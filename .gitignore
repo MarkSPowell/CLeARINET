@@ -1,0 +1,38 @@
+# .NET build output
+bin/
+obj/
+out/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Test results
+TestResults/
+*.trx
+
+# NuGet
+*.nupkg
+packages/
+.nuget/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# --- Scratch material, not part of the product ---
+# These were generated while investigating the SAZ file format and are not
+# meant to become part of the repository's history. If you want to keep any
+# of it, move it outside this repo first; otherwise these paths are ignored
+# so they can't be committed by accident (grpcurl.exe alone is ~32 MB).
+/grpc-demo/
+/grpcbin.proto
+/grpcurl/
+/Sample SAZ File/
+
+# Local drop folder the Claude desktop app saves chat attachments into --
+# not part of the repository.
+/Claude outputs/
