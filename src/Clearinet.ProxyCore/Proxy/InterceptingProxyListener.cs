@@ -4,31 +4,36 @@ using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Text;
 using Clearinet.ProxyCore.Certificates;
+using Clearinet.ProxyCore.Http;
+using Clearinet.ProxyCore.Sessions;
 
 namespace Clearinet.ProxyCore.Proxy;
 
 /// <summary>
-/// A minimal HTTPS-intercepting proxy: just enough to prove the
-/// certificate design out end to end -- accept a CONNECT tunnel, terminate
-/// TLS toward the client with a freshly-signed leaf, open a fresh TLS
-/// connection upstream, and surface the first decrypted request line.
+/// An HTTPS-intercepting proxy: accepts a CONNECT tunnel, terminates TLS
+/// toward the client with a freshly-signed leaf, opens a fresh TLS
+/// connection upstream, and reads each request/response pair on the
+/// connection as a full HTTP/1.1 message (see <see cref="Http1MessageReader"/>),
+/// capturing it into <see cref="SessionStore"/> while relaying the exact
+/// original bytes through unmodified.
 ///
-/// This is deliberately not a full HTTP/1.1 engine yet. After logging the
-/// first request line it relays bytes unmodified in both directions,
-/// which is enough to prove decryption works without building the
-/// session model, SAZ writer or inspector pipeline this early -- that's
-/// the rest of Phase 1, once this spike confirms the certificate design
-/// holds up against real traffic.
+/// Still deliberately narrow: one connection is handled as a strict
+/// request-then-response ping-pong (no pipelining), and a handful of
+/// framing edge cases aren't covered yet -- see Http1MessageReader's
+/// remarks. That's enough to prove the session model and, next, the SAZ
+/// writer against real traffic, which is the rest of Phase 1.
 /// </summary>
 public sealed class InterceptingProxyListener
 {
     private readonly LeafCertificateProvider _leafProvider;
+    private readonly SessionStore _sessionStore;
     private readonly TcpListener _listener;
     private CancellationTokenSource? _cts;
 
-    public InterceptingProxyListener(int port, LeafCertificateProvider leafProvider)
+    public InterceptingProxyListener(int port, LeafCertificateProvider leafProvider, SessionStore sessionStore)
     {
         _leafProvider = leafProvider;
+        _sessionStore = sessionStore;
         _listener = new TcpListener(IPAddress.Loopback, port);
     }
 
@@ -106,29 +111,87 @@ public sealed class InterceptingProxyListener
             // connection for the client's side.
             await upstreamTls.AuthenticateAsClientAsync(targetHost);
 
-            await PumpFirstRequestAndRelayAsync(targetHost, clientTls, upstreamTls, cancellationToken);
+            await PumpSessionsAsync(targetHost, clientTls, upstreamTls, _sessionStore, cancellationToken);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[proxy] Connection ended: {ex.GetType().Name}: {ex.Message}");
+            Console.WriteLine($"[proxy] Connection ended: {DescribeException(ex)}");
         }
     }
 
-    private static async Task PumpFirstRequestAndRelayAsync(
+    private static string DescribeException(Exception ex)
+    {
+        // AuthenticationException's own Message is almost always the
+        // unhelpful "Authentication failed, see inner exception." -- the
+        // actual reason lives in InnerException (sometimes nested a
+        // couple of levels deep), so walk the chain instead of printing
+        // just the outer wrapper.
+        var description = $"{ex.GetType().Name}: {ex.Message}";
+        var inner = ex.InnerException;
+        while (inner is not null)
+        {
+            description += $" ---> {inner.GetType().Name}: {inner.Message}";
+            inner = inner.InnerException;
+        }
+
+        return description;
+    }
+
+    private static async Task PumpSessionsAsync(
         string targetHost,
         SslStream clientTls,
         SslStream upstreamTls,
+        SessionStore sessionStore,
         CancellationToken cancellationToken)
     {
-        var buffer = new byte[8192];
-        var read = await clientTls.ReadAsync(buffer.AsMemory(), cancellationToken);
-        if (read > 0)
+        while (true)
         {
-            var firstLine = ExtractFirstLine(buffer.AsSpan(0, read));
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {targetHost} -> {firstLine}");
-            await upstreamTls.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-        }
+            var startedAt = DateTimeOffset.Now;
+            var request = await Http1MessageReader.ReadRequestAsync(clientTls, upstreamTls, cancellationToken);
+            if (request is null)
+            {
+                // The client closed the connection between requests -- the
+                // normal way a keep-alive HTTP/1.1 connection ends.
+                return;
+            }
 
+            var isHeadRequest = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
+            var response = await Http1MessageReader.ReadResponseAsync(
+                upstreamTls, clientTls, isHeadRequest, cancellationToken);
+            if (response is null)
+            {
+                Console.WriteLine(
+                    $"[proxy] {targetHost}: upstream closed the connection before answering {request.Method} {request.Target}.");
+                return;
+            }
+
+            var session = sessionStore.Add(targetHost, startedAt, request, response);
+            Console.WriteLine(
+                $"[{startedAt:HH:mm:ss}] #{session.Id} {response.StatusCode} {request.Method} https://{targetHost}{request.Target} " +
+                $"({request.Body.Length} B req, {response.Body.Length} B resp)");
+
+            if (response.StatusCode == 101)
+            {
+                // 101 Switching Protocols -- the connection just stopped
+                // being HTTP/1.1 (WebSocket is by far the common case here).
+                // Trying to read another request off it would mean parsing
+                // binary frame data as if it were an HTTP start line, which
+                // fails outright, and even before it fails it can't work
+                // right: a request-then-response loop is fundamentally
+                // half-duplex, while what's needed from here on is a full
+                // duplex, unparsed relay in both directions at once. Fall
+                // back to exactly that for the rest of this connection's
+                // life -- the same raw pump this spike used everywhere
+                // before it understood HTTP/1.1 at all.
+                await RelayRawBytesUntilClosedAsync(clientTls, upstreamTls, cancellationToken);
+                return;
+            }
+        }
+    }
+
+    private static async Task RelayRawBytesUntilClosedAsync(
+        SslStream clientTls, SslStream upstreamTls, CancellationToken cancellationToken)
+    {
         var clientToUpstream = clientTls.CopyToAsync(upstreamTls, cancellationToken);
         var upstreamToClient = upstreamTls.CopyToAsync(clientTls, cancellationToken);
 
@@ -138,16 +201,9 @@ public sealed class InterceptingProxyListener
         }
         catch (Exception)
         {
-            // A one-sided close is the normal way an HTTP/1.1 connection
-            // ends here; nothing to act on.
+            // A one-sided close is the normal way an upgraded connection
+            // like a WebSocket ends here; nothing to act on.
         }
-    }
-
-    private static string ExtractFirstLine(ReadOnlySpan<byte> data)
-    {
-        var newlineIndex = data.IndexOf((byte)'\n');
-        var lineBytes = newlineIndex >= 0 ? data[..newlineIndex] : data;
-        return Encoding.ASCII.GetString(lineBytes).TrimEnd('\r');
     }
 
     private static async Task<(string? Method, string? Target)> ReadRequestLineAndHeadersAsync(

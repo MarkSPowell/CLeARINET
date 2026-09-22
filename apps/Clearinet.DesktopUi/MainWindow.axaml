@@ -1,0 +1,50 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Clearinet.DesktopUi.ViewModels"
+        xmlns:models="using:Clearinet.DesktopUi.Models"
+        x:Class="Clearinet.DesktopUi.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Title="CLeARINET"
+        Width="1000"
+        Height="640">
+  <DockPanel Margin="12">
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,10">
+      <Button Content="Save SAZ" Command="{Binding SaveSazCommand}" />
+      <TextBlock Text="{Binding StatusText}"
+                 VerticalAlignment="Center"
+                 TextWrapping="Wrap" />
+    </StackPanel>
+
+    <!-- Header row: column widths mirror the ItemTemplate's Grid below so
+         labels line up with the data beneath them. -->
+    <Grid DockPanel.Dock="Top"
+          ColumnDefinitions="50,70,60,70,*,70,70"
+          Margin="4,0,4,4">
+      <TextBlock Grid.Column="0" Text="#" FontWeight="Bold" />
+      <TextBlock Grid.Column="1" Text="Time" FontWeight="Bold" />
+      <TextBlock Grid.Column="2" Text="Status" FontWeight="Bold" />
+      <TextBlock Grid.Column="3" Text="Method" FontWeight="Bold" />
+      <TextBlock Grid.Column="4" Text="URL" FontWeight="Bold" />
+      <TextBlock Grid.Column="5" Text="Req" FontWeight="Bold" />
+      <TextBlock Grid.Column="6" Text="Resp" FontWeight="Bold" />
+    </Grid>
+
+    <Border DockPanel.Dock="Top" BorderThickness="0,1,0,0" BorderBrush="Gray" Margin="4,0,4,4" />
+
+    <ListBox ItemsSource="{Binding Sessions}">
+      <ListBox.ItemTemplate>
+        <DataTemplate DataType="models:SessionRow">
+          <Grid ColumnDefinitions="50,70,60,70,*,70,70">
+            <TextBlock Grid.Column="0" Text="{Binding Id}" />
+            <TextBlock Grid.Column="1" Text="{Binding Time}" />
+            <TextBlock Grid.Column="2" Text="{Binding StatusCode}" />
+            <TextBlock Grid.Column="3" Text="{Binding Method}" />
+            <TextBlock Grid.Column="4" Text="{Binding Url}" TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Column="5" Text="{Binding RequestSize}" />
+            <TextBlock Grid.Column="6" Text="{Binding ResponseSize}" />
+          </Grid>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </DockPanel>
+</Window>

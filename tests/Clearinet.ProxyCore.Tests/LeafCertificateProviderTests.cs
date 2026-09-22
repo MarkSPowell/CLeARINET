@@ -43,6 +43,49 @@ public class LeafCertificateProviderTests
     }
 
     [Fact]
+    public void CreateLeaf_ReturnedCertificateHasAnImmediatelyUsablePrivateKey()
+    {
+        // Regression guard for PersistKey's warm-up step: the certificate
+        // this returns must actually be able to sign with its private key
+        // right away, not just report HasPrivateKey == true.
+        var rootNotBefore = DateTimeOffset.UtcNow.AddMinutes(-1);
+        using var root = CertificateAuthority.GenerateRoot(rootNotBefore, rootNotBefore.AddYears(5));
+
+        var leafNotBefore = DateTimeOffset.UtcNow.AddMinutes(-1);
+        using var leaf = LeafCertificateProvider.CreateLeaf(
+            root, "example.test", leafNotBefore, leafNotBefore.AddDays(7));
+
+        using var ecdsa = leaf.GetECDsaPrivateKey();
+        Assert.NotNull(ecdsa);
+        var signature = ecdsa!.SignData("probe"u8.ToArray(), HashAlgorithmName.SHA256);
+        Assert.NotEmpty(signature);
+    }
+
+    [Fact]
+    public async Task GetCertificateFor_ConcurrentCallsForANewHostShareOneSigningOperation()
+    {
+        // Simulates what a browser's burst of parallel preconnects to a
+        // brand-new host looks like: many callers racing GetCertificateFor
+        // before anything is cached yet. CreateLeaf generates a fresh key
+        // and a fresh CNG-backed certificate every time it runs, so if the
+        // race isn't handled, this comes back with several distinct
+        // certificate instances instead of everyone sharing one -- which is
+        // exactly the bug behind the intermittent "unknown error processing
+        // the certificate" failures reproduced against real, bursty browser
+        // traffic.
+        var rootNotBefore = DateTimeOffset.UtcNow.AddDays(-1);
+        using var root = CertificateAuthority.GenerateRoot(rootNotBefore, rootNotBefore.AddYears(5));
+        var provider = new LeafCertificateProvider(root);
+
+        var tasks = Enumerable.Range(0, 16)
+            .Select(_ => Task.Run(() => provider.GetCertificateFor("example.test")))
+            .ToArray();
+        var results = await Task.WhenAll(tasks);
+
+        Assert.All(results, cert => Assert.Same(results[0], cert));
+    }
+
+    [Fact]
     public void GetCertificateFor_CachesByHost()
     {
         // GetCertificateFor backdates its leaf's notBefore by 5 minutes

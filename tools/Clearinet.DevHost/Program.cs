@@ -6,8 +6,10 @@
 // is proving out, and the project plan's Phase 1 exit criterion for what
 // "done" looks like.
 
+using System.Net.Sockets;
 using Clearinet.ProxyCore.Certificates;
 using Clearinet.ProxyCore.Proxy;
+using Clearinet.ProxyCore.Sessions;
 
 Console.WriteLine("CLeARINET dev host -- Phase 1 HTTPS decryption spike");
 Console.WriteLine();
@@ -31,16 +33,61 @@ Console.WriteLine("doc calls for, not a bug.");
 Console.WriteLine();
 
 var leafProvider = new LeafCertificateProvider(authority.RootCertificate);
-const int port = 8888;
-var proxy = new InterceptingProxyListener(port, leafProvider);
-proxy.Start();
+var sessionStore = new SessionStore();
+
+// Defaults to 8888; pass a different port as the first argument if that's
+// already taken on your machine, e.g.:
+//   dotnet run --project tools\Clearinet.DevHost -- 8899
+var port = args.Length > 0 && int.TryParse(args[0], out var parsedPort) ? parsedPort : 8888;
+
+var proxy = new InterceptingProxyListener(port, leafProvider, sessionStore);
+try
+{
+    proxy.Start();
+}
+catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+{
+    Console.WriteLine($"Port {port} is already in use by something else on this machine.");
+    Console.WriteLine("Either stop whatever's holding it, or run with a different port:");
+    Console.WriteLine($"  dotnet run --project tools\\Clearinet.DevHost -- {port + 1}");
+    Console.WriteLine();
+    Console.WriteLine("To see what's using it: netstat -ano | findstr :" + port);
+    return 1;
+}
 
 Console.WriteLine($"Listening on 127.0.0.1:{port}.");
-Console.WriteLine($"Point a browser's HTTPS proxy (or the Windows system proxy) at 127.0.0.1:{port},");
-Console.WriteLine("then browse to any HTTPS site.");
-Console.WriteLine("Decrypted request lines will print below as they come through.");
+Console.WriteLine($"Point a browser's HTTPS proxy at 127.0.0.1:{port} (not the Windows system proxy --");
+Console.WriteLine("that also routes this machine's other apps through here, which breaks anything that");
+Console.WriteLine("doesn't trust the CLeARINET root, Claude Desktop included), then browse to any HTTPS site.");
+Console.WriteLine("Captured sessions will print below as they complete: # status method URL (sizes).");
 Console.WriteLine("Press Ctrl+C to stop.");
 Console.WriteLine();
+
+Console.CancelKeyPress += (_, args) =>
+{
+    // Suppress the default immediate-terminate behavior so the SAZ write
+    // below actually gets to run. This is synchronous, plain file I/O --
+    // no async work in flight to race against -- so there's nothing unsafe
+    // about doing it directly in the handler; Environment.Exit(0) at the
+    // end then terminates explicitly once it's done, rather than leaving
+    // the runtime to decide when (or whether) that happens on its own.
+    args.Cancel = true;
+
+    var sessions = sessionStore.Snapshot();
+    Console.WriteLine();
+    Console.WriteLine($"Captured {sessions.Count} session(s) this run.");
+
+    if (sessions.Count > 0)
+    {
+        var path = Path.Combine(Environment.CurrentDirectory, $"clearinet-capture-{DateTime.Now:yyyyMMdd-HHmmss}.saz");
+        SazWriter.Write(path, sessions);
+        Console.WriteLine($"Saved: {path}");
+        Console.WriteLine("Try opening that in Fiddler Classic, if you still have it installed --");
+        Console.WriteLine("that's the actual Phase 1 exit criterion.");
+    }
+
+    Environment.Exit(0);
+};
 
 await Task.Delay(Timeout.Infinite);
 return 0;
