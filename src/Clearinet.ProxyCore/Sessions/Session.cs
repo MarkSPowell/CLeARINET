@@ -23,8 +23,23 @@ namespace Clearinet.ProxyCore.Sessions;
 /// <c>Pair</c> would have been better -- see the "Lessons from Fiddler's
 /// own history" section of the Project Plan and Goals doc. This type keeps
 /// <c>Session</c> anyway, on purpose, since tenet 1 is API/usage
-/// compatibility with Fiddler, and it's presumably what
-/// ericlaw1979/Clearinet itself calls it too.
+/// compatibility with Fiddler.
+///
+/// Correction to an earlier version of this comment: it used to say this
+/// was "presumably" what ericlaw1979/Clearinet itself calls it too --
+/// checked directly while scoping the FiddlerScript compatibility layer,
+/// and that's actually wrong. That repo's own public <c>Content/SampleRules.js</c>
+/// has already moved on to <c>Exchange</c> (<c>static function
+/// OnBeforeRequest(oEx: Exchange)</c>), with its own comment noting "in
+/// the SAZ format, the term 'Exchange' is written as 'Session'." This
+/// type keeps <c>Session</c> regardless -- renaming CLeARINET's own core
+/// type now, pervasively used across <c>SessionState</c>/<c>SessionStore</c>/
+/// <c>SessionQuery</c>/SAZ read-write, isn't warranted by this alone -- but
+/// <c>Clearinet.Compatibility.FiddlerScript.Exchange</c> (the FiddlerScript
+/// engine's own script-facing wrapper type, a different type from this
+/// one) does follow the newer name, precisely because nothing about that
+/// choice costs anything there. See the FiddlerScript Compatibility
+/// Design doc's "Naming" section for the full reasoning.
 /// </summary>
 public sealed record Session(
     int Id,

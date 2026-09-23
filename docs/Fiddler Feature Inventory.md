@@ -29,17 +29,17 @@ of this doc is filled in.
 | Breakpoints: break on all requests / break on all responses | Shipped (UI-exposed) |
 | Breakpoints: URL-contains, method-equals, status-equals rules (Fiddler's `bpu`/`bpm`/`bps`) | Implemented in `BreakpointRules`, **not yet exposed in the UI** — only the two "break on all" toggles are wired up in `MainWindowViewModel` |
 | SAZ export | Shipped |
-| SAZ import | Not shipped |
+| SAZ import | Shipped |
 | Headers / Raw / Hex inspectors | Shipped |
 | Response decompression (gzip, deflate, zstd, chains) | Shipped |
 | bzip2 / `compress` encodings | Deliberately not supported |
 | SDCH | Recognized, not decoded |
 | Session filtering (DevTools-style `method:`/`host:`/`status:` query grammar) | Shipped — new relative to Fiddler Classic, per tenet 3 |
 | System proxy auto-registration (WinINET) with crash recovery | Shipped, Windows only |
-| FiddlerScript / rules execution | Not shipped (`Clearinet.Compatibility` is an empty placeholder) |
+| FiddlerScript / rules execution | In progress: script engine (Jint), `Exchange`/`AppObject` shim, and JScript.NET-to-ECMAScript preprocessor built and unit-tested; not yet wired into `InterceptingProxyListener`, and Rules-menu/Context-Action/Tools-menu/custom-column UI surfaces not started -- see the FiddlerScript Compatibility Design doc |
 | HAR import | Not shipped |
 | Chromium Netlog import | Not shipped |
-| Traffic replay / Autorespond | Not shipped |
+| Traffic replay / Autorespond | Shipped — full Fiddler Classic AutoResponder syntax (`EXACT:`/`regex:`/`NOT:`/`METHOD:` matches; `*redir:`/`*delay:`/`*header:`/`*flag:`/`*reset`/`*drop`/`*CORSPreflightAllow`/`*exit`/`*bpu`/`*bpafter` actions; serve-file and fetch-URL actions), see `AutoResponderRules` |
 | Explicit HTTP/2 or TLS 1.3 handling | Not shipped |
 | Headless / CLI mode | Out of scope for the MVP by design |
 

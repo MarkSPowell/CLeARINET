@@ -11,4 +11,13 @@
     <ProjectReference Include="..\Clearinet.ProxyCore\Clearinet.ProxyCore.csproj" />
   </ItemGroup>
 
+  <!-- Jint: a pure-C# ECMAScript interpreter, not a JScript.NET compiler;
+       see FiddlerScriptHost's remarks for why that substitution is
+       necessary (Microsoft.JScript was never ported past .NET Framework)
+       and what FiddlerScriptPreprocessor does to bridge the syntax gap
+       between the two. -->
+  <ItemGroup>
+    <PackageReference Include="Jint" Version="4.16.3" />
+  </ItemGroup>
+
 </Project>

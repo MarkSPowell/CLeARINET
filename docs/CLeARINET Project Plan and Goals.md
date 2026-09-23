@@ -24,8 +24,26 @@ itself (see `CONTRIBUTING.md`'s no-relicensing commitment).
 1. **Be as API/usage-compatible as possible with Fiddler Web Debugger.**
    This shows up throughout the code: `SessionState`'s exact state names,
    the breakpoints model's `bpu`/`bpm`/`bps` naming, inspector tab names
-   ("Headers", "Raw", "Hex") matching Fiddler Classic's own, and the
-   `DO_NOT_TRUST_ClearinetRoot` certificate-naming convention.
+   ("Headers", "Raw", "Hex") matching Fiddler Classic's own, the
+   `DO_NOT_TRUST_ClearinetRoot` certificate-naming convention, and
+   AutoResponder's own match/action syntax (`EXACT:`/`regex:`/`NOT:`/
+   `METHOD:`, `*redir:`/`*delay:`/`*bpu`/`*bpafter`/etc.) reproduced
+   verbatim rather than redesigned.
+
+   **Confirmed and sharpened by Eric Lawrence directly (Sept 2026), on
+   reviewing an early build:** *"I do think the long-term direction is
+   indeed using a different UI framework and making a lot of improvements
+   for modernity. But we have a short term need here at microsoft where
+   there's 1000 engineers that have workflows built on the legacy fiddler
+   product and extensions and so forth that need to be easily ported with
+   minimal effort. Hence my plan to start with something that is very
+   compatible with legacy fiddler classic."* This isn't a nice-to-have
+   preference — it's a concrete, numbered constraint (1,000 engineers, at
+   Microsoft, today) that changes how this tenet should be read: not just
+   "familiar to someone who used Fiddler Classic" but "an existing
+   Fiddler Classic **workflow or extension** should port with minimal
+   effort." See "Fiddler Classic compatibility review" below for what that
+   means concretely against the code as it stands today.
 2. **Update for web-standards changes since Fiddler Classic's enhancements
    mostly ended in 2016.** The response-decompression work (zstd support,
    dropping bzip2, SDCH awareness) is a direct instance of this tenet in
@@ -243,6 +261,152 @@ actually starts:
   first-class, typed accessor from day one — parsed once, trimmed,
   case-insensitively deduped — so adding a new overridable list becomes
   "declare a key and a default," not a bespoke parser written per list.
+
+## Fiddler Classic compatibility review (Sept 2026)
+
+Prompted directly by Eric Lawrence's feedback quoted under tenet 1 above:
+a pass over what "port an existing Fiddler Classic workflow with minimal
+effort" actually requires, checked against what's implemented today
+versus what would still block a real Microsoft engineer's existing setup.
+Researched from Telerik's own public Fiddler Classic docs
+(`telerik.com/fiddler/fiddler-classic/documentation`, sourced from the
+[telerik/fiddler-docs](https://github.com/telerik/fiddler-docs) GitHub
+repo), Eric Lawrence's own blog, and public example scripts/extensions —
+consistent with this project's clean-room policy (no decompiled or leaked
+Fiddler source consulted for this review either).
+
+**Already strong, workflow-level compatibility (no porting effort
+required today):**
+- Session capture, breakpoints (`bpu`/`bpm`/`bps` plus the two "break on
+  all" toggles), inspector tab names, SAZ import/export, and AutoResponder
+  now all use Fiddler Classic's own naming and (for AutoResponder) its
+  exact match/action syntax — someone who knows Fiddler Classic's UI
+  already knows this app's UI for these features.
+- SAZ files round-trip with the real Fiddler Classic, so existing capture
+  archives are portable without any conversion step.
+
+**The real gap, and the one Eric's feedback puts squarely in scope: a
+Fiddler Classic *workflow* commonly includes custom automation, not just
+UI habits.** Fiddler Classic has two distinct, well-documented
+extensibility mechanisms, and CLeARINET currently has a placeholder for
+neither:
+
+1. **FiddlerScript (`CustomRules.js`, sometimes `CustomRules.cs`).** A
+   single `Handlers` static class with event methods
+   (`OnBeforeRequest(Session oSession)`, `OnBeforeResponse`,
+   `OnPeekAtResponseHeaders`), written in JScript.NET by default, or in
+   C# (Telerik added this as an alternative FiddlerScript language).
+   Recompiled automatically whenever `Rules > Customize Rules...` is
+   saved. This is documented and, by Eric's own public writing, treated
+   as *the* everyday customization path — lighter-weight than a compiled
+   extension, and what his own blog posts point readers toward for
+   one-off automation. A large share of a script's surface area leans on
+   `Session`'s generic string-indexer property bag (`oSession["..."]`,
+   e.g. `ui-color`, `x-breakrequest`, `response-trickle-delay`) rather
+   than typed members, which is good news for a shim: a
+   dictionary-backed indexer on CLeARINET's own session/context type
+   would cover a lot of real-world scripts before every named
+   `oRequest`/`oResponse`/`util*` member is individually reimplemented.
+   ([Understanding FiddlerScript](https://www.telerik.com/blogs/understanding-fiddlerscript);
+   [Modify a Request or Response](https://www.telerik.com/fiddler/fiddler-classic/documentation/knowledge-base/fiddlerscript/modifyrequestorresponse);
+   [Customize Menus](https://www.telerik.com/fiddler/fiddler-classic/documentation/knowledge-base/fiddlerscript/customizemenus))
+2. **Compiled .NET extensions.** DLLs implementing `IFiddlerExtension`
+   (`OnLoad`/`OnBeforeUnload`), optionally `IAutoTamper`/`IAutoTamper2`/
+   `IAutoTamper3` (request/response tampering hooks, explicitly documented
+   as firing on background threads), `Inspector2` plus
+   `IRequestInspector2`/`IResponseInspector2` (custom Inspector tabs —
+   CLeARINET's own `IInspector` contract, see "Extensibility and core API
+   surface" above, is a from-scratch, differently-shaped equivalent, not
+   this one), and `ISessionImporter`/`ISessionExporter` (File > Import /
+   Export formats). Discovered by folder-scan (a `Scripts` folder under
+   Fiddler's install and under the user's Documents) plus reflection —
+   every public class needs an assembly-level
+   `[Fiddler.RequiredVersion("x.y.z.w")]` attribute or it's silently
+   skipped. No MEF or other plugin framework; Telerik's own architecture
+   doc states outright that this surface is "subject to change," i.e. it
+   was never a versioned, contractual API in the first place — which
+   works in CLeARINET's favor, since there's no exhaustive frozen surface
+   to match, only the commonly-used members.
+   ([Implement Interfaces](https://www.telerik.com/fiddler/fiddler-classic/documentation/extend-fiddler/interfaces);
+   [Extend with .NET](https://www.telerik.com/fiddler/fiddler-classic/documentation/extend-fiddler/extendwithdotnet);
+   [Build a Custom Inspector](https://www.telerik.com/fiddler/fiddler-classic/documentation/extend-fiddler/custominspector);
+   [Importer/Exporter Interfaces](https://www.telerik.com/fiddler/fiddler-classic/documentation/extend-fiddler/importerexporterinterfaces);
+   [Fiddler Classic Architecture Info](https://www.telerik.com/fiddler/fiddler-classic/documentation/knowledge-base/fiddlerarchitecture))
+
+Neither mechanism has a published usage survey, but the circumstantial
+evidence (Eric's own posts, the shape of Telerik's public Add-ons
+gallery) points to FiddlerScript being the higher-volume, lower-friction
+mechanism day to day, with compiled extensions reserved for
+redistributable tools or capabilities script can't reach (new Inspector
+tabs, import/export formats). For "1,000 engineers with existing
+workflows," FiddlerScript compatibility is very likely the higher-value
+target of the two if only one can be built first.
+
+**What this means for `Clearinet.Compatibility` (currently an empty
+Phase 3 placeholder, per "Platform and technology" above):** the honest
+read is that Phase 3 is too late for this constraint as originally
+scoped — Eric's feedback reframes FiddlerScript/extension compatibility
+as closer to an MVP-level concern for the intended Microsoft rollout than
+a Beta nice-to-have.
+
+**Decision: FiddlerScript first.** Of the two mechanisms above, you chose
+FiddlerScript compatibility as the higher-priority target — consistent
+with the research above (it's the everyday, lower-friction mechanism;
+compiled `.NET` extensions are the heavier, less-common path). Compiled
+extension support (`IFiddlerExtension`/`IAutoTamper*`/`Inspector2`/
+`ISessionImporter`/`ISessionExporter`) stays a real future target but is
+explicitly deferred, not abandoned.
+
+**A load-bearing technical constraint discovered while scoping this,
+before any implementation started:** `Microsoft.JScript` (the JScript.NET
+compiler Fiddler Classic's default `CustomRules.js` is written against)
+was never ported to .NET Core/.NET 5+ and isn't available on .NET 10 —
+confirmed by an open, unresolved .NET runtime team feature request asking
+for it ([dotnet/runtime#27155](https://github.com/dotnet/runtime/issues/27155))
+and by JScript.NET's own history as a .NET-Framework-only technology
+([Wikipedia: JScript .NET](https://en.wikipedia.org/wiki/JScript_.NET)).
+This means CLeARINET cannot literally execute an existing `CustomRules.js`
+file's JScript.NET the way Fiddler Classic itself does — a shim has to
+substitute a different engine underneath the same `Handlers`-class
+surface, not just port the compiler forward. Two candidate engines,
+usable together rather than as an either/or:
+- **[Jint](https://github.com/sebastienros/jint)** — a mature, actively
+  maintained, pure-C# ECMAScript interpreter with straightforward .NET
+  object interop, for running the `CustomRules.js` (JavaScript) variant.
+  The gap to flag honestly: Jint targets standard ECMAScript, and
+  JScript.NET has a handful of non-standard extensions (chiefly typed
+  variable declarations like `var x : String = "";`) that plain
+  ECMAScript doesn't have — real-world scripts using those would need a
+  small preprocessing pass (strip the `: Type` annotations) before Jint
+  can parse them, not a fundamental blocker but a real edge to handle,
+  not hand-wave past.
+- **Roslyn scripting** (`Microsoft.CodeAnalysis.CSharp.Scripting`,
+  already a first-class, actively maintained part of the .NET ecosystem)
+  for the `CustomRules.cs` (C#) FiddlerScript variant Telerik later added
+  — a much more direct port since it's real C# already, no interpreter
+  compatibility gap to manage.
+
+Concretely, both engines would compile/interpret user script text against
+the same shimmed `Session`/`FiddlerObject` surface described above, so
+supporting both isn't double the design work, just two front-ends onto
+one shim.
+
+**Implementation has started** — see the dedicated
+**[CLeARINET FiddlerScript Compatibility Design](CLeARINET%20FiddlerScript%20Compatibility%20Design.md)**
+doc for the full detail. Summary: Jint is the engine (Roslyn scripting for
+the C# variant is planned, not yet built); the script-facing type is
+named `Exchange`/`AppObject` (matching `ericlaw1979/Clearinet`'s own
+already-published sample, once that was actually checked rather than
+presumed — see `Session.cs`'s own corrected doc comment) while every
+member keeps Fiddler Classic's exact original casing, since that's what
+an *existing* `CustomRules.js` is actually written against. The engine,
+shim types, and JScript.NET-to-ECMAScript preprocessor are built and
+unit-tested (`src/Clearinet.Compatibility/FiddlerScript/`,
+`tests/Clearinet.Compatibility.Tests/`); wiring the result into
+`InterceptingProxyListener`'s real request/response flow, plus the
+Rules-menu/Context-Action/Tools-menu/custom-column UI surfaces the
+"everything" scope decision above covers, are the remaining, separately
+staged phases the design doc lays out.
 
 ## Still undecided
 
