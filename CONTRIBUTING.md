@@ -32,11 +32,13 @@ implementation code is not.
 
 ## No-relicensing commitment
 
-CLeARINET is licensed under the Apache License 2.0 (see [LICENSE](LICENSE))
-and will stay that way. No maintainer, sponsor, or acquirer gets to pull the
-project behind a paywall or revoke rights already granted to users. This
-commitment is part of why the project exists; see the project plan for the
-full reasoning.
+CLeARINET is licensed under the MIT License (see [LICENSE](LICENSE)) --
+matching the license ericlaw1979/Clearinet itself ships under, since the
+long-term goal here is contributing this work back upstream rather than
+maintaining a permanently separate fork -- and will stay that way. No
+maintainer, sponsor, or acquirer gets to pull the project behind a paywall
+or revoke rights already granted to users. This commitment is part of why
+the project exists; see the project plan for the full reasoning.
 
 ## Getting started
 
