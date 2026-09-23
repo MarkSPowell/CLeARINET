@@ -59,6 +59,10 @@ captured ever leaves the device on its own.
 
 ## Project layout
 
+- `docs/` — design docs referenced throughout the code's own comments
+  ("see the project plan," "the Interception Certificate Design doc"):
+  the project plan and tenets, the interception certificate design, the
+  Fiddler feature/tier inventory, and breakpoints research notes.
 - `src/Clearinet.ProxyCore` — the proxy engine: the listener, HTTP
   message parsing, sessions, breakpoints, certificates, SAZ export, and
   Windows system-proxy registration.

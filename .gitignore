@@ -36,4 +36,7 @@ Thumbs.db
 # Local drop folder the Claude desktop app saves chat attachments into --
 # not part of the repository.
 /Claude outputs/
-test.bat
+
+# Personal build/test/run shortcut -- convenient locally, not meant to
+# become a maintained, cross-platform project script.
+/test.bat
