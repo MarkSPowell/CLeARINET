@@ -8,6 +8,17 @@
     <RootNamespace>Clearinet.DesktopUi</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Overridden on the command line by .github/workflows/release-windows.yml
+         (-p:Version=... , stamped from the pushed git tag) for a real
+         installer build. This default only ever shows up in a plain local
+         dotnet build/run with no such override, and is deliberately not a
+         real-looking release number: the .NET SDK's own unstated default
+         is plain "1.0.0", which this project is specifically reserving for
+         the actual post-MVP-approval release (see the Project Plan doc);
+         a local dev build showing that would be actively misleading in the
+         About dialog (Help -> About CLeARINET, AboutWindow.axaml.cs) this
+         value ultimately feeds. -->
+    <Version>0.0.0-dev</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -39,6 +50,20 @@
        avares:// resource does. -->
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <!-- Ships docs\User Guide.md alongside the built executable so Help ->
+       Documentation (MainWindowViewModel.OpenDocumentationCommand) can open
+       it through the OS's own file association at runtime. None, not
+       AvaloniaResource: that command needs a real path on disk it can hand
+       to Process.Start with UseShellExecute=true, and an avares:// resource
+       is packed into this app's own assembly, not reachable by an external
+       viewer at all. Link places the copy under a Documentation folder next
+       to the .exe rather than mirroring the repo's docs\ layout verbatim,
+       and CopyToOutputDirectory="PreserveNewest" keeps a rebuild from
+       re-copying an unchanged file on every build. -->
+  <ItemGroup>
+    <None Include="..\..\docs\User Guide.md" Link="Documentation\User Guide.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

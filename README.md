@@ -34,11 +34,35 @@ here yet. Feedback and issues are welcome.
   track. Content compressed with Zopfli needs no special handling — it's
   a slower, better gzip encoder that still produces standard gzip output.
 - Fiddler-Classic-style breakpoints: break on all requests and/or all
-  responses, inspect and edit a paused message's raw text, then Resume or
+  responses, or on narrower conditions (URL contains, method, status
+  code); inspect and edit a paused message's raw text, then Resume or
   Abort. The breakpoints panel only takes up space once it's actually
   needed.
-- Export captured sessions to a `.saz` (Session Archive Zip) file.
-- An automatic or manually-specified listening port.
+- AutoResponder: an ordered list of match/action rules (substring,
+  wildcard, `EXACT:`/`regex:`/`NOT:`/`METHOD:` matches; redirect, delay,
+  header, reset, drop, serve-a-file, and other actions) that can answer a
+  matching request without it ever reaching the real server.
+- FiddlerScript compatibility: load a `CustomRules.js`-shaped script and
+  have it hook `OnBeforeRequest`/`OnBeforeResponse`, declare Rules-menu
+  options and string choices, add its own buttons and right-click context
+  actions, and add its own columns to the session grid — see the
+  FiddlerScript Compatibility Design doc for the full scope and cuts.
+- Compiled .NET extension compatibility: drop a compiled extension `.dll`
+  (the successor to Fiddler Classic's own extension model) into
+  CLeARINET's Extensions folder and it's loaded automatically at
+  startup — AutoTamper hooks, request/response inspectors, and session
+  import/export are all supported; see the .NET Extension Compatibility
+  Design doc.
+- A **Tools** menu of checkable toggles that show or hide the
+  FiddlerScript, Extensions, breakpoint-condition, and AutoResponder
+  panels on the main screen, so only what you're actually using takes up
+  space.
+- Export captured sessions to a `.saz` (Session Archive Zip) file, or
+  import a previously saved one back in.
+- An automatic or manually-specified listening port (defaults to Auto).
+- **Help > Documentation** in the running app opens the
+  [User Guide](docs/User%20Guide.md) — see [Documentation](#documentation)
+  below.
 
 ## Getting started
 
@@ -57,23 +81,44 @@ Fiddler Classic's own naming convention for the same purpose) — this is
 what lets CLeARINET see inside HTTPS traffic on this machine. Nothing
 captured ever leaves the device on its own.
 
+## Documentation
+
+- **Using the app?** Start with the [User Guide](docs/User%20Guide.md) —
+  starting/stopping the proxy, the session grid and filtering, breakpoints,
+  AutoResponder, FiddlerScript, extensions, and SAZ import/export. It's
+  also one click away from inside the running app, via **Help >
+  Documentation**.
+- **Contributing or curious how something works?** The rest of `docs/` is
+  written for that: design rationale, scope cuts, and open follow-ups for
+  each area of the app (see [Project layout](#project-layout) below for
+  what's there).
+
 ## Project layout
 
-- `docs/` — design docs referenced throughout the code's own comments
-  ("see the project plan," "the Interception Certificate Design doc"):
-  the project plan and tenets, the interception certificate design, the
+- `docs/` — the [User Guide](docs/User%20Guide.md) for using the app, plus
+  design docs referenced throughout the code's own comments ("see the
+  project plan," "the Interception Certificate Design doc"): the project
+  plan and tenets, the interception certificate design, the FiddlerScript
+  compatibility design, the .NET extension compatibility design, the
   Fiddler feature/tier inventory, and breakpoints research notes.
 - `src/Clearinet.ProxyCore` — the proxy engine: the listener, HTTP
-  message parsing, sessions, breakpoints, certificates, SAZ export, and
-  Windows system-proxy registration.
+  message parsing, sessions, breakpoints, AutoResponder, certificates,
+  SAZ export, and Windows system-proxy registration.
 - `src/Clearinet.Extensibility` — the inspector contract and the built-in
   inspectors (Headers, Raw, Hex).
-- `src/Clearinet.Compatibility` — a placeholder for a FiddlerCore-shaped
-  compatibility adapter, planned for a later phase; intentionally empty
-  today (see its own doc comment).
+- `src/Clearinet.Compatibility` — FiddlerScript compatibility
+  (`FiddlerScriptRunner`, the `Exchange`/`AppObject` shim, the directive
+  scanner behind the Rules menu/Script Actions/custom columns) and
+  compiled .NET extension compatibility (`ExtensionHost` and the
+  `IFiddlerExtension`-family interfaces) — see both design docs above for
+  what's built and what's still scoped out.
 - `apps/Clearinet.DesktopUi` — the Avalonia desktop UI.
 - `tools/Clearinet.DevHost` — a console host used during early
   development of the proxy core.
+- `tools/Clearinet.SampleExtension` — a small, separately-compiled .NET
+  extension used to validate `ExtensionHost` against a real `.dll` rather
+  than only in-process fakes; see its own README for what it demonstrates
+  and how to build it.
 - `tests/` — unit tests for the projects above.
 
 ## Known limitations
@@ -85,14 +130,22 @@ way:
   path is implemented — macOS trust-store installation hasn't been built
   yet, even though every project targets plain `net10.0` and the UI
   itself (Avalonia) already runs on macOS.
-- **No settings persistence.** Port choice, breakpoint checkboxes, and
-  filter text all reset to their defaults on every run — nothing is
-  saved between sessions yet.
-- **No HAR or Chromium Netlog import**, no traffic replay/autorespond,
-  and no explicit HTTP/2 or TLS 1.3 handling yet.
-- **No FiddlerScript-compatible rules or FiddlerCore-shaped API surface
-  yet.** `Clearinet.Compatibility` is a placeholder for that; real design
-  work on it is planned for a later phase, not this one.
+- **No app-level settings persistence.** Port choice, which Tools-menu
+  panels are checked, breakpoint conditions, and filter text all reset to
+  their defaults on every run — nothing about the app's own UI state is
+  saved between sessions yet. (A loaded FiddlerScript's own `[BindPref]`
+  values are a separate, narrower thing and *do* persist, under
+  `%LocalAppData%\CLeARINET\` — see the FiddlerScript Compatibility Design
+  doc.)
+- **No HAR or Chromium Netlog import**, and no explicit HTTP/2 or TLS 1.3
+  handling yet.
+- **No compiled-extension binary-compatibility shim.** An already-compiled
+  Fiddler Classic extension `.dll` can't be loaded as-is; a new extension
+  has to be built against CLeARINET's own (source-level compatible)
+  interfaces. See the .NET Extension Compatibility Design doc.
+- **No import/export format picker.** With more than one loaded extension
+  proffering session import or export, File > Import/Export via Extension
+  always uses the first one found rather than letting you choose.
 - **No headless/CLI mode.** Left out of this milestone by design, not by
   oversight.
 

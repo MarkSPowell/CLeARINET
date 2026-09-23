@@ -209,10 +209,14 @@ mirrors how a live AutoResponder rule edit already races the very next
 request under this codebase's existing "no formal transaction" concurrency
 posture.
 
-**Desktop UI:** a small always-visible "FiddlerScript" panel — a path
-TextBox, Load/Reload buttons, and a status line showing which handlers the
-loaded script defines (or its load error). No Rules-menu integration yet;
-see Phase B below.
+**Desktop UI:** a small "FiddlerScript" panel — a path TextBox, Load/Reload
+buttons, and a status line showing which handlers the loaded script defines
+(or its load error). No Rules-menu integration yet; see Phase B below.
+**Update:** this panel was always-visible when it first shipped; a later
+"move panels into the Tools menu" UI pass gated it behind a checkable
+"Tools -&gt; FiddlerScript" entry instead (default unchecked) — see the
+Phase B/C/D section below for the Rules-menu/Script Actions/custom-columns
+UI that landed alongside that same pass.
 
 **Still deliberately out of scope, even after this pass:**
 

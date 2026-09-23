@@ -1,0 +1,123 @@
+name: Release Windows Installer
+
+# Builds a self-contained win-x64 publish of the desktop app, packages it
+# with Inno Setup into one setup.exe that can install either per-machine
+# (Program Files, needs an admin elevation prompt) or per-user (the current
+# user's own AppData\Local\Programs folder, no admin needed at all -- the
+# person picks at install time; see installer/CLeARINET.iss for how), and
+# attaches that installer to the GitHub Release for the pushed tag. Separate
+# from ci.yml on purpose: ci.yml runs on every push/PR to build+test both
+# supported OSes; this only runs on an actual version tag, and only builds
+# for Windows, since Inno Setup itself is Windows-only tooling and this
+# workflow's whole job is producing a release artifact, not verifying the
+# code.
+#
+# Also runnable by hand (workflow_dispatch) for a test build without
+# cutting a real tag/Release -- see the "version" input below. A manual run
+# still uploads the installer as a build artifact (Actions tab -> this
+# run -> Artifacts), it just never touches a GitHub Release, since
+# softprops/action-gh-release below is explicitly gated on this being a
+# tag push.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Version to stamp a manual test build with (e.g. 0.1.0). Ignored
+          on a real tag push, which derives this from the tag itself
+          instead.
+        required: false
+        default: "0.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          # A tag push always wins over the workflow_dispatch input -- the
+          # tag is the actual source of truth for a real release; the
+          # input only exists for a manual test build with no tag at all.
+          if ($env:GITHUB_REF -like "refs/tags/v*") {
+            $version = $env:GITHUB_REF -replace "refs/tags/v", ""
+          } else {
+            $version = "${{ inputs.version }}"
+            if ([string]::IsNullOrWhiteSpace($version)) {
+              $version = "0.0.0"
+            }
+          }
+          Write-Host "Building installer version $version"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore CLeARINET.sln
+
+      # Self-contained: bundles the .NET 10 runtime into the published
+      # output, so the installer works on a machine with no .NET installed
+      # at all -- CLeARINET's own users are the target audience this
+      # matters for, not developers who already have the SDK. Publishing
+      # only the desktop app project (not the whole solution) is
+      # deliberate: DevHost/FiddlerScriptDemo/SampleExtension and the test
+      # projects are developer-only tools, not part of what ships to an
+      # end user. PublishSingleFile bundles the app's own assemblies into
+      # one .exe; loose content files (like the bundled User Guide.md --
+      # see Clearinet.DesktopUi.csproj's own None/Link entry for it) are
+      # NOT folded into that single file by design, and still land next to
+      # it in the publish output, which is exactly what
+      # OpenDocumentationCommand's AppContext.BaseDirectory-relative path
+      # expects.
+      - name: Publish self-contained win-x64 build
+        run: >-
+          dotnet publish apps/Clearinet.DesktopUi/Clearinet.DesktopUi.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:InformationalVersion=${{ steps.version.outputs.version }}
+          --output publish/win-x64
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DMyAppVersion=${{ steps.version.outputs.version }}" `
+            "/DPublishDir=${{ github.workspace }}\publish\win-x64" `
+            installer\CLeARINET.iss
+
+      - name: Upload installer as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CLeARINET-Setup-${{ steps.version.outputs.version }}
+          path: installer/Output/CLeARINET-Setup-*.exe
+          if-no-files-found: error
+
+      # Only on a real tag push -- a workflow_dispatch test build has no
+      # Release to attach to, and shouldn't create one on your behalf.
+      - name: Attach installer to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/CLeARINET-Setup-*.exe
+          fail_on_unmatched_files: true

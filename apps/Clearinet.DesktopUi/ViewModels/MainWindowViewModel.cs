@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.Reflection;
 using Avalonia.Threading;
 using Clearinet.Compatibility.Extensions;
@@ -652,6 +653,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand SaveSazCommand { get; }
     public RelayCommand ImportViaExtensionCommand { get; }
     public RelayCommand ExportViaExtensionCommand { get; }
+    public RelayCommand OpenDocumentationCommand { get; }
 
     public MainWindowViewModel()
     {
@@ -702,6 +704,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // SessionAdded handler below.
         ImportViaExtensionCommand = new RelayCommand(ImportViaExtension, () => _extensionHost.Importers.Count > 0);
         ExportViaExtensionCommand = new RelayCommand(ExportViaExtension, () => _extensionHost.Exporters.Count > 0 && Sessions.Count > 0);
+        OpenDocumentationCommand = new RelayCommand(OpenDocumentation);
 
         AddAutoResponderRuleCommand = new RelayCommand(AddAutoResponderRule);
         RemoveAutoResponderRuleCommand = new RelayCommand(RemoveSelectedAutoResponderRule, () => SelectedAutoResponderRule is not null);
@@ -1441,5 +1444,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 Dispatcher.UIThread.Post(() => StatusText = $"Extension export failed: {ex.Message}");
             }
         });
+    }
+
+    /// <summary>
+    /// Help -&gt; Documentation: opens the bundled end-user-facing User Guide
+    /// (docs/User Guide.md in the repo, shipped as loose build output next
+    /// to the executable -- see Clearinet.DesktopUi.csproj's own remarks on
+    /// the None/Link/CopyToOutputDirectory entry that puts it there) through
+    /// whatever the OS has registered for .md files -- the same
+    /// UseShellExecute=true approach used to reach a real file-open dialog
+    /// nowhere else in this app, since this is the first place that opens a
+    /// file rather than picking one. Deliberately a local bundled copy
+    /// rather than a GitHub link: as of this pass the repo itself isn't
+    /// pushed anywhere with a public URL to point at, and even once it is, a
+    /// local copy works offline and always matches whatever build is
+    /// actually running, which a hardcoded URL to one specific tag or branch
+    /// wouldn't. No live UI control is needed here (unlike
+    /// BrowseFiddlerScriptButton_Click/OpenSazMenuItem_Click, which need
+    /// TopLevel.StorageProvider), so this lives here rather than in
+    /// MainWindow.axaml.cs. A missing association for .md files, or the doc
+    /// not having been copied to the output folder for some reason, fails
+    /// the same way Start's own try/catch does -- reported through
+    /// StatusText rather than an unhandled exception.
+    /// </summary>
+    private void OpenDocumentation()
+    {
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "Documentation", "User Guide.md");
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Couldn't open the documentation: {ex.Message}";
+        }
     }
 }

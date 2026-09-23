@@ -1,0 +1,45 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Clearinet.DesktopUi.AboutWindow"
+        Title="About CLeARINET"
+        Width="380"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Icon="avares://Clearinet.DesktopUi/Assets/clearinet.webp"
+        Background="{DynamicResource AppBackgroundBrush}">
+
+  <!-- No bindings, no DataContext: everything here is either static XAML
+       text or set once, directly, from AboutWindow.axaml.cs's constructor
+       (VersionText's own Text), a plain code-behind read of the running
+       assembly's own version, not state that changes while this dialog is
+       open, so a full view model would be more machinery than this needs. -->
+  <StackPanel Margin="24" Spacing="4">
+    <TextBlock Text="CLeARINET"
+               FontSize="22"
+               FontWeight="Bold"
+               Foreground="{DynamicResource AppAccentBrush}"
+               HorizontalAlignment="Center" />
+    <TextBlock Text="Plaintext HTTPS Traffic Visibility"
+               FontSize="13"
+               Foreground="{DynamicResource AppMutedTextBrush}"
+               HorizontalAlignment="Center"
+               Margin="0,0,0,10" />
+    <TextBlock x:Name="VersionText"
+               Text="Version 0.0.0-dev"
+               HorizontalAlignment="Center"
+               Margin="0,0,0,10" />
+    <TextBlock Text="An open source HTTP(S) inspection tool for developers, built independently as a spiritual successor to Fiddler Web Debugger."
+               FontSize="12"
+               Foreground="{DynamicResource AppMutedTextBrush}"
+               TextWrapping="Wrap"
+               TextAlignment="Center"
+               Margin="0,0,0,18" />
+    <Button Content="Close"
+            Click="CloseButton_Click"
+            Classes="accent"
+            HorizontalAlignment="Center"
+            MinWidth="90" />
+  </StackPanel>
+</Window>

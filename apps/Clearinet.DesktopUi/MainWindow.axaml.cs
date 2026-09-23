@@ -228,4 +228,24 @@ public partial class MainWindow : Window
 
         viewModel.FiddlerScriptPath = file.Path.LocalPath;
     }
+
+    /// <summary>
+    /// Help -&gt; About CLeARINET. Needs this window as the new dialog's
+    /// owner (<c>ShowDialog(this)</c>, what actually centers it over
+    /// MainWindow and blocks input to it while open) so, like
+    /// <see cref="OpenSazMenuItem_Click"/> and
+    /// <see cref="BrowseFiddlerScriptButton_Click"/> above, this lives here
+    /// rather than as a <c>RelayCommand</c> on <see cref="MainWindowViewModel"/>.
+    /// The result of <see cref="Window.ShowDialog(Window)"/> (a
+    /// <see cref="Task"/> that completes when the dialog closes) is
+    /// deliberately discarded, not awaited: nothing here needs to run after
+    /// the About dialog closes, the same reasoning
+    /// <c>App.axaml.cs</c>'s own fire-and-forget splash handoff already
+    /// documents.
+    /// </summary>
+    private void AboutMenuItem_Click(object? sender, RoutedEventArgs e)
+    {
+        var about = new AboutWindow();
+        _ = about.ShowDialog(this);
+    }
 }

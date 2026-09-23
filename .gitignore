@@ -3,6 +3,14 @@ bin/
 obj/
 out/
 
+# Windows installer build output (.github/workflows/release-windows.yml and
+# installer/CLeARINET.iss): the dotnet publish payload and Inno Setup's own
+# compiled setup.exe, both easily 50-100+ MB and neither meant to be
+# committed -- CI produces these fresh on every tagged release and attaches
+# the installer to the GitHub Release itself, not to the repository.
+/publish/
+/installer/Output/
+
 # Visual Studio / Rider / VS Code
 .vs/
 .vscode/
@@ -40,4 +48,3 @@ Thumbs.db
 # Personal build/test/run shortcut -- convenient locally, not meant to
 # become a maintained, cross-platform project script.
 /test.bat
-/Local Resources

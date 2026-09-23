@@ -462,7 +462,10 @@ label instead — a deliberate simplification, not a fidelity goal), a
 JSON-backed `FiddlerScriptPreferenceStore` under `%LocalAppData%\CLeARINET\`
 (mirroring `WinInetSystemProxy`'s own backup-file convention, and honoring
 Fiddler's own `fiddlerscript.ephemeral.*` naming as in-memory-only), a
-right-click session Context menu and a top-level Tools menu, and
+right-click session Context menu, a "Script Actions" row of buttons inside
+the FiddlerScript panel itself (these started life as their own top-level
+Tools menu entry, moved into that panel once a menu that's usually empty
+turned out to read as broken rather than "nothing here yet"), and
 script-declared custom `DataGrid` columns. See the FiddlerScript
 Compatibility Design doc's own "Phase B/C/D" section for the full design
 and its flagged scope cuts, chief among them: `ContextAction` only ever

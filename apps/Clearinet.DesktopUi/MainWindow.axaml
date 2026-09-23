@@ -150,6 +150,26 @@
         <MenuItem Header="Also Break On" ToggleType="CheckBox" IsChecked="{Binding ShowAlsoBreakOnRow, Mode=TwoWay}" />
         <MenuItem Header="AutoResponder" ToggleType="CheckBox" IsChecked="{Binding AutoResponderEnabled, Mode=TwoWay}" />
       </MenuItem>
+
+      <!-- _Documentation opens the bundled end-user-facing User Guide
+           (docs/User Guide.md, shipped alongside the built app; see
+           Clearinet.DesktopUi.csproj's own remarks on the
+           None/Link/CopyToOutputDirectory entry that puts it there)
+           through whatever the OS has registered to open .md files,
+           resolved at runtime via AppContext.BaseDirectory; see
+           OpenDocumentationCommand's own remarks in MainWindowViewModel for
+           why this opens a local file rather than a web link.
+           _About CLeARINET opens a small modal reporting which build is
+           actually running (see AboutWindow.axaml.cs): a Click handler
+           in code-behind rather than a Command, since showing that dialog
+           needs this window as its owner (ShowDialog(this)), the same
+           "needs a live control" reasoning OpenSazMenuItem_Click and
+           BrowseFiddlerScriptButton_Click already follow. -->
+      <MenuItem Header="_Help">
+        <MenuItem Header="_Documentation" Command="{Binding OpenDocumentationCommand}" />
+        <Separator />
+        <MenuItem Header="_About CLeARINET" Click="AboutMenuItem_Click" />
+      </MenuItem>
     </Menu>
 
     <!-- Brand header, echoing clearinet.webp's wordmark so the window
