@@ -61,6 +61,27 @@ jobs:
           Write-Host "Building installer version $version"
           echo "version=$version" >> $env:GITHUB_OUTPUT
 
+          # A separate, strictly-numeric X.X.X.X derivative of the version
+          # above, for the two places downstream that can't accept a
+          # prerelease suffix like "-preview.1" at all: dotnet publish's
+          # own AssemblyVersion/FileVersion (InformationalVersion, set
+          # alongside it below, is what keeps the full string -- see
+          # AboutWindow.axaml.cs's own remarks) and Inno Setup's
+          # VersionInfoVersion directive (installer/CLeARINET.iss's own
+          # VersionInfoTextVersion is the equivalent full-string escape
+          # hatch there). Drops everything from the first "-" onward, then
+          # pads with trailing ".0"s so there are always exactly four
+          # numeric components -- both targets are stricter about the
+          # component count than they are forgiving about a missing one.
+          $versionCore = ($version -split "-")[0]
+          $parts = @($versionCore -split "\.")
+          while ($parts.Count -lt 4) {
+            $parts += "0"
+          }
+          $fileVersion = ($parts[0..3] -join ".")
+          Write-Host "Numeric file/product version: $fileVersion"
+          echo "fileVersion=$fileVersion" >> $env:GITHUB_OUTPUT
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
         with:
@@ -103,6 +124,7 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             "/DMyAppVersion=${{ steps.version.outputs.version }}" `
+            "/DMyFileVersion=${{ steps.version.outputs.fileVersion }}" `
             "/DPublishDir=${{ github.workspace }}\publish\win-x64" `
             installer\CLeARINET.iss
 

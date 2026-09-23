@@ -1,10 +1,21 @@
 ; CLeARINET Windows installer (Inno Setup).
 ;
-; Built by .github/workflows/release-windows.yml, which passes MyAppVersion
-; and PublishDir on the command line via /D; the #ifndef fallbacks below
-; exist purely so this script still compiles (with placeholder values) if
-; someone runs ISCC.exe against it directly while testing, without having
-; to remember both /D switches every time.
+; Built by .github/workflows/release-windows.yml, which passes MyAppVersion,
+; MyFileVersion, and PublishDir on the command line via /D; the #ifndef
+; fallbacks below exist purely so this script still compiles (with
+; placeholder values) if someone runs ISCC.exe against it directly while
+; testing, without having to remember all three /D switches every time.
+;
+; MyAppVersion and MyFileVersion are deliberately two different strings,
+; not one reused in two places: MyAppVersion can be anything (this
+; project's own tags look like "0.1.0-preview.1"), but VersionInfoVersion
+; below (the compiled setup.exe's actual Win32 FileVersion resource) only
+; accepts a strict numeric "X.X.X.X" -- a prerelease suffix there fails
+; the whole compile outright ("Value of [Setup] section directive
+; VersionInfoVersion is invalid"), which is exactly what happened before
+; this comment was added. release-windows.yml's own "Determine version"
+; step derives MyFileVersion from MyAppVersion by dropping everything from
+; the first "-" onward and padding to four components.
 ;
 ; The one requirement this file exists to satisfy: a single setup.exe that
 ; can install either per-machine (Program Files, needs an admin elevation
@@ -30,6 +41,9 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
 #endif
+#ifndef MyFileVersion
+  #define MyFileVersion "0.0.0.0"
+#endif
 #ifndef PublishDir
   #define PublishDir "..\publish\win-x64"
 #endif
@@ -53,7 +67,14 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-VersionInfoVersion={#MyAppVersion}
+; VersionInfoVersion is the strict-numeric one (see this file's own header
+; comment on why it can't just be MyAppVersion); VersionInfoTextVersion is
+; Inno Setup's documented escape hatch for showing the real, full version
+; string (with its "-preview.1"-style suffix intact) in the compiled
+; setup.exe's own Properties > Details "File version"/"Product version"
+; fields, in place of the numeric-only value VersionInfoVersion carries.
+VersionInfoVersion={#MyFileVersion}
+VersionInfoTextVersion={#MyAppVersion}
 
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
