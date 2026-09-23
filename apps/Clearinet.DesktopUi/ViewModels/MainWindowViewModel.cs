@@ -1,0 +1,1445 @@
+using System.Collections.ObjectModel;
+using System.Reflection;
+using Avalonia.Threading;
+using Clearinet.Compatibility.Extensions;
+using Clearinet.Compatibility.FiddlerScript;
+using Clearinet.DesktopUi.Models;
+using Clearinet.Extensibility.Inspection;
+using Clearinet.ProxyCore.AutoResponder;
+using Clearinet.ProxyCore.Breakpoints;
+using Clearinet.ProxyCore.Certificates;
+using Clearinet.ProxyCore.Proxy;
+using Clearinet.ProxyCore.Sessions;
+using Clearinet.ProxyCore.SystemProxy;
+
+namespace Clearinet.DesktopUi.ViewModels;
+
+/// <summary>
+/// Hosts the same proxy core Clearinet.DevHost's console spike proved out
+/// in Phase 1 (root CA, leaf certificate provider, session store,
+/// intercepting listener) and projects <see cref="SessionStore"/>'s live
+/// change feed into an <see cref="ObservableCollection{T}"/> the session
+/// grid binds to. Unlike the first cut of this app, the proxy no longer
+/// starts itself on launch -- Start/Stop are explicit commands, and the
+/// port is editable up until Start is pressed, so a taken port (or just a
+/// preference) doesn't require editing code and rebuilding.
+/// </summary>
+public sealed class MainWindowViewModel : ViewModelBase, IDisposable
+{
+    private const int DefaultPreferredPort = 8888;
+
+    private readonly SessionStore _sessionStore = new();
+    private readonly InspectorRegistry _inspectorRegistry;
+    private readonly BreakpointManager _breakpointManager = new();
+    private readonly Dictionary<PendingBreakpoint, PendingBreakpointViewModel> _pendingBreakpointViewModels = [];
+    private readonly AutoResponderRules _autoResponderRules = new();
+
+    /// <summary>
+    /// One long-lived runner, same lifecycle reasoning as
+    /// <see cref="_breakpointManager"/>/<see cref="_autoResponderRules"/>
+    /// above -- constructed once here (the composition root) and handed to
+    /// <see cref="InterceptingProxyListener"/> as
+    /// <c>Clearinet.ProxyCore.Scripting.IFiddlerScriptRunner</c> on every
+    /// <see cref="Start"/>. Its own <c>Load</c>/<c>Reload</c> can be called
+    /// at any time, including while the proxy is running, the same way
+    /// <see cref="AutoResponderRules.Rules"/> can already be edited live.
+    /// </summary>
+    private readonly FiddlerScriptRunner _fiddlerScriptRunner;
+
+    /// <summary>
+    /// Unlike <see cref="_fiddlerScriptRunner"/>, loaded exactly once, in
+    /// this constructor, and never reloaded -- see <see cref="ExtensionHost"/>'s
+    /// own remarks on why compiled .NET extensions don't get FiddlerScript's
+    /// live-reload treatment. Its <see cref="ExtensionHost.AutoTampers"/> are
+    /// wrapped fresh (via <see cref="ExtensionHost.CreateAutoTamperHost"/>)
+    /// and handed to <see cref="InterceptingProxyListener"/> on every
+    /// <see cref="Start"/>, the same way <see cref="_fiddlerScriptRunner"/>
+    /// is; its inspectors are folded into <see cref="_inspectorRegistry"/>
+    /// once, below, since that registry itself is rebuilt fresh here rather
+    /// than mutated later.
+    /// </summary>
+    private readonly ExtensionHost _extensionHost;
+
+    private CertificateAuthority? _authority;
+    private InterceptingProxyListener? _proxy;
+    private string _statusText;
+    private decimal? _preferredPort = DefaultPreferredPort;
+    private bool _isRunning;
+    private SessionRow? _selectedSessionRow;
+    private PendingBreakpointViewModel? _selectedPendingBreakpoint;
+    private AutoResponderRuleViewModel? _selectedAutoResponderRule;
+    private SessionQuery _query = SessionQuery.MatchAll;
+    private string _filterText = string.Empty;
+    private bool _useAutomaticPort = true;
+    private bool _isCaptureFlashing;
+    private string _fiddlerScriptPath = string.Empty;
+    private string _fiddlerScriptStatus = "No script loaded.";
+    private string _extensionStatus = "Not scanned yet.";
+    private bool _showFiddlerScriptPanel;
+    private bool _showExtensionsPanel;
+    private bool _showAlsoBreakOnRow;
+
+    /// <summary>
+    /// Restarted (not just started) on every captured session -- see
+    /// <see cref="FlashCaptureIndicator"/> -- so a burst of traffic keeps
+    /// the flash dot lit continuously instead of blinking once per session,
+    /// and it only goes dark shortly after the capture actually goes quiet.
+    /// </summary>
+    private readonly DispatcherTimer _captureFlashTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
+
+    /// <summary>
+    /// Every session captured this run, in capture order, regardless of
+    /// <see cref="FilterText"/> -- still what <see cref="SaveSazCommand"/>
+    /// exports from and what its can-execute check counts, since exporting
+    /// only the currently-filtered view would silently drop sessions the
+    /// person just hasn't gone looking for. The grid itself binds to
+    /// <see cref="FilteredSessions"/>, not this.
+    /// </summary>
+    public ObservableCollection<SessionRow> Sessions { get; } = [];
+
+    /// <summary>
+    /// The subset of <see cref="Sessions"/> that <see cref="FilterText"/>
+    /// currently matches, in capture order -- what the session grid
+    /// actually binds to. Kept as its own collection rather than an
+    /// <c>ICollectionView</c>-style live filter over <see cref="Sessions"/>
+    /// because Avalonia's DataGrid has nothing built in for that; see
+    /// <see cref="ApplyFilter"/> and the SessionAdded handler below for how
+    /// the two are kept in sync without re-scanning the whole list on every
+    /// single captured session.
+    /// </summary>
+    public ObservableCollection<SessionRow> FilteredSessions { get; } = [];
+
+    /// <summary>
+    /// The live text in the filter box -- see <see cref="SessionQuery"/>
+    /// for the grammar (free text plus <c>method:</c>/<c>host:</c>/
+    /// <c>status:</c>). Re-parses and rebuilds <see cref="FilteredSessions"/>
+    /// on every change; that's a full O(n) rescan of <see cref="Sessions"/>
+    /// per keystroke, which is fine at the sizes a single capture run
+    /// reaches in practice and simpler than debouncing or incrementally
+    /// diffing a changed predicate.
+    /// </summary>
+    public string FilterText
+    {
+        get => _filterText;
+        set
+        {
+            if (SetField(ref _filterText, value))
+            {
+                _query = SessionQuery.Parse(value);
+                ApplyFilter();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sessions currently paused at a breakpoint, oldest first. A
+    /// connection's processing thread is genuinely blocked for as long as
+    /// its entry sits here -- see BreakpointManager's remarks on why its
+    /// events fire off that thread, which is why every handler below
+    /// marshals through <see cref="Dispatcher"/> the same way
+    /// SessionStore.SessionAdded already has to.
+    /// </summary>
+    public ObservableCollection<PendingBreakpointViewModel> PendingBreakpoints { get; } = [];
+
+    /// <summary>
+    /// Whether the breakpoints panel should take up any space at all. True
+    /// once either Automatic Breakpoints checkbox is armed, or any of the
+    /// narrower bpu/bpafter/bpm/bps rules below has a value -- see
+    /// <see cref="BreakpointRules.AnyActive"/>, which this defers to
+    /// directly rather than repeating its five-way check here -- so the
+    /// panel is there before it's needed rather than popping in only after
+    /// the first hit; also true whenever something is actually paused
+    /// (<see cref="PendingBreakpoints"/> non-empty) even if every rule got
+    /// cleared afterward, since hiding the panel then would hide the only
+    /// way to Resume or Abort a connection that's still genuinely blocked.
+    /// Recomputed on demand rather than cached -- see every setter/handler
+    /// below that calls <c>RaisePropertyChanged</c> for this -- since
+    /// nothing here tracks dependencies automatically (this app's MVVM base
+    /// is hand-rolled; see ViewModelBase's own remarks).
+    /// </summary>
+    public bool IsBreakpointsPanelVisible =>
+        _breakpointManager.Rules.AnyActive || PendingBreakpoints.Count > 0;
+
+    public PendingBreakpointViewModel? SelectedPendingBreakpoint
+    {
+        get => _selectedPendingBreakpoint;
+        set => SetField(ref _selectedPendingBreakpoint, value);
+    }
+
+    /// <summary>Fiddler's "Rules -&gt; Automatic Breakpoints -&gt; Before Requests".</summary>
+    public bool BreakOnAllRequests
+    {
+        get => _breakpointManager.Rules.BreakOnAllRequests;
+        set
+        {
+            if (_breakpointManager.Rules.BreakOnAllRequests == value)
+            {
+                return;
+            }
+
+            _breakpointManager.Rules.BreakOnAllRequests = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsBreakpointsPanelVisible));
+        }
+    }
+
+    /// <summary>Fiddler's "Rules -&gt; Automatic Breakpoints -&gt; After Responses".</summary>
+    public bool BreakOnAllResponses
+    {
+        get => _breakpointManager.Rules.BreakOnAllResponses;
+        set
+        {
+            if (_breakpointManager.Rules.BreakOnAllResponses == value)
+            {
+                return;
+            }
+
+            _breakpointManager.Rules.BreakOnAllResponses = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsBreakpointsPanelVisible));
+        }
+    }
+
+    /// <summary>Fiddler's <c>bpu</c>: pause a request whose target contains this text.</summary>
+    public string? RequestUrlContains
+    {
+        get => _breakpointManager.Rules.RequestUrlContains;
+        set
+        {
+            if (_breakpointManager.Rules.RequestUrlContains == value)
+            {
+                return;
+            }
+
+            _breakpointManager.Rules.RequestUrlContains = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsBreakpointsPanelVisible));
+        }
+    }
+
+    /// <summary>Fiddler's <c>bpafter</c>: pause a response whose request target contains this text.</summary>
+    public string? ResponseUrlContains
+    {
+        get => _breakpointManager.Rules.ResponseUrlContains;
+        set
+        {
+            if (_breakpointManager.Rules.ResponseUrlContains == value)
+            {
+                return;
+            }
+
+            _breakpointManager.Rules.ResponseUrlContains = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsBreakpointsPanelVisible));
+        }
+    }
+
+    /// <summary>Fiddler's <c>bpm</c>: pause a request with this HTTP method.</summary>
+    public string? RequestMethodEquals
+    {
+        get => _breakpointManager.Rules.RequestMethodEquals;
+        set
+        {
+            if (_breakpointManager.Rules.RequestMethodEquals == value)
+            {
+                return;
+            }
+
+            _breakpointManager.Rules.RequestMethodEquals = value;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsBreakpointsPanelVisible));
+        }
+    }
+
+    /// <summary>
+    /// Fiddler's <c>bps</c>: pause a response with this status code.
+    /// Nullable decimal to match <c>NumericUpDown.Value</c>'s own type --
+    /// the same convention <see cref="PreferredPort"/> already uses for the
+    /// same reason -- converted to and from <see cref="BreakpointRules.ResponseStatusCodeEquals"/>'s
+    /// <c>int?</c> at this property's boundary rather than pushing the UI's
+    /// numeric type down into ProxyCore.
+    /// </summary>
+    public decimal? ResponseStatusCodeEquals
+    {
+        get => _breakpointManager.Rules.ResponseStatusCodeEquals;
+        set
+        {
+            var statusCode = value.HasValue ? (int?)value.Value : null;
+            if (_breakpointManager.Rules.ResponseStatusCodeEquals == statusCode)
+            {
+                return;
+            }
+
+            _breakpointManager.Rules.ResponseStatusCodeEquals = statusCode;
+            RaisePropertyChanged();
+            RaisePropertyChanged(nameof(IsBreakpointsPanelVisible));
+        }
+    }
+
+    /// <summary>
+    /// Whether the "Also break on" row (<see cref="RequestUrlContains"/>/
+    /// <see cref="ResponseUrlContains"/>/<see cref="RequestMethodEquals"/>/
+    /// <see cref="ResponseStatusCodeEquals"/>) shows on the main screen at
+    /// all -- the checkable "_Tools -&gt; Also Break On" entry is this
+    /// property's only writer, same reasoning and default
+    /// (<see langword="false"/>) as <see cref="ShowFiddlerScriptPanel"/>.
+    /// Purely a visibility switch: none of the four fields above are
+    /// cleared when this goes back to <see langword="false"/>, so a
+    /// condition set while the row was visible keeps arming
+    /// <see cref="IsBreakpointsPanelVisible"/> and keeps pausing real
+    /// traffic even after the row that set it is hidden again.
+    /// </summary>
+    public bool ShowAlsoBreakOnRow
+    {
+        get => _showAlsoBreakOnRow;
+        set => SetField(ref _showAlsoBreakOnRow, value);
+    }
+
+    /// <summary>
+    /// Named to avoid colliding with <see cref="AutoResponderRules"/> (the
+    /// ProxyCore engine type) -- one <see cref="AutoResponderRuleViewModel"/>
+    /// per <see cref="AutoResponderRules.Rules"/> entry, kept in the same
+    /// order by hand (see <see cref="AddAutoResponderRule"/>/
+    /// <see cref="RemoveSelectedAutoResponderRule"/>/
+    /// <see cref="MoveSelectedAutoResponderRule"/>), the same two-lists
+    /// tradeoff <see cref="PendingBreakpoints"/> already makes against
+    /// <c>BreakpointManager</c>'s own state.
+    /// </summary>
+    public ObservableCollection<AutoResponderRuleViewModel> AutoResponderRuleRows { get; } = [];
+
+    /// <summary>
+    /// The AutoResponder panel's own on/off switch -- Fiddler Classic's
+    /// "Enable rules" checkbox. See <see cref="AutoResponderRules.IsEnabled"/>'s
+    /// remarks for why this defaults to <see langword="false"/> unlike the
+    /// breakpoints panel's always-live rules.
+    /// </summary>
+    public bool AutoResponderEnabled
+    {
+        get => _autoResponderRules.IsEnabled;
+        set
+        {
+            if (_autoResponderRules.IsEnabled == value)
+            {
+                return;
+            }
+
+            _autoResponderRules.IsEnabled = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public AutoResponderRuleViewModel? SelectedAutoResponderRule
+    {
+        get => _selectedAutoResponderRule;
+        set
+        {
+            if (SetField(ref _selectedAutoResponderRule, value))
+            {
+                RemoveAutoResponderRuleCommand.RaiseCanExecuteChanged();
+                MoveAutoResponderRuleUpCommand.RaiseCanExecuteChanged();
+                MoveAutoResponderRuleDownCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public RelayCommand AddAutoResponderRuleCommand { get; }
+    public RelayCommand RemoveAutoResponderRuleCommand { get; }
+    public RelayCommand MoveAutoResponderRuleUpCommand { get; }
+    public RelayCommand MoveAutoResponderRuleDownCommand { get; }
+
+    /// <summary>
+    /// The path last typed into the FiddlerScript panel -- not necessarily
+    /// what's actually loaded yet; that's <see cref="FiddlerScriptRunner.LoadedPath"/>,
+    /// read back into <see cref="FiddlerScriptStatus"/> only once
+    /// <see cref="LoadFiddlerScriptCommand"/> actually runs. Kept as its own
+    /// field/property (rather than binding the TextBox straight at
+    /// something on <see cref="_fiddlerScriptRunner"/>) purely so the
+    /// "Load"/"Reload" buttons have a plain string to enable/disable
+    /// against without the runner needing any UI-facing surface of its own.
+    /// </summary>
+    public string FiddlerScriptPath
+    {
+        get => _fiddlerScriptPath;
+        set
+        {
+            if (SetField(ref _fiddlerScriptPath, value))
+            {
+                LoadFiddlerScriptCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// What the FiddlerScript panel's status line shows: which handlers the
+    /// loaded script defines, or its load error -- see
+    /// <see cref="RefreshFiddlerScriptStatus"/>. Never read back into any
+    /// proxy behavior; purely informational, the same role
+    /// <see cref="StatusText"/> plays for the proxy itself.
+    /// </summary>
+    public string FiddlerScriptStatus
+    {
+        get => _fiddlerScriptStatus;
+        private set => SetField(ref _fiddlerScriptStatus, value);
+    }
+
+    /// <summary>
+    /// What the extensions status line shows: every folder <see cref="ExtensionHost.Load"/>
+    /// scanned (whether it existed, how many .dll's it found), plus what got
+    /// loaded and any load errors. Built once, right after <see cref="ExtensionHost.Load"/>
+    /// runs in the constructor -- extensions don't come and go mid-run (see
+    /// ExtensionHost's own remarks), so unlike <see cref="FiddlerScriptStatus"/>
+    /// this never needs to be refreshed later. Exists specifically so this
+    /// information doesn't depend on the console being visible at all: a
+    /// WinExe app's Console.WriteLine output isn't reliably visible in every
+    /// terminal a person might launch it from, and this line is always on
+    /// screen in the running app regardless.
+    /// </summary>
+    public string ExtensionStatus
+    {
+        get => _extensionStatus;
+        private set => SetField(ref _extensionStatus, value);
+    }
+
+    public RelayCommand LoadFiddlerScriptCommand { get; }
+    public RelayCommand ReloadFiddlerScriptCommand { get; }
+
+    /// <summary>
+    /// Whether the FiddlerScript panel shows on the main screen at all --
+    /// the checkable "_Tools -&gt; FiddlerScript" entry in MainWindow.axaml
+    /// is this property's only writer (see this project's "move panels into
+    /// the Tools menu" UI pass). Defaults to <see langword="false"/>: unlike
+    /// the Breakpoints/AutoResponder panels, this one has no other signal
+    /// (an armed rule, an active pause) to decide it should be on screen by
+    /// default, and hiding it by default is the whole point of moving it off
+    /// the always-visible main screen in the first place. Purely a
+    /// visibility switch -- loading/reloading a script still works the same
+    /// whether or not this panel happens to be shown.
+    /// </summary>
+    public bool ShowFiddlerScriptPanel
+    {
+        get => _showFiddlerScriptPanel;
+        set => SetField(ref _showFiddlerScriptPanel, value);
+    }
+
+    /// <summary>
+    /// Whether the Extensions status panel shows on the main screen --
+    /// the checkable "_Tools -&gt; Extensions" entry is this property's only
+    /// writer, same reasoning and default (<see langword="false"/>) as
+    /// <see cref="ShowFiddlerScriptPanel"/>. Purely a visibility switch:
+    /// <see cref="ExtensionStatus"/> itself is still built once at startup
+    /// regardless of whether anyone ever checks this box.
+    /// </summary>
+    public bool ShowExtensionsPanel
+    {
+        get => _showExtensionsPanel;
+        set => SetField(ref _showExtensionsPanel, value);
+    }
+
+    /// <summary>
+    /// The dynamic "_Rules" menu's own entries -- one per
+    /// <c>RulesMenuOption</c>/<c>RulesStringChoice</c> the currently-loaded
+    /// script declares (empty when nothing's loaded, or the loaded script
+    /// declares none). Rebuilt from scratch by <see cref="RefreshScriptMenus"/>
+    /// every time a script (re)loads -- see <c>MainWindow.axaml</c>'s own
+    /// remarks on why this binds as one flat <c>MenuItem.ItemsSource</c>
+    /// list rather than real nested Rules-menu submenus.
+    /// </summary>
+    public ObservableCollection<RulesMenuEntryViewModel> RulesMenuEntries { get; } = [];
+
+    /// <summary>
+    /// Whether <see cref="RulesMenuEntries"/> currently has anything in it
+    /// -- MainWindow.axaml binds the "_Rules" menu's own <c>IsEnabled</c>
+    /// to this, so it visibly greys out instead of just opening to an
+    /// empty dropdown (nothing was drawing an arrow or reacting to a click
+    /// either way, but a disabled menu at least reads as "nothing here
+    /// right now" rather than "broken"). Not backed by a field: this app's
+    /// MVVM base has no dependency tracking of its own (see
+    /// ViewModelBase's own remarks), so <see cref="RefreshScriptMenus"/>
+    /// has to explicitly raise this alongside <see cref="RulesMenuEntries"/>
+    /// itself whenever that collection is rebuilt.
+    /// </summary>
+    public bool HasRulesMenuEntries => RulesMenuEntries.Count > 0;
+
+    /// <summary>
+    /// One per <c>ToolsAction</c> the currently-loaded script declares.
+    /// Same rebuild timing as <see cref="RulesMenuEntries"/>. Despite the
+    /// name (kept for the underlying <c>ToolsAction</c> attribute/Phase C
+    /// terminology, and because <see cref="MainWindowViewModel.InvokeContextAction"/>
+    /// and <see cref="FiddlerScriptRunner.InvokeToolsAction"/> both already
+    /// use it), this no longer renders as a "_Tools" submenu -- see the
+    /// FiddlerScript panel's own remarks in MainWindow.axaml for why it was
+    /// moved to a row of buttons inside that panel instead.
+    /// </summary>
+    public ObservableCollection<ActionMenuEntryViewModel> ToolsMenuEntries { get; } = [];
+
+    /// <summary>
+    /// Whether <see cref="ToolsMenuEntries"/> currently has anything in it,
+    /// same reasoning and same "explicitly raised, not field-backed" caveat
+    /// as <see cref="HasRulesMenuEntries"/> -- what the FiddlerScript
+    /// panel's "Script Actions" row binds its own <c>IsVisible</c> to, so
+    /// the row (and its label) takes no space at all when there's nothing
+    /// to show, rather than an empty label with no buttons after it.
+    /// </summary>
+    public bool HasToolsMenuEntries => ToolsMenuEntries.Count > 0;
+
+    /// <summary>
+    /// The session grid's right-click context menu -- one per
+    /// <c>ContextAction</c> the currently-loaded script declares. Same
+    /// rebuild timing as <see cref="RulesMenuEntries"/>; see
+    /// <see cref="InvokeContextAction"/> for what it actually operates on.
+    /// </summary>
+    public ObservableCollection<ActionMenuEntryViewModel> ContextActionEntries { get; } = [];
+
+    /// <summary>
+    /// A live passthrough to <see cref="_fiddlerScriptRunner"/>'s own
+    /// <c>Directives</c> -- exists purely so <c>MainWindow.axaml.cs</c> can
+    /// read <c>UIColumns</c> to rebuild the session grid's script-provided
+    /// columns (see <c>SessionRow.ScriptColumns</c>) from code-behind
+    /// without reaching past this view model into
+    /// <see cref="_fiddlerScriptRunner"/> directly. Read after
+    /// <see cref="FiddlerScriptStatus"/> changes -- that property changing
+    /// is the signal a script just (re)loaded, since both are updated
+    /// together in <see cref="RefreshFiddlerScriptStatus"/>.
+    /// </summary>
+    public FiddlerScriptDirectives ScriptDirectives => _fiddlerScriptRunner.Directives;
+
+    /// <summary>
+    /// The Request/Response tab content for whichever row is selected in
+    /// the grid, recomputed fresh on every selection change (see
+    /// <see cref="RefreshInspectors"/>) rather than kept live -- a captured
+    /// session's headers and body never change after the fact, so there's
+    /// nothing for these to react to beyond "which session is selected now".
+    /// </summary>
+    public ObservableCollection<InspectorTabViewModel> RequestInspectors { get; } = [];
+
+    public ObservableCollection<InspectorTabViewModel> ResponseInspectors { get; } = [];
+
+    public SessionRow? SelectedSessionRow
+    {
+        get => _selectedSessionRow;
+        set
+        {
+            if (SetField(ref _selectedSessionRow, value))
+            {
+                RefreshInspectors();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether this build can intercept at all. Only the Windows
+    /// certificate trust-store path is implemented so far -- see the
+    /// Interception Certificate Design doc's open risks for the macOS gap.
+    /// </summary>
+    public bool IsSupported { get; } = OperatingSystem.IsWindows();
+
+    public string StatusText
+    {
+        get => _statusText;
+        private set => SetField(ref _statusText, value);
+    }
+
+    /// <summary>
+    /// Nullable decimal to match <c>NumericUpDown.Value</c>'s own type --
+    /// binding straight to it needs no converter. Null (the field cleared
+    /// while editing) is treated as "use the default" at Start time rather
+    /// than blocking the click. Only consulted at all when
+    /// <see cref="UseAutomaticPort"/> is false -- see <see cref="Start"/>.
+    /// </summary>
+    public decimal? PreferredPort
+    {
+        get => _preferredPort;
+        set
+        {
+            if (SetField(ref _preferredPort, value))
+            {
+                StartCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// True for "Auto" (let the OS hand back any free port -- the same
+    /// port-0 trick <see cref="InterceptingProxyListener.StartOnAvailablePort"/>
+    /// already falls back to when a preferred port is taken, just requested
+    /// up front instead of after a collision), false for "Specify" (use
+    /// <see cref="PreferredPort"/>). Defaults to true: a first run picks
+    /// whatever port the OS hands back rather than assuming 8888 is free.
+    /// <see cref="PreferredPort"/> is left populated with its own default
+    /// (8888) regardless, so switching to "Specify" still starts from a
+    /// sensible value instead of an empty field.
+    /// </summary>
+    public bool UseAutomaticPort
+    {
+        get => _useAutomaticPort;
+        set
+        {
+            if (SetField(ref _useAutomaticPort, value))
+            {
+                RaisePropertyChanged(nameof(UseSpecificPort));
+                StartCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// The exact negation of <see cref="UseAutomaticPort"/>, kept as its
+    /// own two-way-bindable property purely so the "Specify" RadioButton in
+    /// MainWindow.axaml has something real to bind <c>IsChecked</c> to.
+    /// Two RadioButtons in one GroupName only stay correctly in sync (both
+    /// on the initial, unclicked render, and afterward) if each one binds
+    /// TwoWay to an actual property -- a bare <c>{Binding !UseAutomaticPort}</c>
+    /// on the second button would show it unchecked at startup regardless
+    /// of <see cref="UseAutomaticPort"/>'s actual value, since nothing
+    /// would ever set its IsChecked to true in the first place.
+    /// </summary>
+    public bool UseSpecificPort
+    {
+        get => !_useAutomaticPort;
+        set => UseAutomaticPort = !value;
+    }
+
+    public bool IsRunning
+    {
+        get => _isRunning;
+        private set
+        {
+            if (SetField(ref _isRunning, value))
+            {
+                StartCommand.RaiseCanExecuteChanged();
+                StopCommand.RaiseCanExecuteChanged();
+                RaisePropertyChanged(nameof(ShowSteadyRunningIndicator));
+            }
+        }
+    }
+
+    /// <summary>
+    /// True (private setter -- only <see cref="FlashCaptureIndicator"/> and
+    /// <see cref="Stop"/> ever change it) for a brief window after each
+    /// captured session, so the status bar's dot flashes on new traffic
+    /// rather than just sitting steady the whole time the proxy runs. See
+    /// <see cref="ShowSteadyRunningIndicator"/> for how this and
+    /// <see cref="IsRunning"/> combine into the status bar's three
+    /// mutually-exclusive dots (flashing / steady-running / stopped).
+    /// </summary>
+    public bool IsCaptureFlashing
+    {
+        get => _isCaptureFlashing;
+        private set
+        {
+            if (SetField(ref _isCaptureFlashing, value))
+            {
+                RaisePropertyChanged(nameof(ShowSteadyRunningIndicator));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The "running, but nothing just came in" dot -- true while the proxy
+    /// is running and NOT currently mid-flash. Together with
+    /// <see cref="IsCaptureFlashing"/> and <c>!IsRunning</c> (bound directly
+    /// in MainWindow.axaml, no property needed for that one) these three
+    /// are mutually exclusive and exactly one is ever visible, so the
+    /// status bar reads as exactly one dot that flashes brighter when
+    /// traffic is actively coming in. This way the status bar reads as
+    /// "alive" even during a quiet stretch rather than looking identical to
+    /// stopped.
+    /// </summary>
+    public bool ShowSteadyRunningIndicator => IsRunning && !IsCaptureFlashing;
+
+    public RelayCommand StartCommand { get; }
+    public RelayCommand StopCommand { get; }
+    public RelayCommand SaveSazCommand { get; }
+    public RelayCommand ImportViaExtensionCommand { get; }
+    public RelayCommand ExportViaExtensionCommand { get; }
+
+    public MainWindowViewModel()
+    {
+        // Must run before anything below touches the registry itself: a
+        // backup file still sitting on disk means the *previous* run of
+        // this app never reached Stop/Dispose (crash, kill, an unclean
+        // Windows shutdown) and left the system proxy pointed at a port
+        // nothing is listening on any more. See WinInetSystemProxy's own
+        // remarks for the full design.
+        WinInetSystemProxy.RecoverFromCrash();
+
+        // Loaded once, synchronously, here at startup -- see ExtensionHost's
+        // own remarks on why compiled extensions don't get FiddlerScript's
+        // live-reload treatment. DefaultExtensionsFolder may well not exist
+        // on a machine that has never used extensions; ExtensionHost.Load()
+        // treats that as nothing to load, not an error (see its own
+        // remarks), so this is safe to call unconditionally on every launch.
+        _extensionHost = new ExtensionHost(
+            [ExtensionHost.DefaultExtensionsFolder],
+            log: message => Console.WriteLine($"[Extension] {message}"));
+        _extensionHost.Load();
+        foreach (var loadError in _extensionHost.LoadErrors)
+        {
+            Console.WriteLine($"[Extension] {loadError}");
+        }
+        ExtensionStatus = BuildExtensionStatus();
+
+        // Folds any compiled extension inspectors in alongside the three
+        // built-ins -- see InspectorRegistry.CreateDefault(IEnumerable<IInspector>)'s
+        // own remarks on this being the seam it was written for. Built here,
+        // after Load() above, rather than as a field initializer (like the
+        // three-built-ins-only version this replaced) since it now depends
+        // on what Load() found.
+        _inspectorRegistry = InspectorRegistry.CreateDefault(
+            _extensionHost.RequestInspectors.Select(i => (IInspector)Inspector2Adapter.ForRequest(i))
+                .Concat(_extensionHost.ResponseInspectors.Select(i => (IInspector)Inspector2Adapter.ForResponse(i))));
+
+        StartCommand = new RelayCommand(
+            Start, () => IsSupported && !IsRunning && (UseAutomaticPort || PreferredPort is >= 1 and <= 65535));
+        StopCommand = new RelayCommand(Stop, () => IsRunning);
+        SaveSazCommand = new RelayCommand(SaveSaz, () => Sessions.Count > 0);
+        // The Importers/Exporters.Count half of each condition is a one-time
+        // check against what Load() already found above -- extensions don't
+        // come and go mid-run (see ExtensionHost's own remarks), so that
+        // half never needs RaiseCanExecuteChanged. ExportViaExtensionCommand's
+        // Sessions.Count > 0 half is exactly SaveSazCommand's own condition,
+        // so it rides along on the same RaiseCanExecuteChanged call in the
+        // SessionAdded handler below.
+        ImportViaExtensionCommand = new RelayCommand(ImportViaExtension, () => _extensionHost.Importers.Count > 0);
+        ExportViaExtensionCommand = new RelayCommand(ExportViaExtension, () => _extensionHost.Exporters.Count > 0 && Sessions.Count > 0);
+
+        AddAutoResponderRuleCommand = new RelayCommand(AddAutoResponderRule);
+        RemoveAutoResponderRuleCommand = new RelayCommand(RemoveSelectedAutoResponderRule, () => SelectedAutoResponderRule is not null);
+        MoveAutoResponderRuleUpCommand = new RelayCommand(() => MoveSelectedAutoResponderRule(-1), () => CanMoveSelectedAutoResponderRule(-1));
+        MoveAutoResponderRuleDownCommand = new RelayCommand(() => MoveSelectedAutoResponderRule(1), () => CanMoveSelectedAutoResponderRule(1));
+
+        // The log callback routes FiddlerObject.alert()/Log.LogString()
+        // calls (and this runner's own handler-error notices) to the
+        // console -- the same place every other diagnostic in this proxy
+        // core already goes (see InterceptingProxyListener's own
+        // Console.WriteLine calls), rather than a dedicated log pane this
+        // pass doesn't build.
+        _fiddlerScriptRunner = new FiddlerScriptRunner(log: message => Console.WriteLine($"[FiddlerScript] {message}"));
+        LoadFiddlerScriptCommand = new RelayCommand(LoadFiddlerScript, () => !string.IsNullOrWhiteSpace(FiddlerScriptPath));
+        ReloadFiddlerScriptCommand = new RelayCommand(ReloadFiddlerScript, () => _fiddlerScriptRunner.IsLoaded);
+
+        // DispatcherTimer over a raw Task.Delay/CancellationTokenSource
+        // specifically because Tick always fires on the UI thread -- every
+        // other event handler in this constructor already has to marshal
+        // through Dispatcher.UIThread.Post for that same reason, and a timer
+        // sidesteps needing to do that here too.
+        _captureFlashTimer.Tick += (_, _) =>
+        {
+            _captureFlashTimer.Stop();
+            IsCaptureFlashing = false;
+        };
+
+        // Registered after the commands above are assigned -- the compiler's
+        // nullable flow analysis judges a captured non-nullable property by
+        // where its assignment appears in the constructor's text, not by
+        // when the closure actually runs, so referencing SaveSazCommand here
+        // before its assignment line would (harmlessly, since the closure
+        // only ever runs post-construction) still trip CS8602.
+        _sessionStore.SessionAdded += session => Dispatcher.UIThread.Post(() =>
+        {
+            var row = SessionRow.From(session, _fiddlerScriptRunner);
+            Sessions.Add(row);
+            // Only this one new row needs checking against the current
+            // filter -- everything already in FilteredSessions was already
+            // matched when it arrived (or by the last ApplyFilter() run),
+            // so there's no reason to re-scan the whole list per capture.
+            if (_query.Matches(session))
+            {
+                FilteredSessions.Add(row);
+            }
+
+            SaveSazCommand.RaiseCanExecuteChanged();
+            ExportViaExtensionCommand.RaiseCanExecuteChanged();
+            FlashCaptureIndicator();
+        });
+
+        _breakpointManager.BreakpointHit += pending => Dispatcher.UIThread.Post(() =>
+        {
+            var vm = new PendingBreakpointViewModel(pending);
+            _pendingBreakpointViewModels[pending] = vm;
+            PendingBreakpoints.Add(vm);
+            SelectedPendingBreakpoint ??= vm;
+            RaisePropertyChanged(nameof(IsBreakpointsPanelVisible));
+        });
+
+        _breakpointManager.BreakpointResolved += pending => Dispatcher.UIThread.Post(() =>
+        {
+            if (!_pendingBreakpointViewModels.Remove(pending, out var vm))
+            {
+                return;
+            }
+
+            PendingBreakpoints.Remove(vm);
+            if (ReferenceEquals(SelectedPendingBreakpoint, vm))
+            {
+                SelectedPendingBreakpoint = PendingBreakpoints.Count > 0 ? PendingBreakpoints[0] : null;
+            }
+
+            RaisePropertyChanged(nameof(IsBreakpointsPanelVisible));
+        });
+
+        _statusText = IsSupported
+            ? "Not started. Pick a port and click Start."
+            : "This build only implements the Windows certificate trust-store path so far " +
+              "-- see the Interception Certificate Design doc's open risks.";
+    }
+
+    private void Start()
+    {
+        try
+        {
+            // Reused across Start/Stop/Start cycles within one run of the
+            // app -- there's no reason to re-install a new trust-store
+            // root every time, only a fresh leaf provider (cheap, and it
+            // keeps each run's leaves independent of any that came before).
+            _authority ??= new CertificateAuthority();
+            var leafProvider = new LeafCertificateProvider(_authority.RootCertificate);
+            // Port 0 is the same "let the OS pick" signal
+            // StartOnAvailablePort itself falls back to on a collision --
+            // "Auto" just asks for that straight away instead of trying a
+            // preferred port first.
+            var requestedPort = UseAutomaticPort ? 0 : (int)(PreferredPort ?? DefaultPreferredPort);
+
+            _proxy = InterceptingProxyListener.StartOnAvailablePort(
+                requestedPort, leafProvider, _sessionStore, _breakpointManager, _autoResponderRules, _fiddlerScriptRunner,
+                _extensionHost.CreateAutoTamperHost());
+            IsRunning = true;
+            PreferredPort = _proxy.Port;
+
+            // In Auto mode requestedPort is always 0, which _proxy.Port
+            // (the real bound port) will never equal -- there's no
+            // "preferred port was taken" collision to report in that mode
+            // in the first place, so this note only ever applies to Specify.
+            var portNote = UseAutomaticPort || _proxy.Port == requestedPort
+                ? string.Empty
+                : $" (port {requestedPort} was already taken -- probably another CLeARINET process still running)";
+
+            // A failure here shouldn't roll back the listener that just
+            // started successfully above -- worst case, CLeARINET works
+            // exactly like it did before this feature existed (a manually
+            // pointed browser proxy), it just doesn't also become the
+            // system default.
+            try
+            {
+                WinInetSystemProxy.Enable(_proxy.Port);
+                StatusText =
+                    $"Listening on 127.0.0.1:{_proxy.Port}{portNote} and registered as the Windows system proxy -- " +
+                    "browsers and most other WinINET-aware apps on this machine will route through here " +
+                    "automatically until you click Stop.";
+            }
+            catch (Exception ex)
+            {
+                StatusText =
+                    $"Listening on 127.0.0.1:{_proxy.Port}{portNote}, but couldn't register as the Windows system " +
+                    $"proxy ({ex.Message}) -- point a browser's HTTPS proxy here manually instead.";
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Failed to start the proxy: {ex.Message}";
+        }
+    }
+
+    private void Stop()
+    {
+        if (_proxy is null)
+        {
+            return;
+        }
+
+        _proxy.Stop();
+        _proxy = null;
+        WinInetSystemProxy.Disable();
+        IsRunning = false;
+
+        // Defensive rather than load-bearing -- SessionAdded can't fire
+        // while stopped, so nothing would restart the timer from here on.
+        // Still worth guaranteeing no flash state lingers into the next run.
+        _captureFlashTimer.Stop();
+        IsCaptureFlashing = false;
+
+        StatusText = $"Stopped and released as the system proxy. {Sessions.Count} session(s) captured this run -- " +
+                      "Start again to keep going, or File > Save SAZ to export what's here.";
+    }
+
+    /// <summary>
+    /// Lights the flash dot and (re)starts its fade-out countdown -- called
+    /// once per captured session. Restarting an already-running
+    /// DispatcherTimer (Stop then Start) rather than letting an in-flight
+    /// one run to completion is what gives "stays lit through a burst of
+    /// traffic, fades shortly after things go quiet" instead of a blink per
+    /// session.
+    /// </summary>
+    private void FlashCaptureIndicator()
+    {
+        IsCaptureFlashing = true;
+        _captureFlashTimer.Stop();
+        _captureFlashTimer.Start();
+    }
+
+    /// <summary>
+    /// Appends a fresh, disabled, empty rule to the end of the list (both
+    /// <see cref="AutoResponderRules.Rules"/> and <see cref="AutoResponderRuleRows"/>)
+    /// and selects it -- so clicking "Add" always gives you something to
+    /// immediately start typing into, matching Fiddler Classic's own
+    /// AutoResponder "Add Rule" behavior. Starts disabled (rather than
+    /// inheriting <see cref="AutoResponderEnabled"/>) since an empty
+    /// match/action pair matches everything and would otherwise start
+    /// intercepting traffic before the person has typed anything into it.
+    /// </summary>
+    private void AddAutoResponderRule()
+    {
+        var rule = new AutoResponderRule { IsEnabled = false };
+        _autoResponderRules.Rules.Add(rule);
+        var vm = new AutoResponderRuleViewModel(rule);
+        AutoResponderRuleRows.Add(vm);
+        SelectedAutoResponderRule = vm;
+    }
+
+    /// <summary>
+    /// Reads <see cref="FiddlerScriptPath"/> and loads it into
+    /// <see cref="_fiddlerScriptRunner"/> -- Fiddler's own
+    /// "Rules > Customize Rules" workflow, minus the text editor itself
+    /// (the script is edited in whatever editor the person already uses;
+    /// this button just (re)reads it). A file that can't even be read (bad
+    /// path, permissions) surfaces here rather than as an unhandled
+    /// exception, same posture as <see cref="Start"/>'s own try/catch
+    /// around a failed listener start; a file that *is* read but has a
+    /// broken script inside it is a different failure
+    /// (<see cref="FiddlerScriptRunner.LoadError"/>), surfaced the same way
+    /// through <see cref="RefreshFiddlerScriptStatus"/>.
+    /// </summary>
+    private void LoadFiddlerScript()
+    {
+        try
+        {
+            _fiddlerScriptRunner.LoadFromFile(FiddlerScriptPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            FiddlerScriptStatus = $"Couldn't read '{FiddlerScriptPath}': {ex.Message}";
+            ReloadFiddlerScriptCommand.RaiseCanExecuteChanged();
+            return;
+        }
+
+        RefreshFiddlerScriptStatus();
+        ReloadFiddlerScriptCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// Fiddler's own <c>FiddlerObject.ReloadScript()</c> reaches this same
+    /// method (see the constructor's <c>reloadScript</c> callback passed
+    /// into <see cref="FiddlerScriptRunner"/>) -- a script can trigger its
+    /// own reload, not just this button.
+    /// </summary>
+    private void ReloadFiddlerScript()
+    {
+        _fiddlerScriptRunner.Reload();
+        RefreshFiddlerScriptStatus();
+    }
+
+    private void RefreshFiddlerScriptStatus()
+    {
+        FiddlerScriptStatus = _fiddlerScriptRunner.LoadError is { } error
+            ? $"Script error -- still running the last-good script, if any: {error}"
+            : $"Loaded '{_fiddlerScriptRunner.LoadedPath}'. " +
+              $"OnBeforeRequest: {(_fiddlerScriptRunner.HasOnBeforeRequest ? "yes" : "no")}, " +
+              $"OnBeforeResponse: {(_fiddlerScriptRunner.HasOnBeforeResponse ? "yes" : "no")}.";
+
+        // Rules-menu/Tools-menu/Context-menu entries and the grid's
+        // script-provided columns are all only ever as fresh as the
+        // currently-loaded script -- rebuilding them here, alongside the
+        // status line itself, means every call site that already refreshes
+        // one (LoadFiddlerScript/ReloadFiddlerScript) gets the other for
+        // free, with no separate call to remember.
+        RefreshScriptMenus();
+    }
+
+    /// <summary>
+    /// Rebuilds <see cref="RulesMenuEntries"/>/<see cref="ToolsMenuEntries"/>/
+    /// <see cref="ContextActionEntries"/> from scratch against whatever
+    /// <see cref="_fiddlerScriptRunner"/>'s <c>Directives</c> currently say
+    /// -- called once per script (re)load, from
+    /// <see cref="RefreshFiddlerScriptStatus"/>, never incrementally
+    /// patched. A full rebuild is simpler to reason about than diffing the
+    /// old script's menu against the new one, and a script (re)load is
+    /// already a rare, explicit, human-driven action (see
+    /// <c>FiddlerScriptRunner</c>'s own remarks on why compiled extensions
+    /// and FiddlerScript both treat reload as an occasional event, not a
+    /// hot path) -- there's no per-request cost here to worry about.
+    /// </summary>
+    private void RefreshScriptMenus()
+    {
+        RulesMenuEntries.Clear();
+        foreach (var entry in BuildRulesMenuEntries())
+        {
+            RulesMenuEntries.Add(entry);
+        }
+
+        RaisePropertyChanged(nameof(HasRulesMenuEntries));
+
+        ToolsMenuEntries.Clear();
+        foreach (var descriptor in _fiddlerScriptRunner.Directives.ToolsActions)
+        {
+            ToolsMenuEntries.Add(new ActionMenuEntryViewModel(
+                descriptor.MenuText, () => _fiddlerScriptRunner.InvokeToolsAction(descriptor.MethodName)));
+        }
+
+        RaisePropertyChanged(nameof(HasToolsMenuEntries));
+
+        ContextActionEntries.Clear();
+        foreach (var descriptor in _fiddlerScriptRunner.Directives.ContextActions)
+        {
+            ContextActionEntries.Add(new ActionMenuEntryViewModel(
+                descriptor.MenuText, () => InvokeContextAction(descriptor.MethodName)));
+        }
+    }
+
+    /// <summary>
+    /// Runs a <c>ContextAction</c> against <see cref="SelectedSessionRow"/>
+    /// -- a no-op with nothing selected, rather than an error, since the
+    /// context menu that offers this is only ever opened from a row the
+    /// person right-clicked in the first place, but a click landing between
+    /// the menu opening and the selection changing underneath it (a fast
+    /// re-click, a session list that just scrolled) is cheap to guard
+    /// against here.
+    /// </summary>
+    private void InvokeContextAction(string methodName)
+    {
+        if (SelectedSessionRow is { } selected)
+        {
+            _fiddlerScriptRunner.InvokeContextAction(methodName, [selected.Session]);
+        }
+    }
+
+    /// <summary>
+    /// Builds one <see cref="RulesMenuEntryViewModel"/> per
+    /// <c>RulesMenuOption</c> and per <c>RulesStringChoice</c> the loaded
+    /// script declares, wiring up each one's checked-state callback to
+    /// read/write the underlying script field through
+    /// <see cref="_fiddlerScriptRunner"/> and, for a radio-grouped option or
+    /// a string-choice submenu, to keep its sibling entries (and their own
+    /// underlying fields -- not just their checkmarks) in sync. See
+    /// <see cref="RulesMenuOption"/>'s own remarks on what "radio-grouped"
+    /// means here, and <c>MainWindow.axaml</c>'s own remarks on why every
+    /// entry (grouped or not) renders as one flat list with a
+    /// "Submenu: Option" label rather than a real nested flyout.
+    /// </summary>
+    private List<RulesMenuEntryViewModel> BuildRulesMenuEntries()
+    {
+        var entries = new List<RulesMenuEntryViewModel>();
+        var radioGroups = new Dictionary<string, List<(RulesMenuOption Option, RulesMenuEntryViewModel Entry)>>();
+
+        foreach (var option in _fiddlerScriptRunner.Directives.RulesMenuOptions)
+        {
+            var header = option.SubmenuName is null ? option.MenuText : $"{option.SubmenuName}: {option.MenuText}";
+            var initial = _fiddlerScriptRunner.GetRulesOptionValue(option.FieldName);
+
+            List<(RulesMenuOption Option, RulesMenuEntryViewModel Entry)>? group = null;
+            if (option.IsRadio && option.SubmenuName is not null)
+            {
+                if (!radioGroups.TryGetValue(option.SubmenuName, out group))
+                {
+                    group = [];
+                    radioGroups[option.SubmenuName] = group;
+                }
+            }
+
+            var entry = new RulesMenuEntryViewModel(header, initial, isChecked =>
+            {
+                _fiddlerScriptRunner.SetRulesOptionValue(option.FieldName, isChecked);
+
+                // Radio semantics: checking this one clears every sibling's
+                // own field, not just its checkmark -- otherwise the
+                // script would be left with more than one of the group's
+                // booleans true at once, even though the UI shows only one
+                // checked.
+                if (isChecked && group is not null)
+                {
+                    foreach (var (siblingOption, siblingEntry) in group)
+                    {
+                        if (!string.Equals(siblingOption.FieldName, option.FieldName, StringComparison.Ordinal))
+                        {
+                            _fiddlerScriptRunner.SetRulesOptionValue(siblingOption.FieldName, false);
+                            siblingEntry.SetCheckedWithoutNotifying(false);
+                        }
+                    }
+                }
+            });
+
+            entries.Add(entry);
+            group?.Add((option, entry));
+        }
+
+        foreach (var stringOption in _fiddlerScriptRunner.Directives.RulesMenuStringOptions)
+        {
+            var currentValue = _fiddlerScriptRunner.GetRulesStringValue(stringOption.FieldName);
+            var group = new List<RulesMenuEntryViewModel>();
+
+            foreach (var choice in stringOption.Choices)
+            {
+                var header = $"{stringOption.SubmenuName}: {choice.Name}";
+                var initial = string.Equals(currentValue, choice.Value, StringComparison.Ordinal);
+
+                RulesMenuEntryViewModel? entry = null;
+                entry = new RulesMenuEntryViewModel(header, initial, isChecked =>
+                {
+                    if (!isChecked)
+                    {
+                        // Unchecking a radio-style choice directly isn't a
+                        // real action in this model -- picking a DIFFERENT
+                        // choice is what changes the value. Put this one
+                        // back rather than leaving the whole group
+                        // unchecked.
+                        entry!.SetCheckedWithoutNotifying(true);
+                        return;
+                    }
+
+                    _fiddlerScriptRunner.SetRulesStringValue(stringOption.FieldName, choice.Value);
+                    foreach (var sibling in group)
+                    {
+                        if (!ReferenceEquals(sibling, entry))
+                        {
+                            sibling.SetCheckedWithoutNotifying(false);
+                        }
+                    }
+                });
+
+                entries.Add(entry);
+                group.Add(entry);
+            }
+        }
+
+        return entries;
+    }
+
+    /// <summary>
+    /// Builds <see cref="ExtensionStatus"/> from what <see cref="ExtensionHost.Load"/>
+    /// found -- called exactly once, in the constructor, right after
+    /// <c>_extensionHost.Load()</c> runs. Deliberately verbose/explicit
+    /// (spells out every scanned folder, not just a summary count) since
+    /// this exists specifically to answer "did it look in the right place,
+    /// and what did it find there" without needing console access at all --
+    /// see <see cref="ExtensionStatus"/>'s own remarks.
+    /// </summary>
+    private string BuildExtensionStatus()
+    {
+        var lines = new List<string>();
+
+        foreach (var (folder, existed, dllFilesFound) in _extensionHost.ScanResults)
+        {
+            lines.Add(existed
+                ? $"Scanned '{folder}': found {dllFilesFound} .dll file(s)."
+                : $"Folder not found, nothing scanned: '{folder}'.");
+        }
+
+        var loadedCount = _extensionHost.AutoTampers.Count
+            + _extensionHost.RequestInspectors.Count
+            + _extensionHost.ResponseInspectors.Count
+            + _extensionHost.Importers.Count
+            + _extensionHost.Exporters.Count
+            + _extensionHost.ExecActionHandlers.Count;
+        lines.Add(
+            $"Loaded: {_extensionHost.AutoTampers.Count} AutoTamper, " +
+            $"{_extensionHost.RequestInspectors.Count} request inspector, " +
+            $"{_extensionHost.ResponseInspectors.Count} response inspector, " +
+            $"{_extensionHost.Importers.Count} importer, " +
+            $"{_extensionHost.Exporters.Count} exporter, " +
+            $"{_extensionHost.ExecActionHandlers.Count} exec-action handler " +
+            $"(total {loadedCount}).");
+
+        foreach (var loadError in _extensionHost.LoadErrors)
+        {
+            lines.Add($"Error: {loadError}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private void RemoveSelectedAutoResponderRule()
+    {
+        var selected = SelectedAutoResponderRule;
+        if (selected is null)
+        {
+            return;
+        }
+
+        var index = AutoResponderRuleRows.IndexOf(selected);
+        _autoResponderRules.Rules.Remove(selected.Rule);
+        AutoResponderRuleRows.Remove(selected);
+
+        SelectedAutoResponderRule = AutoResponderRuleRows.Count == 0
+            ? null
+            : AutoResponderRuleRows[Math.Min(index, AutoResponderRuleRows.Count - 1)];
+    }
+
+    private bool CanMoveSelectedAutoResponderRule(int direction)
+    {
+        if (SelectedAutoResponderRule is null)
+        {
+            return false;
+        }
+
+        var index = AutoResponderRuleRows.IndexOf(SelectedAutoResponderRule);
+        var newIndex = index + direction;
+        return newIndex >= 0 && newIndex < AutoResponderRuleRows.Count;
+    }
+
+    /// <summary>
+    /// Reorders both <see cref="AutoResponderRuleRows"/> (via
+    /// <see cref="ObservableCollection{T}.Move"/>, so the ListBox reorders
+    /// in place without losing its selection) and the underlying
+    /// <see cref="AutoResponderRules.Rules"/> list -- the two have to move
+    /// together since <see cref="AutoResponderRules.Evaluate"/> walks its
+    /// own list in order, oblivious to whatever order the UI happens to
+    /// display rows in.
+    /// </summary>
+    private void MoveSelectedAutoResponderRule(int direction)
+    {
+        if (SelectedAutoResponderRule is not { } selected || !CanMoveSelectedAutoResponderRule(direction))
+        {
+            return;
+        }
+
+        var index = AutoResponderRuleRows.IndexOf(selected);
+        var newIndex = index + direction;
+
+        AutoResponderRuleRows.Move(index, newIndex);
+        _autoResponderRules.Rules.RemoveAt(index);
+        _autoResponderRules.Rules.Insert(newIndex, selected.Rule);
+
+        MoveAutoResponderRuleUpCommand.RaiseCanExecuteChanged();
+        MoveAutoResponderRuleDownCommand.RaiseCanExecuteChanged();
+    }
+
+    private void SaveSaz()
+    {
+        var sessions = _sessionStore.Snapshot();
+        try
+        {
+            var path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                $"clearinet-capture-{DateTime.Now:yyyyMMdd-HHmmss}.saz");
+            SazWriter.Write(path, sessions);
+            StatusText = $"Saved {sessions.Count} session(s) to {path}";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Failed to save SAZ: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Imports every session from the .saz file at <paramref name="path"/>
+    /// into the live session list. <see cref="SazReader"/> adds each one
+    /// through <see cref="SessionStore.Add"/>, the same call live capture
+    /// makes, so an imported session arrives through the exact same
+    /// SessionAdded handler wired up in the constructor -- no separate
+    /// "imported row" rendering path to keep in sync with the real one.
+    ///
+    /// Genuinely async, awaited from an <c>async void</c> click handler in
+    /// MainWindow.axaml.cs, not wrapped in a <see cref="RelayCommand"/> --
+    /// this app's <c>RelayCommand</c> is synchronous-only, and blocking the
+    /// UI thread on this instead (<c>.GetAwaiter().GetResult()</c>) would
+    /// risk deadlocking against <see cref="SazReader"/>'s own async reads,
+    /// which don't use <c>ConfigureAwait(false)</c> -- see that class's own
+    /// remarks.
+    /// </summary>
+    public async Task ImportSazAsync(string path)
+    {
+        try
+        {
+            var result = await SazReader.ImportAsync(path, _sessionStore);
+            StatusText = result.Skipped.Count == 0
+                ? $"Imported {result.Imported} session(s) from {Path.GetFileName(path)}."
+                : $"Imported {result.Imported} session(s) from {Path.GetFileName(path)} " +
+                  $"({result.Skipped.Count} skipped -- see the console for details).";
+
+            foreach (var reason in result.Skipped)
+            {
+                Console.WriteLine($"[import] Skipped {reason}");
+            }
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Failed to import {Path.GetFileName(path)}: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds <see cref="FilteredSessions"/> from scratch against
+    /// <see cref="Sessions"/> and the current <see cref="_query"/> -- the
+    /// only time a full rescan is warranted, since it's the query that
+    /// changed, not any one session (the SessionAdded handler above covers
+    /// that far cheaper, one row at a time).
+    /// </summary>
+    private void ApplyFilter()
+    {
+        FilteredSessions.Clear();
+        foreach (var row in Sessions)
+        {
+            if (_query.Matches(row.Session))
+            {
+                FilteredSessions.Add(row);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds both tab lists from scratch for whatever's now selected
+    /// (or empties them when nothing is). Runs every applicable inspector
+    /// eagerly rather than lazily per-tab -- these are small, local
+    /// computations over one session's headers/body, not worth the extra
+    /// state a lazy scheme would need.
+    /// </summary>
+    private void RefreshInspectors()
+    {
+        RequestInspectors.Clear();
+        ResponseInspectors.Clear();
+
+        var session = _selectedSessionRow?.Session;
+        if (session is null)
+        {
+            return;
+        }
+
+        AddInspectorTabs(RequestInspectors, new InspectorContext(session, InspectorSide.Request));
+        AddInspectorTabs(ResponseInspectors, new InspectorContext(session, InspectorSide.Response));
+    }
+
+    private void AddInspectorTabs(ObservableCollection<InspectorTabViewModel> target, InspectorContext context)
+    {
+        foreach (var inspector in _inspectorRegistry.GetApplicable(context))
+        {
+            InspectorContent content;
+            try
+            {
+                content = inspector.Inspect(context);
+            }
+            catch (Exception ex)
+            {
+                // An inspector throwing shouldn't take the rest of the tabs
+                // (or the app) down with it -- show the failure in its own
+                // tab instead, same as a well-behaved inspector returning
+                // ErrorContent on purpose.
+                content = new ErrorContent($"{inspector.DisplayName} inspector failed: {ex.Message}");
+            }
+
+            target.Add(new InspectorTabViewModel(inspector.DisplayName, content));
+        }
+    }
+
+    public void Dispose()
+    {
+        // Unloaded regardless of whether the proxy is currently running --
+        // an extension that never got started still had OnLoad() called
+        // above and deserves its OnBeforeUnload() call, matching
+        // IFiddlerExtension's own paired-lifecycle contract.
+        _extensionHost.Unload();
+
+        if (_proxy is null)
+        {
+            return;
+        }
+
+        _proxy.Stop();
+        _proxy = null;
+        WinInetSystemProxy.Disable();
+    }
+
+    /// <summary>
+    /// Runs the first loaded <see cref="ISessionImporter"/>'s
+    /// <see cref="ISessionImporter.ImportSessions"/> on a background thread
+    /// and adds whatever it returns through <see cref="SessionStore.Add"/> --
+    /// the same call live capture and <see cref="ImportSazAsync"/> both
+    /// already make, so an extension-imported session arrives through the
+    /// exact same SessionAdded handler.
+    ///
+    /// Deliberately simpler than real Fiddler's own multi-format Import
+    /// dialog: with more than one importer loaded, or an importer proffering
+    /// more than one <see cref="ProfferFormatAttribute"/> format, this always
+    /// picks the first importer and its first proffered format rather than
+    /// showing a picker -- a real format-choice UI is future work, not this
+    /// pass's scope. The options dictionary passed to
+    /// <see cref="ISessionImporter.ImportSessions"/> is always empty: this
+    /// host has no host-side notion of what any given extension's format
+    /// needs, so (per that interface's own remarks) an importer that needs a
+    /// file path or other input is expected to gather it itself, the same
+    /// way a real Fiddler extension would show its own dialog.
+    /// </summary>
+    private void ImportViaExtension()
+    {
+        var importer = _extensionHost.Importers.FirstOrDefault();
+        if (importer is null)
+        {
+            return;
+        }
+
+        // GetCustomAttributes (plural), not GetCustomAttribute: ProfferFormatAttribute
+        // declares AllowMultiple = true (an importer can proffer more than
+        // one named format), and the singular GetCustomAttribute<T>() throws
+        // AmbiguousMatchException the moment more than one is actually
+        // present -- exactly the case this is meant to support, so using it
+        // here would crash on the very extensions it's documented to allow.
+        var formatName = importer.GetType().GetCustomAttributes<ProfferFormatAttribute>().FirstOrDefault()?.FormatName ?? string.Empty;
+        StatusText = "Importing via extension...";
+        Task.Run(() =>
+        {
+            try
+            {
+                var imported = importer.ImportSessions(formatName, new Dictionary<string, object>(), progress: null);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    foreach (var session in imported)
+                    {
+                        _sessionStore.Add(session.Host, session.StartedAt, session.Request, session.Response);
+                    }
+
+                    StatusText = $"Imported {imported.Count} session(s) via extension.";
+                });
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.UIThread.Post(() => StatusText = $"Extension import failed: {ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// Runs the first loaded <see cref="ISessionExporter"/>'s
+    /// <see cref="ISessionExporter.ExportSessions"/> against every currently
+    /// captured session, on a background thread -- see
+    /// <see cref="ImportViaExtension"/>'s own remarks on why this picks the
+    /// first importer/format rather than showing a picker, and why
+    /// <c>options</c> is passed empty (an exporter that needs a destination
+    /// path is expected to prompt for it itself).
+    /// </summary>
+    private void ExportViaExtension()
+    {
+        var exporter = _extensionHost.Exporters.FirstOrDefault();
+        if (exporter is null)
+        {
+            return;
+        }
+
+        var sessions = _sessionStore.Snapshot();
+        // See ImportViaExtension's own remarks on why this is GetCustomAttributes
+        // (plural) rather than the singular, AmbiguousMatchException-prone form.
+        var formatName = exporter.GetType().GetCustomAttributes<ProfferFormatAttribute>().FirstOrDefault()?.FormatName ?? string.Empty;
+        StatusText = "Exporting via extension...";
+        Task.Run(() =>
+        {
+            try
+            {
+                var succeeded = exporter.ExportSessions(formatName, sessions, new Dictionary<string, object>(), progress: null);
+                Dispatcher.UIThread.Post(() => StatusText = succeeded
+                    ? $"Exported {sessions.Count} session(s) via extension."
+                    : "Extension export reported failure -- see the console for anything it logged.");
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.UIThread.Post(() => StatusText = $"Extension export failed: {ex.Message}");
+            }
+        });
+    }
+}

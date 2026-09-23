@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Clearinet.DesktopUi</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.2" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="12.1.2" />
+    <!-- Dev-tools overlay (F12 in the running app); kept out of Release builds. -->
+    <PackageReference Include="AvaloniaUI.DiagnosticsSupport" Version="2.2.3">
+      <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
+      <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Clearinet.ProxyCore\Clearinet.ProxyCore.csproj" />
+    <ProjectReference Include="..\..\src\Clearinet.Extensibility\Clearinet.Extensibility.csproj" />
+    <!-- For FiddlerScriptRunner: constructed here (the composition root,
+         same as BreakpointManager/AutoResponderRules above) and handed to
+         InterceptingProxyListener as Clearinet.ProxyCore.Scripting.IFiddlerScriptRunner.
+         See that interface's own remarks on why the dependency only points
+         this one direction. -->
+    <ProjectReference Include="..\..\src\Clearinet.Compatibility\Clearinet.Compatibility.csproj" />
+  </ItemGroup>
+
+  <!-- clearinet.webp (the splash-screen artwork and app icon) lives here,
+       not the repo root, so it ships inside the app the same way any other
+       avares:// resource does. -->
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+</Project>

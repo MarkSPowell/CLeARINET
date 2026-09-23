@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Clearinet.Compatibility</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Clearinet.ProxyCore\Clearinet.ProxyCore.csproj" />
+    <!-- Added for Inspector2Adapter, which implements
+         Clearinet.Extensibility.Inspection.IInspector so a compiled
+         extension's IInspector2 can plug into the same inspector registry
+         FiddlerScript-independent inspectors already use. No cycle: this is
+         a new edge (Compatibility -> Extensibility); Extensibility itself
+         only ever references ProxyCore. -->
+    <ProjectReference Include="..\Clearinet.Extensibility\Clearinet.Extensibility.csproj" />
+  </ItemGroup>
+
+  <!-- Jint: a pure-C# ECMAScript interpreter, not a JScript.NET compiler;
+       see FiddlerScriptHost's remarks for why that substitution is
+       necessary (Microsoft.JScript was never ported past .NET Framework)
+       and what FiddlerScriptPreprocessor does to bridge the syntax gap
+       between the two. -->
+  <ItemGroup>
+    <PackageReference Include="Jint" Version="4.16.3" />
+  </ItemGroup>
+
+</Project>
