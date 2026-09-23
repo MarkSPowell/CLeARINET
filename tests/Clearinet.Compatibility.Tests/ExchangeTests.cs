@@ -97,7 +97,7 @@ public class ExchangeTests
 
         exchange.oRequest.headers["X-Test"] = "two";
         Assert.Equal("two", exchange.oRequest.headers["X-Test"]);
-        Assert.Single(exchange.ToRequest().Headers.Where(h => h.Name == "X-Test"));
+        Assert.Single(exchange.ToRequest().Headers, h => h.Name == "X-Test");
     }
 
     [Fact]
