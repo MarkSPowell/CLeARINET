@@ -195,7 +195,9 @@ docs' intentions:
   settings persistence yet (see README's Known limitations), so there's
   nothing to get wrong yet — but worth designing with that same
   deadlock-avoidance care in mind when it's eventually built, rather than
-  reaching for the obvious approach and finding out later.
+  reaching for the obvious approach and finding out later. See
+  "Extensible config lists (upstream Issue #2)," below, for a second
+  design commitment that same future system should carry.
 - *HTTP/2 blocked by `SslStream` never exposing ALPN.* His version of
   .NET's `SslStream` genuinely didn't expose ALPN control, which is why
   "Fiddler Classic still doesn't support HTTP2 to this day." That
@@ -203,6 +205,44 @@ docs' intentions:
   exposes `SslServerAuthenticationOptions.ApplicationProtocols` — so
   CLeARINET not doing HTTP/2 yet (already a Known limitation) is a
   scoping decision, not an inherited platform limitation.
+
+## Extensible config lists (upstream Issue #2)
+
+ericlaw1979/Clearinet's [Issue #2](https://github.com/ericlaw1979/Clearinet/issues/2),
+"Extensible Lists," states the requirement plainly: "Anything based on a
+list of potentially changing data should be based on an overridable
+preference," giving
+`clearinet.config.processnames.browsers = "msedge.exe;chrome.exe;firefox.exe;brave.exe;iexplore.exe"`
+as the example.
+
+This is a design commitment for CLeARINET's eventual Preferences system
+(see "Lessons from Fiddler's own history," above, on building it with the
+same deadlock-avoidance care Lawrence used) — not something to retrofit
+today. Checked against the current codebase, it doesn't actually apply to
+anything that exists yet: there's no browser-process list to make
+overridable in the first place, since CLeARINET has no per-process capture
+feature at all. The one hardcoded "set of X" list that does exist —
+`RawTextInspector.KnownUnsupportedEncodings`, the informational
+bzip2/compress/sdch map — wouldn't gain real value from being data-driven
+either, since decoding a genuinely new encoding needs decoder code, not
+just a recognized name.
+
+Recorded here so the commitment isn't lost before Preferences design
+actually starts:
+
+- Any future list of "potentially changing data" — process names for a
+  later per-process capture feature, a set of hosts to always/never
+  intercept, header names an inspector treats specially, and so on —
+  should be sourced from an overridable preference from the moment it's
+  introduced, not a hardcoded array added "for now."
+- Follow Eric's own naming convention (`clearinet.config.<category>.<name>`)
+  and semicolon-delimited list values: familiar to anyone coming from
+  Fiddler, and already a known, working format rather than one CLeARINET
+  would need to invent and document itself.
+- The Preferences system itself should treat a config-list value as a
+  first-class, typed accessor from day one — parsed once, trimmed,
+  case-insensitively deduped — so adding a new overridable list becomes
+  "declare a key and a default," not a bespoke parser written per list.
 
 ## Still undecided
 
