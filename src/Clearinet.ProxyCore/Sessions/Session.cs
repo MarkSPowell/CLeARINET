@@ -15,6 +15,16 @@ namespace Clearinet.ProxyCore.Sessions;
 /// intermediate states (ReadingRequest, HandTamperRequest, ...) start
 /// mattering once there's a live session list and inspectors/breakpoints to
 /// drive them -- that's Phase 2, not this capture spike.
+///
+/// The name itself is a deliberate, on-the-record choice, not an accident:
+/// Eric Lawrence has since said he regrets naming Fiddler's own equivalent
+/// type <c>Session</c> ("there are so many different concepts of a
+/// <c>Session</c> in web networking"), and that <c>Exchange</c> or
+/// <c>Pair</c> would have been better -- see the "Lessons from Fiddler's
+/// own history" section of the Project Plan and Goals doc. This type keeps
+/// <c>Session</c> anyway, on purpose, since tenet 1 is API/usage
+/// compatibility with Fiddler, and it's presumably what
+/// ericlaw1979/Clearinet itself calls it too.
 /// </summary>
 public sealed record Session(
     int Id,

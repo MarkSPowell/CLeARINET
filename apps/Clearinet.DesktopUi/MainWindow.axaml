@@ -1,50 +1,358 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Clearinet.DesktopUi.ViewModels"
-        xmlns:models="using:Clearinet.DesktopUi.Models"
+        xmlns:inspect="using:Clearinet.Extensibility.Inspection"
+        xmlns:conv="using:Clearinet.DesktopUi.Converters"
+        xmlns:avc="using:Avalonia.Data.Converters"
         x:Class="Clearinet.DesktopUi.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="CLeARINET"
-        Width="1000"
-        Height="640">
-  <DockPanel Margin="12">
-    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,10">
-      <Button Content="Save SAZ" Command="{Binding SaveSazCommand}" />
-      <TextBlock Text="{Binding StatusText}"
-                 VerticalAlignment="Center"
-                 TextWrapping="Wrap" />
+        Width="1100"
+        Height="720"
+        Icon="avares://Clearinet.DesktopUi/Assets/clearinet.webp"
+        Background="{DynamicResource AppBackgroundBrush}">
+
+  <!-- One DataTemplate per InspectorContent subtype (the contract's closed
+       set; see IInspector's remarks). Avalonia picks these up by the
+       runtime type of whatever's bound to a plain ContentControl.Content,
+       via this DataTemplates collection specifically, NOT Resources,
+       which is where WPF would look. -->
+  <Window.DataTemplates>
+    <DataTemplate DataType="inspect:TextContent">
+      <TextBox Text="{Binding Text}"
+               IsReadOnly="True"
+               AcceptsReturn="True"
+               TextWrapping="NoWrap"
+               FontFamily="Cascadia Mono,Consolas,monospace"
+               VerticalAlignment="Stretch"
+               BorderThickness="0" />
+    </DataTemplate>
+
+    <DataTemplate DataType="inspect:KeyValueContent">
+      <!-- Same reasoning as the session grid: DataGridTextColumn.Binding
+           isn't compiled-binding aware, so this subtree opts back into
+           classic reflection bindings. HeaderRow has real Name/Value
+           properties (not a ValueTuple), so reflection sees them fine. -->
+      <DataGrid x:CompileBindings="False"
+                ItemsSource="{Binding Rows}"
+                AutoGenerateColumns="False"
+                IsReadOnly="True"
+                CanUserSortColumns="True"
+                CanUserResizeColumns="True"
+                GridLinesVisibility="Horizontal"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                Background="{DynamicResource AppPanelBrush}"
+                RowBackground="Transparent"
+                HorizontalGridLinesBrush="{DynamicResource AppBorderBrush}">
+        <DataGrid.Columns>
+          <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="220" />
+          <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*" />
+        </DataGrid.Columns>
+      </DataGrid>
+    </DataTemplate>
+
+    <DataTemplate DataType="inspect:HexContent">
+      <TextBox Text="{Binding Bytes, Converter={x:Static conv:HexDumpConverter.Instance}}"
+               IsReadOnly="True"
+               AcceptsReturn="True"
+               TextWrapping="NoWrap"
+               FontFamily="Cascadia Mono,Consolas,monospace"
+               VerticalAlignment="Stretch"
+               BorderThickness="0" />
+    </DataTemplate>
+
+    <DataTemplate DataType="inspect:ErrorContent">
+      <TextBlock Text="{Binding Message}"
+                 Foreground="IndianRed"
+                 TextWrapping="Wrap"
+                 Margin="8" />
+    </DataTemplate>
+  </Window.DataTemplates>
+
+  <DockPanel Margin="16">
+    <Menu DockPanel.Dock="Top"
+          Background="{DynamicResource AppPanelBrush}"
+          Margin="0,0,0,14">
+      <MenuItem Header="_File">
+        <MenuItem Header="_Open SAZ…" Click="OpenSazMenuItem_Click" HotKey="Ctrl+O" />
+        <MenuItem Header="_Save SAZ…" Command="{Binding SaveSazCommand}" HotKey="Ctrl+S" />
+      </MenuItem>
+    </Menu>
+
+    <!-- Brand header, echoing clearinet.webp's wordmark so the window
+         someone lands in after the splash still feels like the same app
+         rather than a plain default-Fluent shell. -->
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="10" Margin="0,0,0,14">
+      <TextBlock Text="CLeARINET"
+                 FontSize="20"
+                 FontWeight="Bold"
+                 Foreground="{DynamicResource AppAccentBrush}"
+                 VerticalAlignment="Center" />
+      <TextBlock Text="Plaintext HTTPS Traffic Visibility"
+                 FontSize="13"
+                 Foreground="{DynamicResource AppMutedTextBrush}"
+                 VerticalAlignment="Center" />
     </StackPanel>
 
-    <!-- Header row: column widths mirror the ItemTemplate's Grid below so
-         labels line up with the data beneath them. -->
-    <Grid DockPanel.Dock="Top"
-          ColumnDefinitions="50,70,60,70,*,70,70"
-          Margin="4,0,4,4">
-      <TextBlock Grid.Column="0" Text="#" FontWeight="Bold" />
-      <TextBlock Grid.Column="1" Text="Time" FontWeight="Bold" />
-      <TextBlock Grid.Column="2" Text="Status" FontWeight="Bold" />
-      <TextBlock Grid.Column="3" Text="Method" FontWeight="Bold" />
-      <TextBlock Grid.Column="4" Text="URL" FontWeight="Bold" />
-      <TextBlock Grid.Column="5" Text="Req" FontWeight="Bold" />
-      <TextBlock Grid.Column="6" Text="Resp" FontWeight="Bold" />
+    <Border DockPanel.Dock="Top"
+            Background="{DynamicResource AppPanelBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="14,10"
+            Margin="0,0,0,14">
+      <!-- Two columns rather than one long horizontal StackPanel: the
+           filter box (moved up from its own row below, to reclaim that
+           vertical space) needs to be able to grow with the window rather
+           than sit at a fixed width, and a StackPanel has no notion of
+           "the rest of the space" the way a Grid's star column does. -->
+      <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="12">
+          <TextBlock Text="Port:" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" />
+          <RadioButton Content="Auto"
+                       GroupName="PortMode"
+                       IsChecked="{Binding UseAutomaticPort, Mode=TwoWay}"
+                       IsEnabled="{Binding !IsRunning}"
+                       VerticalAlignment="Center" />
+          <RadioButton Content="Specify"
+                       GroupName="PortMode"
+                       IsChecked="{Binding UseSpecificPort, Mode=TwoWay}"
+                       IsEnabled="{Binding !IsRunning}"
+                       VerticalAlignment="Center" />
+          <NumericUpDown Value="{Binding PreferredPort, Mode=TwoWay}"
+                          Minimum="1"
+                          Maximum="65535"
+                          FormatString="0"
+                          IsEnabled="{Binding !IsRunning}"
+                          IsVisible="{Binding !UseAutomaticPort}"
+                          Width="130" />
+          <Button Content="Start" Command="{Binding StartCommand}" Classes="accent" />
+          <Button Content="Stop" Command="{Binding StopCommand}" />
+          <CheckBox Content="Break on requests" IsChecked="{Binding BreakOnAllRequests, Mode=TwoWay}" />
+          <CheckBox Content="Break on responses" IsChecked="{Binding BreakOnAllResponses, Mode=TwoWay}" />
+        </StackPanel>
+
+        <!-- SessionQuery's own grammar doc (Clearinet.ProxyCore.Sessions)
+             covers the syntax; the placeholder below is just the short
+             version. Bound straight to FilterText: every keystroke
+             re-parses and re-applies, see MainWindowViewModel.FilterText's
+             remarks. -->
+        <TextBox Grid.Row="0"
+                 Grid.Column="1"
+                 Text="{Binding FilterText, Mode=TwoWay}"
+                 PlaceholderText="Filter: free text, or method:GET  host:example.com  status:4xx"
+                 VerticalAlignment="Center"
+                 Margin="16,0,0,0" />
+
+        <!-- The four narrower breakpoint conditions (Fiddler's
+             bpu/bpafter/bpm/bps, see BreakpointRules' own remarks) live
+             here, in this always-visible row, rather than inside the
+             breakpoints panel below: that panel's own visibility depends on
+             one of these having a value (IsBreakpointsPanelVisible), so
+             putting the fields that set them inside it would mean nothing
+             could ever show them in the first place. -->
+        <StackPanel Grid.Row="1"
+                    Grid.Column="0"
+                    Grid.ColumnSpan="2"
+                    Orientation="Horizontal"
+                    Spacing="10"
+                    Margin="0,10,0,0">
+          <TextBlock Text="Also break on:" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" />
+          <TextBox Text="{Binding RequestUrlContains, Mode=TwoWay}"
+                   PlaceholderText="bpu: request URL contains…"
+                   VerticalAlignment="Center"
+                   Width="170" />
+          <TextBox Text="{Binding ResponseUrlContains, Mode=TwoWay}"
+                   PlaceholderText="bpafter: response's request URL contains…"
+                   VerticalAlignment="Center"
+                   Width="200" />
+          <TextBox Text="{Binding RequestMethodEquals, Mode=TwoWay}"
+                   PlaceholderText="bpm: method"
+                   VerticalAlignment="Center"
+                   Width="110" />
+          <NumericUpDown Value="{Binding ResponseStatusCodeEquals, Mode=TwoWay}"
+                          Minimum="100"
+                          Maximum="599"
+                          FormatString="0"
+                          VerticalAlignment="Center"
+                          Width="120" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <!-- Paused sessions. Fiddler-Classic-style: a request or response sits
+         here, with its owning connection thread genuinely blocked, until
+         Resume or Abort is clicked. Left panel picks which paused session
+         to look at; right panel is its raw text (Fiddler's TextView model)
+         plus the actions. Hidden by default: it only takes up space once
+         it can actually have something in it, i.e. once one of the
+         Automatic Breakpoints checkboxes is armed or one of the "Also
+         break on" fields above has a value, or (see
+         MainWindowViewModel.IsBreakpointsPanelVisible) while a session is
+         genuinely paused and blocked, even if every rule got cleared after
+         it hit. Otherwise clearing the rules mid-pause would hide the only
+         way to Resume or Abort it. -->
+    <Border DockPanel.Dock="Top"
+            IsVisible="{Binding IsBreakpointsPanelVisible}"
+            Background="{DynamicResource AppPanelBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="12"
+            Margin="0,0,0,14"
+            MinHeight="48"
+            MaxHeight="280">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top"
+                   FontWeight="Bold"
+                   Foreground="{DynamicResource AppAccentBrush}"
+                   Margin="0,0,0,8"
+                   Text="{Binding PendingBreakpoints.Count, StringFormat='Breakpoints ({0})'}" />
+        <Grid ColumnDefinitions="260,4,*">
+          <ListBox Grid.Column="0"
+                    ItemsSource="{Binding PendingBreakpoints}"
+                    SelectedItem="{Binding SelectedPendingBreakpoint, Mode=TwoWay}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:PendingBreakpointViewModel">
+                <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+
+          <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" Background="{DynamicResource AppBorderBrush}" />
+
+          <DockPanel Grid.Column="2" IsEnabled="{Binding SelectedPendingBreakpoint, Converter={x:Static avc:ObjectConverters.IsNotNull}}">
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+              <Button Content="Resume" Command="{Binding SelectedPendingBreakpoint.ResumeCommand}" Classes="accent" />
+              <Button Content="Abort" Command="{Binding SelectedPendingBreakpoint.AbortCommand}" />
+              <TextBlock Text="{Binding SelectedPendingBreakpoint.ValidationError}"
+                         Foreground="{DynamicResource AppErrorBrush}"
+                         VerticalAlignment="Center"
+                         TextWrapping="Wrap" />
+            </StackPanel>
+            <TextBox Text="{Binding SelectedPendingBreakpoint.RawText, Mode=TwoWay}"
+                     AcceptsReturn="True"
+                     TextWrapping="NoWrap"
+                     FontFamily="Cascadia Mono,Consolas,monospace" />
+          </DockPanel>
+        </Grid>
+      </DockPanel>
+    </Border>
+
+    <!-- Status bar: docked to the window's bottom edge regardless of where
+         it sits in this document (DockPanel stacks each side
+         independently), as long as it isn't the panel's literal last
+         child. That's still the content Grid below, which is what picks
+         up LastChildFill. Three dots, exactly one visible at a time (see
+         MainWindowViewModel.ShowSteadyRunningIndicator's remarks): gray
+         while stopped, steady green while running with nothing arriving
+         right now, and a brighter accent flash while sessions are actively
+         coming in. This way the status bar reads as "alive" during a burst
+         of traffic instead of looking identical whether one session or a
+         thousand just landed. -->
+    <Border DockPanel.Dock="Bottom"
+            Background="{DynamicResource AppPanelBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="14,10"
+            Margin="0,14,0,0">
+      <StackPanel Orientation="Horizontal" Spacing="10">
+        <Ellipse Width="10"
+                 Height="10"
+                 VerticalAlignment="Center"
+                 Fill="{DynamicResource AppAccentBrush}"
+                 IsVisible="{Binding IsCaptureFlashing}" />
+        <Ellipse Width="10"
+                 Height="10"
+                 VerticalAlignment="Center"
+                 Fill="{DynamicResource AppSuccessBrush}"
+                 IsVisible="{Binding ShowSteadyRunningIndicator}" />
+        <Ellipse Width="10"
+                 Height="10"
+                 VerticalAlignment="Center"
+                 Fill="{DynamicResource AppMutedTextBrush}"
+                 IsVisible="{Binding !IsRunning}" />
+        <TextBlock Text="{Binding StatusText}"
+                   VerticalAlignment="Center"
+                   TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+
+    <Grid RowDefinitions="2*,4,3*">
+      <!-- DataGridTextColumn.Binding isn't compiled-binding aware the way a
+           plain control's Binding markup is, so this subtree opts back into
+           classic reflection bindings rather than fighting the project-wide
+           AvaloniaUseCompiledBindingsByDefault default. -->
+      <DataGrid Grid.Row="0"
+                x:CompileBindings="False"
+                ItemsSource="{Binding FilteredSessions}"
+                SelectedItem="{Binding SelectedSessionRow, Mode=TwoWay}"
+                AutoGenerateColumns="False"
+                IsReadOnly="True"
+                CanUserSortColumns="True"
+                CanUserResizeColumns="True"
+                CanUserReorderColumns="True"
+                GridLinesVisibility="Horizontal"
+                BorderThickness="1"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                Background="{DynamicResource AppPanelBrush}"
+                RowBackground="Transparent"
+                HorizontalGridLinesBrush="{DynamicResource AppBorderBrush}">
+        <DataGrid.Columns>
+          <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="50" />
+          <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="80" />
+          <DataGridTextColumn Header="Status" Binding="{Binding StatusCode}" Width="70" />
+          <DataGridTextColumn Header="Method" Binding="{Binding Method}" Width="80" />
+          <DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="*" />
+          <DataGridTextColumn Header="Req" Binding="{Binding RequestSize}" Width="80" />
+          <DataGridTextColumn Header="Resp" Binding="{Binding ResponseSize}" Width="80" />
+        </DataGrid.Columns>
+      </DataGrid>
+
+      <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" Background="{DynamicResource AppBorderBrush}" />
+
+      <!-- Detail pane: Request and Response side by side, each with its
+           own set of inspector tabs. ItemTemplate styles the tab headers
+           (DisplayName); ContentTemplate hands the selected tab's
+           InspectorContent to a plain ContentControl, which is where the
+           Window.DataTemplates above take over. -->
+      <Grid Grid.Row="2" ColumnDefinitions="*,4,*">
+        <DockPanel Grid.Column="0">
+          <TextBlock DockPanel.Dock="Top" Text="Request" FontWeight="Bold" Foreground="{DynamicResource AppAccentBrush}" Margin="0,0,0,4" />
+          <TabControl ItemsSource="{Binding RequestInspectors}">
+            <TabControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:InspectorTabViewModel">
+                <TextBlock Text="{Binding DisplayName}" />
+              </DataTemplate>
+            </TabControl.ItemTemplate>
+            <TabControl.ContentTemplate>
+              <DataTemplate x:DataType="vm:InspectorTabViewModel">
+                <ContentControl Content="{Binding Content}" />
+              </DataTemplate>
+            </TabControl.ContentTemplate>
+          </TabControl>
+        </DockPanel>
+
+        <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch" Background="{DynamicResource AppBorderBrush}" />
+
+        <DockPanel Grid.Column="2">
+          <TextBlock DockPanel.Dock="Top" Text="Response" FontWeight="Bold" Foreground="{DynamicResource AppAccentBrush}" Margin="0,0,0,4" />
+          <TabControl ItemsSource="{Binding ResponseInspectors}">
+            <TabControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:InspectorTabViewModel">
+                <TextBlock Text="{Binding DisplayName}" />
+              </DataTemplate>
+            </TabControl.ItemTemplate>
+            <TabControl.ContentTemplate>
+              <DataTemplate x:DataType="vm:InspectorTabViewModel">
+                <ContentControl Content="{Binding Content}" />
+              </DataTemplate>
+            </TabControl.ContentTemplate>
+          </TabControl>
+        </DockPanel>
+      </Grid>
     </Grid>
-
-    <Border DockPanel.Dock="Top" BorderThickness="0,1,0,0" BorderBrush="Gray" Margin="4,0,4,4" />
-
-    <ListBox ItemsSource="{Binding Sessions}">
-      <ListBox.ItemTemplate>
-        <DataTemplate DataType="models:SessionRow">
-          <Grid ColumnDefinitions="50,70,60,70,*,70,70">
-            <TextBlock Grid.Column="0" Text="{Binding Id}" />
-            <TextBlock Grid.Column="1" Text="{Binding Time}" />
-            <TextBlock Grid.Column="2" Text="{Binding StatusCode}" />
-            <TextBlock Grid.Column="3" Text="{Binding Method}" />
-            <TextBlock Grid.Column="4" Text="{Binding Url}" TextTrimming="CharacterEllipsis" />
-            <TextBlock Grid.Column="5" Text="{Binding RequestSize}" />
-            <TextBlock Grid.Column="6" Text="{Binding ResponseSize}" />
-          </Grid>
-        </DataTemplate>
-      </ListBox.ItemTemplate>
-    </ListBox>
   </DockPanel>
 </Window>

@@ -118,6 +118,92 @@ rather than `INotifyPropertyChanged` view models, and a closed,
 UI-neutral `InspectorContent` shape (`TextContent`/`KeyValueContent`/
 `HexContent`/`ErrorContent`) that any host renders however it wants.
 
+## Lessons from Fiddler's own history
+
+Eric Lawrence published a retrospective on Fiddler's own mistakes
+([textslashplain.com, Nov 2024](https://textslashplain.com/2024/11/24/fiddler-my-mistakes/))
+that's worth reading against this codebase directly, not just in spirit.
+Checked here against what's actually implemented, not against the design
+docs' intentions:
+
+**Already structurally avoided:**
+
+- *Public fields instead of properties, especially raw `byte[]` body
+  fields.* Lawrence calls this his worst API mistake — headers and bodies
+  exposed as mutable public fields early on, later impossible to convert
+  to properties without a breaking change, with `byte[]` bodies over the
+  85KB Large Object Heap threshold causing real GC and (on 32-bit)
+  address-space-fragmentation pain. `Session`, `CapturedRequest`, and
+  `CapturedResponse` (`Session.cs`, `CapturedHttpMessage.cs`) are `sealed
+  record`s with init-only properties from day one — there's no field to
+  someday need to convert.
+- *Thread-per-connection, and the .NET ThreadPool starvation trap he hit
+  years later switching away from it* (a 500ms injection delay past 30
+  concurrent connections). `InterceptingProxyListener` is async end-to-end
+  — `AcceptTcpClientAsync`, `AuthenticateAsServerAsync`,
+  `Http1MessageReader`'s reads — never blocks a pool thread waiting on the
+  network, so neither failure mode has anywhere to occur.
+- *Staying closed-source, which Lawrence calls his biggest regret*
+  ("Telerik has allowed Fiddler Classic to stagnate...but we can't
+  because the code is closed-source"). MIT plus the intent to upstream
+  was chosen specifically to avoid repeating this.
+- *Windows-only via a UI framework that couldn't be decoupled later.*
+  Avalonia was picked specifically for cross-platform reach from day one
+  (see Platform and technology, above) rather than the WinForms lock-in
+  that kept Fiddler Classic Windows-only for its whole life. The macOS
+  trust-store path isn't built yet, but nothing in the architecture blocks
+  it the way WinForms did.
+- *Extensibility as an afterthought.* Lawrence calls Fiddler's
+  scripting/extension model — born from not wanting to build a filter UI
+  — one of its best decisions. `IInspector` and `InspectorRegistry`'s
+  isolated-`AssemblyLoadContext` loading are already part of Phase 2, not
+  a Phase 3 retrofit.
+
+**Still a live, open risk, same shape as his:**
+
+- *Unbounded in-memory body buffering.* `SessionStore` keeps every
+  captured `Session` — including both `CapturedRequest`/`CapturedResponse`
+  `Body` byte arrays — in memory for the process's whole life, with no
+  eviction; its own doc comment already says "Eviction and on-disk
+  spillover for long-running captures are still unsolved." That's the
+  same shape as Lawrence's LOH/GC-pressure problem (large bodies — video,
+  big downloads — landing as `byte[]` on the heap). 32-bit address-space
+  fragmentation isn't a risk here since this only targets 64-bit, but the
+  GC-pressure half is open today and gets worse the longer a capture
+  session runs. Worth treating "session eviction / body size caps /
+  spill-to-disk for large bodies" as a real near-term gap rather than a
+  someday item, so it doesn't quietly become load-bearing API surface the
+  way the `byte[]` fields did for Fiddler.
+
+**A deliberate, acknowledged tradeoff, not a mistake to fix:**
+
+- *The name `Session`.* Lawrence specifically regrets this name ("there
+  are so many different concepts of a `Session` in web networking") and
+  says `Exchange` or `Pair` would have been better, but couldn't change it
+  without breaking every extension. CLeARINET's core type is also named
+  `Session` (`Session.cs`) — inherited on purpose, since tenet 1 is
+  API/usage compatibility with Fiddler, and it's presumably what
+  ericlaw1979/Clearinet itself calls it too. Noted here so it's an
+  explicit, on-the-record choice rather than an accidental repeat.
+
+**Not yet applicable — no verdict to give:**
+
+- *A deliberately deadlock-safe preferences system.* Lawrence calls
+  Fiddler's `about:config`-inspired preferences system — built
+  specifically to avoid deadlocks in a heavily multithreaded, extensible
+  app — one of the few things he's genuinely proud of. CLeARINET has no
+  settings persistence yet (see README's Known limitations), so there's
+  nothing to get wrong yet — but worth designing with that same
+  deadlock-avoidance care in mind when it's eventually built, rather than
+  reaching for the obvious approach and finding out later.
+- *HTTP/2 blocked by `SslStream` never exposing ALPN.* His version of
+  .NET's `SslStream` genuinely didn't expose ALPN control, which is why
+  "Fiddler Classic still doesn't support HTTP2 to this day." That
+  specific platform wall doesn't exist anymore — modern `SslStream`
+  exposes `SslServerAuthenticationOptions.ApplicationProtocols` — so
+  CLeARINET not doing HTTP/2 yet (already a Known limitation) is a
+  scoping decision, not an inherited platform limitation.
+
 ## Still undecided
 
 Carried over from the original plan as genuinely open, not just
