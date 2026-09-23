@@ -8,8 +8,11 @@ namespace Clearinet.DesktopUi.Models;
 /// for display in the session list. Deliberately not the domain type itself:
 /// the list binds to plain strings/ints it can show as-is, and formatting
 /// choices (time zone, byte units) live here rather than leaking into
-/// <see cref="Session"/>, which other consumers (SazWriter, future
-/// inspectors) need untouched.
+/// <see cref="Session"/>, which other consumers (SazWriter, inspectors)
+/// need untouched. <see cref="Session"/> is still carried along -- not
+/// projected into strings -- because the detail pane's inspectors need the
+/// real headers and body bytes once a row is selected, not their grid
+/// display text.
 /// </summary>
 public sealed class SessionRow
 {
@@ -20,6 +23,7 @@ public sealed class SessionRow
     public required string Url { get; init; }
     public required string RequestSize { get; init; }
     public required string ResponseSize { get; init; }
+    public required Session Session { get; init; }
 
     public static SessionRow From(Session session) => new()
     {
@@ -32,6 +36,7 @@ public sealed class SessionRow
         Url = $"https://{session.Host}{session.Request.Target}",
         RequestSize = FormatBytes(session.Request.Body.Length),
         ResponseSize = FormatBytes(session.Response.Body.Length),
+        Session = session,
     };
 
     private static string FormatBytes(int bytes) => bytes < 1024

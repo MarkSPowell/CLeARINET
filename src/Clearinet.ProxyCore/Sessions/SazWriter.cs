@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
+using Clearinet.ProxyCore.Http;
 
 namespace Clearinet.ProxyCore.Sessions;
 
@@ -75,68 +76,21 @@ public static class SazWriter
     {
         var entry = archive.CreateEntry($"raw/{session.Id}_c.txt", CompressionLevel.Optimal);
         using var stream = entry.Open();
-        WriteHttpMessage(
-            stream,
-            startLine: $"{session.Request.Method} {session.Request.Target} {session.Request.HttpVersion}",
-            headers: session.Request.Headers,
-            body: session.Request.Body);
+        // The body here is always what Http1MessageReader already decoded
+        // -- never raw chunked-transfer-encoded wire bytes -- so
+        // HttpMessageWriter rebuilds headers rather than replaying them
+        // verbatim: Transfer-Encoding is dropped (there's nothing left to
+        // de-chunk) and Content-Length is set to this decoded body's real
+        // length, which may differ from whatever the original header said
+        // (or said nothing at all, for a chunked message).
+        stream.Write(HttpMessageWriter.BuildRequestBytes(session.Request));
     }
 
     private static void WriteResponse(ZipArchive archive, Session session)
     {
         var entry = archive.CreateEntry($"raw/{session.Id}_s.txt", CompressionLevel.Optimal);
         using var stream = entry.Open();
-        var reason = string.IsNullOrEmpty(session.Response.ReasonPhrase)
-            ? string.Empty
-            : $" {session.Response.ReasonPhrase}";
-        WriteHttpMessage(
-            stream,
-            startLine: $"{session.Response.HttpVersion} {session.Response.StatusCode}{reason}",
-            headers: session.Response.Headers,
-            body: session.Response.Body);
-    }
-
-    private static void WriteHttpMessage(
-        Stream destination, string startLine, IReadOnlyList<(string Name, string Value)> headers, byte[] body)
-    {
-        // The body here is always what Http1MessageReader already decoded
-        // -- never raw chunked-transfer-encoded wire bytes -- so headers
-        // are rebuilt rather than replayed verbatim: Transfer-Encoding is
-        // dropped (there's nothing left to de-chunk) and Content-Length is
-        // set to this decoded body's real length, which may differ from
-        // whatever the original header said (or said nothing at all, for
-        // a chunked message).
-        var text = new StringBuilder();
-        text.Append(startLine).Append("\r\n");
-
-        var sawContentLength = false;
-        foreach (var (name, value) in headers)
-        {
-            if (string.Equals(name, "Transfer-Encoding", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            if (string.Equals(name, "Content-Length", StringComparison.OrdinalIgnoreCase))
-            {
-                sawContentLength = true;
-                text.Append("Content-Length: ").Append(body.Length.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
-                continue;
-            }
-
-            text.Append(name).Append(": ").Append(value).Append("\r\n");
-        }
-
-        if (!sawContentLength && body.Length > 0)
-        {
-            text.Append("Content-Length: ").Append(body.Length.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
-        }
-
-        text.Append("\r\n");
-
-        var headerBytes = Encoding.ASCII.GetBytes(text.ToString());
-        destination.Write(headerBytes);
-        destination.Write(body);
+        stream.Write(HttpMessageWriter.BuildResponseBytes(session.Response));
     }
 
     private static void WriteMetadata(ZipArchive archive, Session session)

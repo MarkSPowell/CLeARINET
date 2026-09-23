@@ -3,6 +3,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Text;
+using Clearinet.ProxyCore.Breakpoints;
 using Clearinet.ProxyCore.Certificates;
 using Clearinet.ProxyCore.Http;
 using Clearinet.ProxyCore.Sessions;
@@ -13,9 +14,18 @@ namespace Clearinet.ProxyCore.Proxy;
 /// An HTTPS-intercepting proxy: accepts a CONNECT tunnel, terminates TLS
 /// toward the client with a freshly-signed leaf, opens a fresh TLS
 /// connection upstream, and reads each request/response pair on the
-/// connection as a full HTTP/1.1 message (see <see cref="Http1MessageReader"/>),
-/// capturing it into <see cref="SessionStore"/> while relaying the exact
-/// original bytes through unmodified.
+/// connection as HTTP/1.1 (see <see cref="Http1MessageReader"/>), capturing
+/// it into <see cref="SessionStore"/> along the way.
+///
+/// Every message is read as a preamble first (start line + headers only),
+/// which is enough for <see cref="BreakpointManager"/> to decide whether
+/// it would actually pause this exchange -- <c>PumpSessionsAsync</c> below
+/// only buffers a body fully (so it can be edited) when a breakpoint is
+/// genuinely going to fire; otherwise the body is relayed live via
+/// <see cref="Http1MessageReader.RelayBodyAsync"/> instead. That split
+/// matters for anything long-lived -- a streamed chat response, a large
+/// download -- where buffering the whole thing first would mean the other
+/// side sees nothing at all until it's completely finished.
 ///
 /// Still deliberately narrow: one connection is handled as a strict
 /// request-then-response ping-pong (no pipelining), and a handful of
@@ -27,14 +37,65 @@ public sealed class InterceptingProxyListener
 {
     private readonly LeafCertificateProvider _leafProvider;
     private readonly SessionStore _sessionStore;
+    private readonly BreakpointManager _breakpointManager;
     private readonly TcpListener _listener;
     private CancellationTokenSource? _cts;
 
-    public InterceptingProxyListener(int port, LeafCertificateProvider leafProvider, SessionStore sessionStore)
+    public InterceptingProxyListener(
+        int port,
+        LeafCertificateProvider leafProvider,
+        SessionStore sessionStore,
+        BreakpointManager? breakpointManager = null)
     {
         _leafProvider = leafProvider;
         _sessionStore = sessionStore;
+        // A fresh, untouched manager has no rules set, so
+        // BreakpointRules.AnyActive is false and every call this listener
+        // makes into it is a single boolean check that returns immediately
+        // -- callers that don't care about breakpoints (tests, the console
+        // dev host) get identical behavior to before this existed.
+        _breakpointManager = breakpointManager ?? new BreakpointManager();
         _listener = new TcpListener(IPAddress.Loopback, port);
+    }
+
+    /// <summary>
+    /// The port actually being listened on. Only meaningful after
+    /// <see cref="Start"/> -- reading it before that throws, same as
+    /// <see cref="TcpListener.LocalEndpoint"/> does. Needed because
+    /// <see cref="StartOnAvailablePort"/> may bind somewhere other than the
+    /// port that was asked for.
+    /// </summary>
+    public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
+
+    /// <summary>
+    /// Starts on <paramref name="preferredPort"/> when it's free. When
+    /// something else already holds it -- in practice, almost always
+    /// another CLeARINET process still running (the console dev host, or a
+    /// previous launch of this app that didn't shut down cleanly) -- falls
+    /// back to whatever free port the OS hands out, rather than failing
+    /// outright. Callers read the actual port back from <see cref="Port"/>.
+    /// </summary>
+    public static InterceptingProxyListener StartOnAvailablePort(
+        int preferredPort,
+        LeafCertificateProvider leafProvider,
+        SessionStore sessionStore,
+        BreakpointManager? breakpointManager = null)
+    {
+        var preferred = new InterceptingProxyListener(preferredPort, leafProvider, sessionStore, breakpointManager);
+        try
+        {
+            preferred.Start();
+            return preferred;
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+        {
+            // Port 0 tells the OS to hand back any free port -- the same
+            // trick ASP.NET Core's test host and countless other tools use
+            // to avoid ever hard-failing on a port collision.
+            var fallback = new InterceptingProxyListener(0, leafProvider, sessionStore, breakpointManager);
+            fallback.Start();
+            return fallback;
+        }
     }
 
     public void Start()
@@ -111,7 +172,11 @@ public sealed class InterceptingProxyListener
             // connection for the client's side.
             await upstreamTls.AuthenticateAsClientAsync(targetHost);
 
-            await PumpSessionsAsync(targetHost, clientTls, upstreamTls, _sessionStore, cancellationToken);
+            await PumpSessionsAsync(targetHost, clientTls, upstreamTls, _sessionStore, _breakpointManager, cancellationToken);
+        }
+        catch (BreakpointAbortedException ex)
+        {
+            Console.WriteLine($"[proxy] {ex.Message}");
         }
         catch (Exception ex)
         {
@@ -142,27 +207,85 @@ public sealed class InterceptingProxyListener
         SslStream clientTls,
         SslStream upstreamTls,
         SessionStore sessionStore,
+        BreakpointManager breakpointManager,
         CancellationToken cancellationToken)
     {
         while (true)
         {
             var startedAt = DateTimeOffset.Now;
-            var request = await Http1MessageReader.ReadRequestAsync(clientTls, upstreamTls, cancellationToken);
-            if (request is null)
+            var requestPreamble = await Http1MessageReader.ReadRequestPreambleAsync(clientTls, cancellationToken);
+            if (requestPreamble is null)
             {
                 // The client closed the connection between requests -- the
                 // normal way a keep-alive HTTP/1.1 connection ends.
                 return;
             }
 
+            // BreakpointRules.ShouldBreakBeforeRequest only ever looks at
+            // Method/Target, never the body, so this can be decided from
+            // the preamble alone -- before a single byte of the request
+            // body has been read. That's what makes the fork below
+            // possible: buffer the body only when something is actually
+            // going to pause on it, relay it live otherwise. See
+            // Http1MessageReader's remarks for why that distinction
+            // matters at all (a long-lived streamed body, not just an
+            // ordinary one).
+            CapturedRequest request;
+            if (breakpointManager.WouldBreakBeforeRequest(requestPreamble))
+            {
+                var requestBody = await Http1MessageReader.ReadBodyAsync(clientTls, requestPreamble.Headers, cancellationToken);
+                request = requestPreamble with { Body = requestBody };
+
+                // A breakpoint here (Fiddler's "bpu"/bpm/break-on-all-requests)
+                // can hold this connection open and edit the request
+                // before it's forwarded.
+                request = await breakpointManager.ApplyRequestBreakpointAsync(targetHost, request, cancellationToken);
+                await HttpMessageWriter.WriteRequestAsync(upstreamTls, request, cancellationToken);
+            }
+            else
+            {
+                await HttpMessageWriter.WriteRequestPreambleAsync(upstreamTls, requestPreamble, cancellationToken);
+                var requestBody = await Http1MessageReader.RelayBodyAsync(
+                    clientTls, upstreamTls, requestPreamble.Headers, cancellationToken);
+                request = requestPreamble with { Body = requestBody };
+            }
+
             var isHeadRequest = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
-            var response = await Http1MessageReader.ReadResponseAsync(
-                upstreamTls, clientTls, isHeadRequest, cancellationToken);
-            if (response is null)
+            var responsePreamble = await Http1MessageReader.ReadResponsePreambleAsync(upstreamTls, cancellationToken);
+            if (responsePreamble is null)
             {
                 Console.WriteLine(
                     $"[proxy] {targetHost}: upstream closed the connection before answering {request.Method} {request.Target}.");
                 return;
+            }
+
+            var responseHasNoBody = Http1MessageReader.ResponseHasNoBody(responsePreamble.StatusCode, isHeadRequest);
+
+            CapturedResponse response;
+            if (breakpointManager.WouldBreakBeforeResponse(request, responsePreamble))
+            {
+                var responseBody = responseHasNoBody
+                    ? Array.Empty<byte>()
+                    : await Http1MessageReader.ReadBodyAsync(upstreamTls, responsePreamble.Headers, cancellationToken);
+                response = responsePreamble with { Body = responseBody };
+
+                response = await breakpointManager.ApplyResponseBreakpointAsync(
+                    targetHost, request, response, cancellationToken);
+                await HttpMessageWriter.WriteResponseAsync(clientTls, response, cancellationToken);
+            }
+            else
+            {
+                // The case that matters most in practice: this is what
+                // lets a long-lived streamed response -- a chat reply
+                // arriving token by token, easily tens of seconds -- reach
+                // the client as it's generated instead of only once the
+                // whole thing is done.
+                await HttpMessageWriter.WriteResponsePreambleAsync(clientTls, responsePreamble, cancellationToken);
+                var responseBody = responseHasNoBody
+                    ? Array.Empty<byte>()
+                    : await Http1MessageReader.RelayBodyAsync(
+                        upstreamTls, clientTls, responsePreamble.Headers, cancellationToken);
+                response = responsePreamble with { Body = responseBody };
             }
 
             var session = sessionStore.Add(targetHost, startedAt, request, response);

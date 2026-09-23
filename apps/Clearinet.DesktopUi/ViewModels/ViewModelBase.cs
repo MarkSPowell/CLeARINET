@@ -24,4 +24,14 @@ public abstract class ViewModelBase : INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         return true;
     }
+
+    /// <summary>
+    /// For a property that isn't backed by a plain field -- one that reads
+    /// through to another object's state (see MainWindowViewModel's
+    /// BreakOnAllRequests, or PendingBreakpointViewModel's RawText, both of
+    /// which delegate to a Clearinet.ProxyCore type) -- so
+    /// <see cref="SetField{T}"/>'s own ref-field comparison doesn't apply.
+    /// </summary>
+    protected void RaisePropertyChanged([CallerMemberName] string? propertyName = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

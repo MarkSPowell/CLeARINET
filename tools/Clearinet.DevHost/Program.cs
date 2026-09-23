@@ -35,24 +35,29 @@ Console.WriteLine();
 var leafProvider = new LeafCertificateProvider(authority.RootCertificate);
 var sessionStore = new SessionStore();
 
-// Defaults to 8888; pass a different port as the first argument if that's
-// already taken on your machine, e.g.:
+// Defaults to 8888; pass a different preferred port as the first argument,
+// e.g.:
 //   dotnet run --project tools\Clearinet.DevHost -- 8899
-var port = args.Length > 0 && int.TryParse(args[0], out var parsedPort) ? parsedPort : 8888;
+// If the preferred port is already taken -- most often another CLeARINET
+// process still running, DesktopUi included -- StartOnAvailablePort falls
+// back to whatever free port the OS hands out rather than failing outright.
+var preferredPort = args.Length > 0 && int.TryParse(args[0], out var parsedPort) ? parsedPort : 8888;
 
-var proxy = new InterceptingProxyListener(port, leafProvider, sessionStore);
+InterceptingProxyListener proxy;
 try
 {
-    proxy.Start();
+    proxy = InterceptingProxyListener.StartOnAvailablePort(preferredPort, leafProvider, sessionStore);
 }
-catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+catch (SocketException ex)
 {
-    Console.WriteLine($"Port {port} is already in use by something else on this machine.");
-    Console.WriteLine("Either stop whatever's holding it, or run with a different port:");
-    Console.WriteLine($"  dotnet run --project tools\\Clearinet.DevHost -- {port + 1}");
-    Console.WriteLine();
-    Console.WriteLine("To see what's using it: netstat -ano | findstr :" + port);
+    Console.WriteLine($"Couldn't start the proxy: {ex.Message}");
     return 1;
+}
+
+var port = proxy.Port;
+if (port != preferredPort)
+{
+    Console.WriteLine($"Port {preferredPort} was already in use -- probably another CLeARINET process still running.");
 }
 
 Console.WriteLine($"Listening on 127.0.0.1:{port}.");

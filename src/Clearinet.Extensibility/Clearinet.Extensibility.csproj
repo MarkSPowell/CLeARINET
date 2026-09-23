@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Clearinet.Extensibility</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Clearinet.ProxyCore\Clearinet.ProxyCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Pure managed zstd decoder. .NET doesn't ship one until .NET 11 (per
+      Microsoft's own .NET 11 release notes), and this repo targets net10.0.
+      ZstdSharp.Port is a straight C# port of the reference zstd library, MIT
+      licensed, with no native binary to ship per platform. See
+      RawTextInspector's remarks for why that matters here.
+    -->
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
+  </ItemGroup>
+
+</Project>

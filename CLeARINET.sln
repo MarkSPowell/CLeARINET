@@ -13,6 +13,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Clearinet.DevHost", "tools\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Clearinet.DesktopUi", "apps\Clearinet.DesktopUi\Clearinet.DesktopUi.csproj", "{536ED54F-44F4-4219-9E9C-44A7693E89ED}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Clearinet.Extensibility", "src\Clearinet.Extensibility\Clearinet.Extensibility.csproj", "{D7F10C17-FF89-4C0C-AEAF-0245BDD337D5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Clearinet.Extensibility.Tests", "tests\Clearinet.Extensibility.Tests\Clearinet.Extensibility.Tests.csproj", "{CDCE0953-1BE0-417C-B8DB-AF0FF39DCD89}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +43,14 @@ Global
 		{536ED54F-44F4-4219-9E9C-44A7693E89ED}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{536ED54F-44F4-4219-9E9C-44A7693E89ED}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{536ED54F-44F4-4219-9E9C-44A7693E89ED}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D7F10C17-FF89-4C0C-AEAF-0245BDD337D5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D7F10C17-FF89-4C0C-AEAF-0245BDD337D5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D7F10C17-FF89-4C0C-AEAF-0245BDD337D5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D7F10C17-FF89-4C0C-AEAF-0245BDD337D5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CDCE0953-1BE0-417C-B8DB-AF0FF39DCD89}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CDCE0953-1BE0-417C-B8DB-AF0FF39DCD89}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CDCE0953-1BE0-417C-B8DB-AF0FF39DCD89}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CDCE0953-1BE0-417C-B8DB-AF0FF39DCD89}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

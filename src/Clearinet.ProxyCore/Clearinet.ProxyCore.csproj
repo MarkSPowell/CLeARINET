@@ -7,4 +7,14 @@
     <RootNamespace>Clearinet.ProxyCore</RootNamespace>
   </PropertyGroup>
 
+  <!-- Clearinet.ProxyCore.SystemProxy.WinInetSystemProxy uses the Windows
+       registry APIs (Microsoft.Win32.Registry). No PackageReference needed
+       for that as of net10.0: they're part of the base shared framework
+       now, with the same "throws PlatformNotSupportedException on
+       non-Windows" behavior every call site there is already guarded
+       against via OperatingSystem.IsWindows(). An explicit reference to
+       the old standalone Microsoft.Win32.Registry package here used to
+       work but now trips NU1510 ("will not be pruned"), which is exactly
+       this: the package is redundant, not broken. -->
+
 </Project>
