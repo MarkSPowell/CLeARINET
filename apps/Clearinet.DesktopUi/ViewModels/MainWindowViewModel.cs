@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using Clearinet.DesktopUi.Models;
 using Clearinet.Extensibility.Inspection;
+using Clearinet.ProxyCore.AutoResponder;
 using Clearinet.ProxyCore.Breakpoints;
 using Clearinet.ProxyCore.Certificates;
 using Clearinet.ProxyCore.Proxy;
@@ -28,6 +29,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly InspectorRegistry _inspectorRegistry = InspectorRegistry.CreateDefault();
     private readonly BreakpointManager _breakpointManager = new();
     private readonly Dictionary<PendingBreakpoint, PendingBreakpointViewModel> _pendingBreakpointViewModels = [];
+    private readonly AutoResponderRules _autoResponderRules = new();
     private CertificateAuthority? _authority;
     private InterceptingProxyListener? _proxy;
     private string _statusText;
@@ -35,6 +37,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isRunning;
     private SessionRow? _selectedSessionRow;
     private PendingBreakpointViewModel? _selectedPendingBreakpoint;
+    private AutoResponderRuleViewModel? _selectedAutoResponderRule;
     private SessionQuery _query = SessionQuery.MatchAll;
     private string _filterText = string.Empty;
     private bool _useAutomaticPort;
@@ -238,6 +241,58 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Named to avoid colliding with <see cref="AutoResponderRules"/> (the
+    /// ProxyCore engine type) -- one <see cref="AutoResponderRuleViewModel"/>
+    /// per <see cref="AutoResponderRules.Rules"/> entry, kept in the same
+    /// order by hand (see <see cref="AddAutoResponderRule"/>/
+    /// <see cref="RemoveSelectedAutoResponderRule"/>/
+    /// <see cref="MoveSelectedAutoResponderRule"/>), the same two-lists
+    /// tradeoff <see cref="PendingBreakpoints"/> already makes against
+    /// <c>BreakpointManager</c>'s own state.
+    /// </summary>
+    public ObservableCollection<AutoResponderRuleViewModel> AutoResponderRuleRows { get; } = [];
+
+    /// <summary>
+    /// The AutoResponder panel's own on/off switch -- Fiddler Classic's
+    /// "Enable rules" checkbox. See <see cref="AutoResponderRules.IsEnabled"/>'s
+    /// remarks for why this defaults to <see langword="false"/> unlike the
+    /// breakpoints panel's always-live rules.
+    /// </summary>
+    public bool AutoResponderEnabled
+    {
+        get => _autoResponderRules.IsEnabled;
+        set
+        {
+            if (_autoResponderRules.IsEnabled == value)
+            {
+                return;
+            }
+
+            _autoResponderRules.IsEnabled = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public AutoResponderRuleViewModel? SelectedAutoResponderRule
+    {
+        get => _selectedAutoResponderRule;
+        set
+        {
+            if (SetField(ref _selectedAutoResponderRule, value))
+            {
+                RemoveAutoResponderRuleCommand.RaiseCanExecuteChanged();
+                MoveAutoResponderRuleUpCommand.RaiseCanExecuteChanged();
+                MoveAutoResponderRuleDownCommand.RaiseCanExecuteChanged();
+            }
+        }
+    }
+
+    public RelayCommand AddAutoResponderRuleCommand { get; }
+    public RelayCommand RemoveAutoResponderRuleCommand { get; }
+    public RelayCommand MoveAutoResponderRuleUpCommand { get; }
+    public RelayCommand MoveAutoResponderRuleDownCommand { get; }
+
+    /// <summary>
     /// The Request/Response tab content for whichever row is selected in
     /// the grid, recomputed fresh on every selection change (see
     /// <see cref="RefreshInspectors"/>) rather than kept live -- a captured
@@ -398,6 +453,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         StopCommand = new RelayCommand(Stop, () => IsRunning);
         SaveSazCommand = new RelayCommand(SaveSaz, () => Sessions.Count > 0);
 
+        AddAutoResponderRuleCommand = new RelayCommand(AddAutoResponderRule);
+        RemoveAutoResponderRuleCommand = new RelayCommand(RemoveSelectedAutoResponderRule, () => SelectedAutoResponderRule is not null);
+        MoveAutoResponderRuleUpCommand = new RelayCommand(() => MoveSelectedAutoResponderRule(-1), () => CanMoveSelectedAutoResponderRule(-1));
+        MoveAutoResponderRuleDownCommand = new RelayCommand(() => MoveSelectedAutoResponderRule(1), () => CanMoveSelectedAutoResponderRule(1));
+
         // DispatcherTimer over a raw Task.Delay/CancellationTokenSource
         // specifically because Tick always fires on the UI thread -- every
         // other event handler in this constructor already has to marshal
@@ -480,7 +540,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             var requestedPort = UseAutomaticPort ? 0 : (int)(PreferredPort ?? DefaultPreferredPort);
 
             _proxy = InterceptingProxyListener.StartOnAvailablePort(
-                requestedPort, leafProvider, _sessionStore, _breakpointManager);
+                requestedPort, leafProvider, _sessionStore, _breakpointManager, _autoResponderRules);
             IsRunning = true;
             PreferredPort = _proxy.Port;
 
@@ -553,6 +613,81 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         IsCaptureFlashing = true;
         _captureFlashTimer.Stop();
         _captureFlashTimer.Start();
+    }
+
+    /// <summary>
+    /// Appends a fresh, disabled, empty rule to the end of the list (both
+    /// <see cref="AutoResponderRules.Rules"/> and <see cref="AutoResponderRuleRows"/>)
+    /// and selects it -- so clicking "Add" always gives you something to
+    /// immediately start typing into, matching Fiddler Classic's own
+    /// AutoResponder "Add Rule" behavior. Starts disabled (rather than
+    /// inheriting <see cref="AutoResponderEnabled"/>) since an empty
+    /// match/action pair matches everything and would otherwise start
+    /// intercepting traffic before the person has typed anything into it.
+    /// </summary>
+    private void AddAutoResponderRule()
+    {
+        var rule = new AutoResponderRule { IsEnabled = false };
+        _autoResponderRules.Rules.Add(rule);
+        var vm = new AutoResponderRuleViewModel(rule);
+        AutoResponderRuleRows.Add(vm);
+        SelectedAutoResponderRule = vm;
+    }
+
+    private void RemoveSelectedAutoResponderRule()
+    {
+        var selected = SelectedAutoResponderRule;
+        if (selected is null)
+        {
+            return;
+        }
+
+        var index = AutoResponderRuleRows.IndexOf(selected);
+        _autoResponderRules.Rules.Remove(selected.Rule);
+        AutoResponderRuleRows.Remove(selected);
+
+        SelectedAutoResponderRule = AutoResponderRuleRows.Count == 0
+            ? null
+            : AutoResponderRuleRows[Math.Min(index, AutoResponderRuleRows.Count - 1)];
+    }
+
+    private bool CanMoveSelectedAutoResponderRule(int direction)
+    {
+        if (SelectedAutoResponderRule is null)
+        {
+            return false;
+        }
+
+        var index = AutoResponderRuleRows.IndexOf(SelectedAutoResponderRule);
+        var newIndex = index + direction;
+        return newIndex >= 0 && newIndex < AutoResponderRuleRows.Count;
+    }
+
+    /// <summary>
+    /// Reorders both <see cref="AutoResponderRuleRows"/> (via
+    /// <see cref="ObservableCollection{T}.Move"/>, so the ListBox reorders
+    /// in place without losing its selection) and the underlying
+    /// <see cref="AutoResponderRules.Rules"/> list -- the two have to move
+    /// together since <see cref="AutoResponderRules.Evaluate"/> walks its
+    /// own list in order, oblivious to whatever order the UI happens to
+    /// display rows in.
+    /// </summary>
+    private void MoveSelectedAutoResponderRule(int direction)
+    {
+        if (SelectedAutoResponderRule is not { } selected || !CanMoveSelectedAutoResponderRule(direction))
+        {
+            return;
+        }
+
+        var index = AutoResponderRuleRows.IndexOf(selected);
+        var newIndex = index + direction;
+
+        AutoResponderRuleRows.Move(index, newIndex);
+        _autoResponderRules.Rules.RemoveAt(index);
+        _autoResponderRules.Rules.Insert(newIndex, selected.Rule);
+
+        MoveAutoResponderRuleUpCommand.RaiseCanExecuteChanged();
+        MoveAutoResponderRuleDownCommand.RaiseCanExecuteChanged();
     }
 
     private void SaveSaz()

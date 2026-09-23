@@ -131,6 +131,7 @@
           <Button Content="Stop" Command="{Binding StopCommand}" />
           <CheckBox Content="Break on requests" IsChecked="{Binding BreakOnAllRequests, Mode=TwoWay}" />
           <CheckBox Content="Break on responses" IsChecked="{Binding BreakOnAllResponses, Mode=TwoWay}" />
+          <CheckBox Content="AutoResponder" IsChecked="{Binding AutoResponderEnabled, Mode=TwoWay}" />
         </StackPanel>
 
         <!-- SessionQuery's own grammar doc (Clearinet.ProxyCore.Sessions)
@@ -237,6 +238,61 @@
                      FontFamily="Cascadia Mono,Consolas,monospace" />
           </DockPanel>
         </Grid>
+      </DockPanel>
+    </Border>
+
+    <!-- AutoResponder rules editor. Fiddler-Classic-style: an ordered list
+         of match/action pairs, edited directly (Fiddler's own AutoResponder
+         tab has no separate "edit dialog" either; the list rows are the
+         editor). Structurally mirrors the breakpoints panel above it
+         (header + ListBox), but action buttons sit in their own row below
+         the list rather than beside a detail pane, since there's no
+         separate "selected item detail" view here; each row edits itself
+         in place via the two TextBoxes in its own DataTemplate. Visible
+         whenever the AutoResponder checkbox above is checked, regardless of
+         whether any rules exist yet: same reasoning as
+         IsBreakpointsPanelVisible, the toggle itself is what earns the
+         panel its space, not what's already in it. -->
+    <Border DockPanel.Dock="Top"
+            IsVisible="{Binding AutoResponderEnabled}"
+            Background="{DynamicResource AppPanelBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="12"
+            Margin="0,0,0,14"
+            MinHeight="48"
+            MaxHeight="280">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top"
+                   FontWeight="Bold"
+                   Foreground="{DynamicResource AppAccentBrush}"
+                   Margin="0,0,0,8"
+                   Text="{Binding AutoResponderRuleRows.Count, StringFormat='AutoResponder rules ({0})'}" />
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+          <Button Content="Add Rule" Command="{Binding AddAutoResponderRuleCommand}" Classes="accent" />
+          <Button Content="Remove" Command="{Binding RemoveAutoResponderRuleCommand}" />
+          <Button Content="Move Up" Command="{Binding MoveAutoResponderRuleUpCommand}" />
+          <Button Content="Move Down" Command="{Binding MoveAutoResponderRuleDownCommand}" />
+        </StackPanel>
+        <ListBox ItemsSource="{Binding AutoResponderRuleRows}"
+                 SelectedItem="{Binding SelectedAutoResponderRule, Mode=TwoWay}">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="vm:AutoResponderRuleViewModel">
+              <Grid ColumnDefinitions="Auto,2*,3,3*" Margin="0,2">
+                <CheckBox Grid.Column="0" IsChecked="{Binding IsEnabled, Mode=TwoWay}" VerticalAlignment="Center" />
+                <TextBox Grid.Column="1"
+                         Text="{Binding MatchPattern, Mode=TwoWay}"
+                         PlaceholderText="Match: substring, *wildcard*, EXACT:…, regex:…, NOT:…, METHOD:verb …"
+                         FontFamily="Cascadia Mono,Consolas,monospace" />
+                <TextBox Grid.Column="3"
+                         Text="{Binding Action, Mode=TwoWay}"
+                         PlaceholderText="Action: file path, http(s)://url, *redir:, *delay:ms, *header:N=V, *reset, *drop, *bpu, *bpafter…"
+                         FontFamily="Cascadia Mono,Consolas,monospace" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
       </DockPanel>
     </Border>
 
