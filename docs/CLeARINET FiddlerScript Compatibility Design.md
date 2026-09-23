@@ -307,11 +307,18 @@ scope cut, not a silently half-built feature. A preference name containing
 disk — surviving a script `Reload()`, not a CLeARINET restart, since one
 store instance lives exactly as long as its `FiddlerScriptRunner` does.
 
-**Context Actions and Tools-menu commands (Phase C).** A new "_Tools" menu
-(`MainWindowViewModel.ToolsMenuEntries`) and a right-click context menu on
-the session grid (`ContextActionEntries`, set as the `DataGrid`'s own
-`ContextMenu`), both `ItemsSource`-bound the same way the Rules menu is,
-rebuilt on every script (re)load. Real Fiddler's own `ContextAction`
+**Context Actions and Tools-menu commands (Phase C).** `MainWindowViewModel.ToolsMenuEntries`
+(despite the name, kept for the underlying `ToolsAction` attribute/Phase C
+terminology) and a right-click context menu on the session grid
+(`ContextActionEntries`, set as the `DataGrid`'s own `ContextMenu`), both
+`ItemsSource`-bound the same way the Rules menu is, rebuilt on every script
+(re)load. `ToolsMenuEntries` originally rendered as its own "_Tools" menu
+bar entry; moved into a "Script Actions" row of plain buttons inside the
+FiddlerScript panel itself instead, during this project's "move panels
+into the Tools menu" UI pass, once it became clear a menu entry that's
+usually empty (nothing loaded, or a loaded script with no `ToolsAction`)
+reads as broken rather than "nothing here yet" — see MainWindow.axaml's
+own remarks on `HasToolsMenuEntries`. Real Fiddler's own `ContextAction`
 operates on every currently-selected session at once (`Session[]`); this
 project's grid only supports single selection today, so
 `FiddlerScriptRunner.InvokeContextAction` scopes this down to

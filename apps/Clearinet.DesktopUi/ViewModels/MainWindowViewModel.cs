@@ -70,11 +70,14 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private AutoResponderRuleViewModel? _selectedAutoResponderRule;
     private SessionQuery _query = SessionQuery.MatchAll;
     private string _filterText = string.Empty;
-    private bool _useAutomaticPort;
+    private bool _useAutomaticPort = true;
     private bool _isCaptureFlashing;
     private string _fiddlerScriptPath = string.Empty;
     private string _fiddlerScriptStatus = "No script loaded.";
     private string _extensionStatus = "Not scanned yet.";
+    private bool _showFiddlerScriptPanel;
+    private bool _showExtensionsPanel;
+    private bool _showAlsoBreakOnRow;
 
     /// <summary>
     /// Restarted (not just started) on every captured session -- see
@@ -274,6 +277,25 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Whether the "Also break on" row (<see cref="RequestUrlContains"/>/
+    /// <see cref="ResponseUrlContains"/>/<see cref="RequestMethodEquals"/>/
+    /// <see cref="ResponseStatusCodeEquals"/>) shows on the main screen at
+    /// all -- the checkable "_Tools -&gt; Also Break On" entry is this
+    /// property's only writer, same reasoning and default
+    /// (<see langword="false"/>) as <see cref="ShowFiddlerScriptPanel"/>.
+    /// Purely a visibility switch: none of the four fields above are
+    /// cleared when this goes back to <see langword="false"/>, so a
+    /// condition set while the row was visible keeps arming
+    /// <see cref="IsBreakpointsPanelVisible"/> and keeps pausing real
+    /// traffic even after the row that set it is hidden again.
+    /// </summary>
+    public bool ShowAlsoBreakOnRow
+    {
+        get => _showAlsoBreakOnRow;
+        set => SetField(ref _showAlsoBreakOnRow, value);
+    }
+
+    /// <summary>
     /// Named to avoid colliding with <see cref="AutoResponderRules"/> (the
     /// ProxyCore engine type) -- one <see cref="AutoResponderRuleViewModel"/>
     /// per <see cref="AutoResponderRules.Rules"/> entry, kept in the same
@@ -382,6 +404,38 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand ReloadFiddlerScriptCommand { get; }
 
     /// <summary>
+    /// Whether the FiddlerScript panel shows on the main screen at all --
+    /// the checkable "_Tools -&gt; FiddlerScript" entry in MainWindow.axaml
+    /// is this property's only writer (see this project's "move panels into
+    /// the Tools menu" UI pass). Defaults to <see langword="false"/>: unlike
+    /// the Breakpoints/AutoResponder panels, this one has no other signal
+    /// (an armed rule, an active pause) to decide it should be on screen by
+    /// default, and hiding it by default is the whole point of moving it off
+    /// the always-visible main screen in the first place. Purely a
+    /// visibility switch -- loading/reloading a script still works the same
+    /// whether or not this panel happens to be shown.
+    /// </summary>
+    public bool ShowFiddlerScriptPanel
+    {
+        get => _showFiddlerScriptPanel;
+        set => SetField(ref _showFiddlerScriptPanel, value);
+    }
+
+    /// <summary>
+    /// Whether the Extensions status panel shows on the main screen --
+    /// the checkable "_Tools -&gt; Extensions" entry is this property's only
+    /// writer, same reasoning and default (<see langword="false"/>) as
+    /// <see cref="ShowFiddlerScriptPanel"/>. Purely a visibility switch:
+    /// <see cref="ExtensionStatus"/> itself is still built once at startup
+    /// regardless of whether anyone ever checks this box.
+    /// </summary>
+    public bool ShowExtensionsPanel
+    {
+        get => _showExtensionsPanel;
+        set => SetField(ref _showExtensionsPanel, value);
+    }
+
+    /// <summary>
     /// The dynamic "_Rules" menu's own entries -- one per
     /// <c>RulesMenuOption</c>/<c>RulesStringChoice</c> the currently-loaded
     /// script declares (empty when nothing's loaded, or the loaded script
@@ -392,8 +446,41 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     public ObservableCollection<RulesMenuEntryViewModel> RulesMenuEntries { get; } = [];
 
-    /// <summary>The dynamic "_Tools" menu's own entries -- one per <c>ToolsAction</c> the currently-loaded script declares. Same rebuild timing as <see cref="RulesMenuEntries"/>.</summary>
+    /// <summary>
+    /// Whether <see cref="RulesMenuEntries"/> currently has anything in it
+    /// -- MainWindow.axaml binds the "_Rules" menu's own <c>IsEnabled</c>
+    /// to this, so it visibly greys out instead of just opening to an
+    /// empty dropdown (nothing was drawing an arrow or reacting to a click
+    /// either way, but a disabled menu at least reads as "nothing here
+    /// right now" rather than "broken"). Not backed by a field: this app's
+    /// MVVM base has no dependency tracking of its own (see
+    /// ViewModelBase's own remarks), so <see cref="RefreshScriptMenus"/>
+    /// has to explicitly raise this alongside <see cref="RulesMenuEntries"/>
+    /// itself whenever that collection is rebuilt.
+    /// </summary>
+    public bool HasRulesMenuEntries => RulesMenuEntries.Count > 0;
+
+    /// <summary>
+    /// One per <c>ToolsAction</c> the currently-loaded script declares.
+    /// Same rebuild timing as <see cref="RulesMenuEntries"/>. Despite the
+    /// name (kept for the underlying <c>ToolsAction</c> attribute/Phase C
+    /// terminology, and because <see cref="MainWindowViewModel.InvokeContextAction"/>
+    /// and <see cref="FiddlerScriptRunner.InvokeToolsAction"/> both already
+    /// use it), this no longer renders as a "_Tools" submenu -- see the
+    /// FiddlerScript panel's own remarks in MainWindow.axaml for why it was
+    /// moved to a row of buttons inside that panel instead.
+    /// </summary>
     public ObservableCollection<ActionMenuEntryViewModel> ToolsMenuEntries { get; } = [];
+
+    /// <summary>
+    /// Whether <see cref="ToolsMenuEntries"/> currently has anything in it,
+    /// same reasoning and same "explicitly raised, not field-backed" caveat
+    /// as <see cref="HasRulesMenuEntries"/> -- what the FiddlerScript
+    /// panel's "Script Actions" row binds its own <c>IsVisible</c> to, so
+    /// the row (and its label) takes no space at all when there's nothing
+    /// to show, rather than an empty label with no buttons after it.
+    /// </summary>
+    public bool HasToolsMenuEntries => ToolsMenuEntries.Count > 0;
 
     /// <summary>
     /// The session grid's right-click context menu -- one per
@@ -476,9 +563,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// port-0 trick <see cref="InterceptingProxyListener.StartOnAvailablePort"/>
     /// already falls back to when a preferred port is taken, just requested
     /// up front instead of after a collision), false for "Specify" (use
-    /// <see cref="PreferredPort"/>). Defaults to false so a first run keeps
-    /// behaving exactly like before this toggle existed -- port 8888 unless
-    /// changed.
+    /// <see cref="PreferredPort"/>). Defaults to true: a first run picks
+    /// whatever port the OS hands back rather than assuming 8888 is free.
+    /// <see cref="PreferredPort"/> is left populated with its own default
+    /// (8888) regardless, so switching to "Specify" still starts from a
+    /// sensible value instead of an empty field.
     /// </summary>
     public bool UseAutomaticPort
     {
@@ -887,12 +976,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             RulesMenuEntries.Add(entry);
         }
 
+        RaisePropertyChanged(nameof(HasRulesMenuEntries));
+
         ToolsMenuEntries.Clear();
         foreach (var descriptor in _fiddlerScriptRunner.Directives.ToolsActions)
         {
             ToolsMenuEntries.Add(new ActionMenuEntryViewModel(
                 descriptor.MenuText, () => _fiddlerScriptRunner.InvokeToolsAction(descriptor.MethodName)));
         }
+
+        RaisePropertyChanged(nameof(HasToolsMenuEntries));
 
         ContextActionEntries.Clear();
         foreach (var descriptor in _fiddlerScriptRunner.Directives.ContextActions)

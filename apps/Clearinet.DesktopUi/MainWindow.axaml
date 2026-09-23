@@ -82,28 +82,49 @@
              menu's shape doesn't shift around based on what's installed.
              Deliberately no per-format submenu here: see
              MainWindowViewModel.ImportViaExtension's own remarks on why
-             this always uses the first loaded importer/exporter. -->
+             this always uses the first loaded importer/exporter. ToolTip.Tip
+             spells out what these actually do and why they're greyed out by
+             default, since nothing else in the running app explains that:
+             see tools/Clearinet.SampleExtension/README.md for a concrete,
+             buildable example that proffers both, and the .NET Extension
+             Compatibility Design doc's "ISessionImporter/ISessionExporter"
+             section for the full design (including why there's no
+             per-format picker here). -->
         <Separator />
-        <MenuItem Header="Import via _Extension…" Command="{Binding ImportViaExtensionCommand}" />
-        <MenuItem Header="Export via Extensio_n…" Command="{Binding ExportViaExtensionCommand}" />
+        <MenuItem Header="Import via _Extension…"
+                  Command="{Binding ImportViaExtensionCommand}"
+                  ToolTip.Tip="Adds sessions from whatever the first loaded .NET extension's ISessionImporter proffers (e.g. a saved log format only that extension understands). Disabled until an extension exposing ISessionImporter is dropped into the Extensions folder -- see Tools -&gt; Extensions for what's currently loaded." />
+        <MenuItem Header="Export via Extensio_n…"
+                  Command="{Binding ExportViaExtensionCommand}"
+                  ToolTip.Tip="Writes every captured session out through the first loaded .NET extension's ISessionExporter (e.g. a custom report format only that extension knows how to produce). Disabled until an extension exposing ISessionExporter is loaded and at least one session has been captured." />
       </MenuItem>
 
       <!-- Phase B: one checkable entry per RulesOption/RulesStringChoice the
            currently-loaded FiddlerScript declares (see
-           MainWindowViewModel.RulesMenuEntries's own remarks): empty, and
-           so effectively an empty dropdown, whenever nothing's loaded or
-           the loaded script declares none. Deliberately ItemsSource-bound
-           rather than a real nested Rules-menu submenu per RulesOption's
-           own SubmenuName: a single flat MenuItem.ItemsSource binding is a
-           well-worn, low-risk Avalonia pattern, where a recursive
-           hierarchical menu template is not; RulesMenuEntryViewModel.Header
-           already carries a "Submenu: Option" prefix for a grouped entry
-           instead, a readable stand-in for real nesting rather than a
-           fidelity goal. ToggleType="CheckBox" is what actually draws the
-           checkmark; IsChecked is two-way so both a click and a
-           script-driven radio-group clear (see RulesMenuEntryViewModel's
-           own SetCheckedWithoutNotifying) redraw correctly. -->
-      <MenuItem Header="_Rules" ItemsSource="{Binding RulesMenuEntries}">
+           MainWindowViewModel.RulesMenuEntries's own remarks): empty
+           whenever nothing's loaded or the loaded script declares none.
+           Deliberately ItemsSource-bound rather than a real nested
+           Rules-menu submenu per RulesOption's own SubmenuName: a single
+           flat MenuItem.ItemsSource binding is a well-worn, low-risk
+           Avalonia pattern, where a recursive hierarchical menu template is
+           not; RulesMenuEntryViewModel.Header already carries a "Submenu:
+           Option" prefix for a grouped entry instead, a readable stand-in
+           for real nesting rather than a fidelity goal. ToggleType="CheckBox"
+           is what actually draws the checkmark; IsChecked is two-way so
+           both a click and a script-driven radio-group clear (see
+           RulesMenuEntryViewModel's own SetCheckedWithoutNotifying) redraw
+           correctly. IsEnabled bound to HasRulesMenuEntries: with zero
+           items an ItemsSource-bound MenuItem draws no submenu arrow and
+           opens nothing on click, which reads as broken rather than
+           "nothing here yet"; greying it out (same idiom Import/Export
+           via Extension already use) plus the ToolTip.Tip explaining why is
+           the fix, in place of injecting a fake placeholder entry into
+           RulesMenuEntries itself (which would have to fake being
+           uncheckable without also being a real RulesMenuOption). -->
+      <MenuItem Header="_Rules"
+                ItemsSource="{Binding RulesMenuEntries}"
+                IsEnabled="{Binding HasRulesMenuEntries}"
+                ToolTip.Tip="Populated from [RulesOption]/[RulesString] attributes in the currently-loaded FiddlerScript file (Tools -&gt; FiddlerScript to load one). Empty/disabled when no script is loaded, or the loaded script declares none -- see the FiddlerScript Compatibility Design doc's 'Phase B/C/D' section.">
         <MenuItem.ItemTemplate>
           <DataTemplate x:DataType="vm:RulesMenuEntryViewModel">
             <MenuItem Header="{Binding Header}" ToggleType="CheckBox" IsChecked="{Binding IsChecked, Mode=TwoWay}" />
@@ -111,16 +132,23 @@
         </MenuItem.ItemTemplate>
       </MenuItem>
 
-      <!-- Phase C (Tools half): one entry per ToolsAction the
-           currently-loaded script declares: see ContextActionEntries
-           below, and the session grid's own ContextMenu, for the other
-           half (ContextAction). -->
-      <MenuItem Header="_Tools" ItemsSource="{Binding ToolsMenuEntries}">
-        <MenuItem.ItemTemplate>
-          <DataTemplate x:DataType="vm:ActionMenuEntryViewModel">
-            <MenuItem Header="{Binding Header}" Command="{Binding InvokeCommand}" />
-          </DataTemplate>
-        </MenuItem.ItemTemplate>
+      <!-- _Tools: six checkable panel-visibility toggles (see this
+           project's "move panels into the Tools menu" UI pass). The
+           script-declared Tools actions from Phase C (ToolsMenuEntries)
+           used to live here too, nested under a "Script Actions" submenu;
+           moved into the FiddlerScript panel itself instead (see that
+           panel's own remarks below), since a menu entry that only ever
+           does something once a script happens to be loaded, and is
+           otherwise just sitting there empty/greyed out, is easy to miss
+           entirely inside a menu someone opens rarely; buttons alongside
+           the rest of that script's own controls are hard to miss instead. -->
+      <MenuItem Header="_Tools">
+        <MenuItem Header="FiddlerScript" ToggleType="CheckBox" IsChecked="{Binding ShowFiddlerScriptPanel, Mode=TwoWay}" />
+        <MenuItem Header="Extensions" ToggleType="CheckBox" IsChecked="{Binding ShowExtensionsPanel, Mode=TwoWay}" />
+        <MenuItem Header="Break on Requests" ToggleType="CheckBox" IsChecked="{Binding BreakOnAllRequests, Mode=TwoWay}" />
+        <MenuItem Header="Break on Responses" ToggleType="CheckBox" IsChecked="{Binding BreakOnAllResponses, Mode=TwoWay}" />
+        <MenuItem Header="Also Break On" ToggleType="CheckBox" IsChecked="{Binding ShowAlsoBreakOnRow, Mode=TwoWay}" />
+        <MenuItem Header="AutoResponder" ToggleType="CheckBox" IsChecked="{Binding AutoResponderEnabled, Mode=TwoWay}" />
       </MenuItem>
     </Menu>
 
@@ -164,18 +192,22 @@
                        IsChecked="{Binding UseSpecificPort, Mode=TwoWay}"
                        IsEnabled="{Binding !IsRunning}"
                        VerticalAlignment="Center" />
+          <!-- ShowButtonSpinner="False": the up/down spinner buttons add
+               width without adding value for a port number: nobody
+               increments toward a free port one at a time, they either type
+               a specific number or use "Auto" above. Typing and pasting
+               still work exactly the same; only the spinner chrome is
+               gone. -->
           <NumericUpDown Value="{Binding PreferredPort, Mode=TwoWay}"
                           Minimum="1"
                           Maximum="65535"
                           FormatString="0"
+                          ShowButtonSpinner="False"
                           IsEnabled="{Binding !IsRunning}"
                           IsVisible="{Binding !UseAutomaticPort}"
                           Width="130" />
           <Button Content="Start" Command="{Binding StartCommand}" Classes="accent" />
           <Button Content="Stop" Command="{Binding StopCommand}" />
-          <CheckBox Content="Break on requests" IsChecked="{Binding BreakOnAllRequests, Mode=TwoWay}" />
-          <CheckBox Content="Break on responses" IsChecked="{Binding BreakOnAllResponses, Mode=TwoWay}" />
-          <CheckBox Content="AutoResponder" IsChecked="{Binding AutoResponderEnabled, Mode=TwoWay}" />
         </StackPanel>
 
         <!-- SessionQuery's own grammar doc (Clearinet.ProxyCore.Sessions)
@@ -192,17 +224,27 @@
 
         <!-- The four narrower breakpoint conditions (Fiddler's
              bpu/bpafter/bpm/bps, see BreakpointRules' own remarks) live
-             here, in this always-visible row, rather than inside the
-             breakpoints panel below: that panel's own visibility depends on
-             one of these having a value (IsBreakpointsPanelVisible), so
-             putting the fields that set them inside it would mean nothing
-             could ever show them in the first place. -->
+             here, rather than inside the breakpoints panel below: that
+             panel's own visibility depends on one of these having a value
+             (IsBreakpointsPanelVisible), so putting the fields that set
+             them inside it would mean nothing could ever show them in the
+             first place. No longer always visible, though: gated behind
+             "_Tools -&gt; Also Break On" (ShowAlsoBreakOnRow), same pattern
+             and default (false) as the other five panels this project's
+             "move panels into the Tools menu" UI pass already relocated.
+             A value typed in here before the row is hidden again keeps
+             armed and keeps affecting real traffic: hiding the row only
+             hides the fields, it doesn't clear whatever they already
+             hold, the same "toggle just earns/loses screen space, doesn't
+             touch the underlying state" reasoning IsBreakpointsPanelVisible
+             itself already relies on. -->
         <StackPanel Grid.Row="1"
                     Grid.Column="0"
                     Grid.ColumnSpan="2"
                     Orientation="Horizontal"
                     Spacing="10"
-                    Margin="0,10,0,0">
+                    Margin="0,10,0,0"
+                    IsVisible="{Binding ShowAlsoBreakOnRow}">
           <TextBlock Text="Also break on:" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" />
           <TextBox Text="{Binding RequestUrlContains, Mode=TwoWay}"
                    PlaceholderText="bpu: request URL contains…"
@@ -232,8 +274,10 @@
          to look at; right panel is its raw text (Fiddler's TextView model)
          plus the actions. Hidden by default: it only takes up space once
          it can actually have something in it, i.e. once one of the
-         Automatic Breakpoints checkboxes is armed or one of the "Also
-         break on" fields above has a value, or (see
+         Automatic Breakpoints toggles (now "_Tools -&gt; Break on
+         Requests"/"Break on Responses", relocated off the main screen,
+         see this project's "move panels into the Tools menu" UI pass) is
+         armed or one of the "Also break on" fields above has a value, or (see
          MainWindowViewModel.IsBreakpointsPanelVisible) while a session is
          genuinely paused and blocked, even if every rule got cleared after
          it hit. Otherwise clearing the rules mid-pause would hide the only
@@ -297,12 +341,14 @@
          the list rather than beside a detail pane, since there's no
          separate "selected item detail" view here; each row edits itself
          in place via the two TextBoxes in its own DataTemplate. Visible
-         whenever the AutoResponder checkbox above is checked, regardless of
-         whether any rules exist yet: same reasoning as
-         IsBreakpointsPanelVisible, the toggle itself is what earns the
-         panel its space, not what's already in it. Wrapped in an Expander,
-         same reasoning and default (IsExpanded="True") as the Breakpoints
-         panel above, see this project's "reduce panel clutter" UI pass. -->
+         whenever "_Tools -&gt; AutoResponder" (AutoResponderEnabled,
+         relocated off the main screen, see this project's "move panels
+         into the Tools menu" UI pass) is checked, regardless of whether any
+         rules exist yet: same reasoning as IsBreakpointsPanelVisible, the
+         toggle itself is what earns the panel its space, not what's
+         already in it. Wrapped in an Expander, same reasoning and default
+         (IsExpanded="True") as the Breakpoints panel above, see this
+         project's earlier "reduce panel clutter" UI pass. -->
     <Border DockPanel.Dock="Top"
             IsVisible="{Binding AutoResponderEnabled}"
             Background="{DynamicResource AppPanelBrush}"
@@ -344,35 +390,39 @@
       </Expander>
     </Border>
 
-    <!-- FiddlerScript + Extensions: combined into one tabbed panel instead
-         of two permanently-stacked always-visible Borders (see this
-         project's "reduce panel clutter" UI pass: previously each was
-         its own full-width Border, present on screen at all times whether
-         or not either had anything to say). Neither needs to be visible at
-         the same moment as the other, so a TabControl, a well-worn,
-         low-risk Avalonia pattern (the same reasoning the Rules menu above
-         already gives for preferring a flat ItemsSource binding over a
-         recursive template), replaces two panels' worth of permanent
-         vertical space with one. Each tab keeps its own original content
-         unchanged; only the outer chrome (the per-panel Border + bold
-         header TextBlock) was collapsed into the TabControl's own tab
-         strip. A ScrollViewer around each tab's status text guards against
-         the Border's own MaxHeight clipping a long ExtensionStatus (many
-         LoadErrors) or FiddlerScriptStatus line, something neither panel
-         needed to guard against before this pass since neither had a
-         height cap at all.
-         FiddlerScript: one loaded CustomRules.js-shaped file, wired into
+    <!-- FiddlerScript: one loaded CustomRules.js-shaped file, wired into
          InterceptingProxyListener's OnBeforeRequest/OnBeforeResponse hook
          points (see the FiddlerScript Compatibility Design doc's Phase A2
          section). Load reads it in, Reload re-reads it after an edit (also
          reachable from inside a running script via
          FiddlerObject.ReloadScript(), see FiddlerScriptRunner's remarks).
-         Extensions: read-only status for compiled .NET extensions found by
-         ExtensionHost at startup (see ExtensionHost's own remarks on "load
-         once at startup" scope): built once, entirely from what Load()
-         found, so it stays accurate without depending on console output
-         being visible at all. -->
+         No longer always on screen: this Border's own visibility is now
+         solely "_Tools -&gt; FiddlerScript" (ShowFiddlerScriptPanel), the
+         previous tabbed-together-with-Extensions arrangement from this
+         project's earlier "reduce panel clutter" pass is superseded by
+         menu-driven checkable visibility, which makes the space-sharing
+         tab trick unnecessary: each panel now earns its own screen space
+         only when its own box is checked, rather than needing to share one
+         tabbed area with the other. The path field is IsReadOnly; a
+         "Browse…" button opens a native file picker rather than the field
+         accepting typed text directly, a deliberate simplification
+         matching the existing "Open SAZ" picker precedent (a network path
+         or anything else the picker can't reach has no way in through this
+         field anymore). This used to be wired as a PointerPressed handler
+         directly on the TextBox itself, so a click anywhere in the field
+         opened the picker with no separate button needed. Reverted after
+         it turned out not to fire in practice: an Avalonia TextBox, even
+         IsReadOnly="True", still handles pointer-press internally for
+         caret placement/text selection and marks the event Handled before
+         it bubbles out to a plain XAML PointerPressed attribute, a control
+         this sandbox has no way to build and click-test itself to have
+         caught up front. A Button's Click event doesn't have that problem
+         (see OpenSazMenuItem_Click/LoadFiddlerScriptCommand, both already
+         proven working), so that's what this now uses instead. A
+         ScrollViewer around the status text guards against the Border's
+         own MaxHeight clipping a long FiddlerScriptStatus line. -->
     <Border DockPanel.Dock="Top"
+            IsVisible="{Binding ShowFiddlerScriptPanel}"
             Background="{DynamicResource AppPanelBrush}"
             BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
@@ -380,35 +430,102 @@
             Padding="12"
             Margin="0,0,0,14"
             MaxHeight="220">
-      <TabControl>
-        <TabItem Header="FiddlerScript">
-          <DockPanel Margin="0,8,0,0">
-            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8">
-              <TextBox Text="{Binding FiddlerScriptPath, Mode=TwoWay}"
-                       PlaceholderText="Path to a CustomRules.js-shaped script…"
-                       FontFamily="Cascadia Mono,Consolas,monospace"
-                       VerticalAlignment="Center"
-                       Width="420" />
-              <Button Content="Load" Command="{Binding LoadFiddlerScriptCommand}" Classes="accent" />
-              <Button Content="Reload" Command="{Binding ReloadFiddlerScriptCommand}" />
-            </StackPanel>
-            <ScrollViewer>
-              <TextBlock Text="{Binding FiddlerScriptStatus}"
-                         Foreground="{DynamicResource AppMutedTextBrush}"
-                         TextWrapping="Wrap"
-                         Margin="0,8,0,0" />
-            </ScrollViewer>
-          </DockPanel>
-        </TabItem>
-        <TabItem Header="Extensions">
-          <ScrollViewer Margin="0,8,0,0">
-            <TextBlock Text="{Binding ExtensionStatus}"
-                       Foreground="{DynamicResource AppMutedTextBrush}"
-                       TextWrapping="Wrap"
-                       FontFamily="Cascadia Mono,Consolas,monospace" />
-          </ScrollViewer>
-        </TabItem>
-      </TabControl>
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top"
+                   FontWeight="Bold"
+                   Foreground="{DynamicResource AppAccentBrush}"
+                   Margin="0,0,0,8"
+                   Text="FiddlerScript" />
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8">
+          <TextBox Text="{Binding FiddlerScriptPath, Mode=TwoWay}"
+                   PlaceholderText="Browse for a CustomRules.js-shaped script…"
+                   IsReadOnly="True"
+                   FontFamily="Cascadia Mono,Consolas,monospace"
+                   VerticalAlignment="Center"
+                   Width="380" />
+          <Button Content="Browse…" Click="BrowseFiddlerScriptButton_Click" />
+          <Button Content="Load" Command="{Binding LoadFiddlerScriptCommand}" Classes="accent" />
+          <Button Content="Reload" Command="{Binding ReloadFiddlerScriptCommand}" />
+        </StackPanel>
+
+        <!-- Phase C (Tools half): one button per ToolsAction the
+             currently-loaded script declares (ToolsMenuEntries). Lives
+             here, beside the script's own Load/Reload controls, rather than
+             in the menu bar's "_Tools" menu the way it first shipped. A menu
+             entry that's usually empty/disabled (nothing loaded, or a
+             loaded script with no ToolsAction) is easy to write off as
+             broken; a row of buttons that only appears once there's
+             something to click is harder to miss, and it sits right next to
+             the panel that explains why it's there at all. IsVisible bound
+             to HasToolsMenuEntries so this row (and its label) takes no
+             space at all rather than showing an empty "Script Actions:"
+             with nothing after it. WrapPanel rather than a plain horizontal
+             StackPanel so an unusually long list of actions wraps within
+             this Border's own MaxHeight instead of running off the right
+             edge. -->
+        <DockPanel DockPanel.Dock="Top"
+                   Margin="0,8,0,0"
+                   IsVisible="{Binding HasToolsMenuEntries}">
+          <TextBlock DockPanel.Dock="Left"
+                     Text="Script Actions:"
+                     VerticalAlignment="Top"
+                     Margin="0,4,8,0"
+                     Foreground="{DynamicResource AppMutedTextBrush}" />
+          <ItemsControl ItemsSource="{Binding ToolsMenuEntries}">
+            <ItemsControl.ItemsPanel>
+              <ItemsPanelTemplate>
+                <WrapPanel Orientation="Horizontal" />
+              </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ActionMenuEntryViewModel">
+                <Button Content="{Binding Header}" Command="{Binding InvokeCommand}" Margin="0,0,8,4" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </DockPanel>
+
+        <ScrollViewer>
+          <TextBlock Text="{Binding FiddlerScriptStatus}"
+                     Foreground="{DynamicResource AppMutedTextBrush}"
+                     TextWrapping="Wrap"
+                     Margin="0,8,0,0" />
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <!-- Extensions: read-only status for compiled .NET extensions found by
+         ExtensionHost at startup (see ExtensionHost's own remarks on "load
+         once at startup" scope): built once, entirely from what Load()
+         found, so it stays accurate without depending on console output
+         being visible at all. No longer always on screen: this Border's
+         own visibility is now solely "_Tools -&gt; Extensions"
+         (ShowExtensionsPanel), see the FiddlerScript panel's own remarks
+         above for why the two no longer need to share one tabbed area. A
+         ScrollViewer guards against the Border's own MaxHeight clipping a
+         long ExtensionStatus line (many LoadErrors). -->
+    <Border DockPanel.Dock="Top"
+            IsVisible="{Binding ShowExtensionsPanel}"
+            Background="{DynamicResource AppPanelBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="12"
+            Margin="0,0,0,14"
+            MaxHeight="220">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top"
+                   FontWeight="Bold"
+                   Foreground="{DynamicResource AppAccentBrush}"
+                   Margin="0,0,0,8"
+                   Text="Extensions" />
+        <ScrollViewer>
+          <TextBlock Text="{Binding ExtensionStatus}"
+                     Foreground="{DynamicResource AppMutedTextBrush}"
+                     TextWrapping="Wrap"
+                     FontFamily="Cascadia Mono,Consolas,monospace" />
+        </ScrollViewer>
+      </DockPanel>
     </Border>
 
     <!-- Status bar: docked to the window's bottom edge regardless of where

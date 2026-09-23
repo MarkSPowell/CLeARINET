@@ -20,6 +20,21 @@ public partial class MainWindow : Window
     };
 
     /// <summary>
+    /// Filters <see cref="BrowseFiddlerScriptButton_Click"/>'s own
+    /// picker down to <c>*.js</c> -- real FiddlerScript's default,
+    /// JScript.NET-flavored variant (see the FiddlerScript Compatibility
+    /// Design doc's engine discussion). The Roslyn-scripting <c>*.cs</c>
+    /// variant Telerik later added isn't implemented yet, so it isn't
+    /// listed here either; <see cref="FilePickerFileTypes.All"/> is offered
+    /// alongside it so nothing already-working (a differently-extensioned
+    /// script someone's using today) becomes unreachable through the picker.
+    /// </summary>
+    private static readonly FilePickerFileType FiddlerScriptFileType = new("FiddlerScript (*.js)")
+    {
+        Patterns = ["*.js"],
+    };
+
+    /// <summary>
     /// Every <see cref="DataGridTextColumn"/> this window has added itself
     /// for a Phase D <c>[BindUIColumn]</c> -- kept so
     /// <see cref="RefreshScriptColumns"/> can remove exactly these on the
@@ -162,5 +177,55 @@ public partial class MainWindow : Window
         }
 
         await viewModel.ImportSazAsync(file.Path.LocalPath);
+    }
+
+    /// <summary>
+    /// Opens a native file picker for MainWindow.axaml's FiddlerScript path
+    /// field, which is <c>IsReadOnly="True"</c> so this "Browse…" button is
+    /// the only way that field's text ever changes. Originally wired as a
+    /// <c>PointerPressed</c> handler directly on the <c>TextBox</c> itself
+    /// (clicking anywhere in the field, no separate button needed), which
+    /// turned out not to fire: an Avalonia <see cref="TextBox"/>, even
+    /// read-only, still handles pointer-press internally for caret
+    /// placement and text selection, and marks the event
+    /// <see cref="Avalonia.Input.PointerEventArgs.Handled"/> before it ever
+    /// bubbles out to a plain XAML <c>PointerPressed</c> attribute -- not
+    /// something this sandbox could catch up front with no build/click-test
+    /// loop of its own. Same pattern and reasoning as
+    /// <see cref="OpenSazMenuItem_Click"/> otherwise (StorageProvider only
+    /// reachable from a live control, <c>async void</c> the only legal
+    /// event-handler signature, a plain <see cref="Button.Click"/> proven to
+    /// actually fire where <c>PointerPressed</c> didn't). Canceling the
+    /// picker leaves <see cref="MainWindowViewModel.FiddlerScriptPath"/>
+    /// exactly as it was, the same as canceling "Open SAZ" leaves nothing
+    /// changed.
+    /// </summary>
+    private async void BrowseFiddlerScriptButton_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel)
+        {
+            return;
+        }
+
+        var topLevel = GetTopLevel(this);
+        if (topLevel is null)
+        {
+            return;
+        }
+
+        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Choose a FiddlerScript file",
+            AllowMultiple = false,
+            FileTypeFilter = [FiddlerScriptFileType, FilePickerFileTypes.All],
+        });
+
+        var file = files.Count > 0 ? files[0] : null;
+        if (file is null)
+        {
+            return;
+        }
+
+        viewModel.FiddlerScriptPath = file.Path.LocalPath;
     }
 }
