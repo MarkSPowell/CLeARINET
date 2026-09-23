@@ -6,7 +6,9 @@ using System.Text;
 using Clearinet.ProxyCore.AutoResponder;
 using Clearinet.ProxyCore.Breakpoints;
 using Clearinet.ProxyCore.Certificates;
+using Clearinet.ProxyCore.Extensions;
 using Clearinet.ProxyCore.Http;
+using Clearinet.ProxyCore.Scripting;
 using Clearinet.ProxyCore.Sessions;
 
 namespace Clearinet.ProxyCore.Proxy;
@@ -37,6 +39,16 @@ namespace Clearinet.ProxyCore.Proxy;
 /// framing edge cases aren't covered yet -- see Http1MessageReader's
 /// remarks. That's enough to prove the session model and, next, the SAZ
 /// writer against real traffic, which is the rest of Phase 1.
+///
+/// FiddlerScript's own two hook points (<c>Handlers.OnBeforeRequest</c>/
+/// <c>OnBeforeResponse</c>, via an optional <see cref="IFiddlerScriptRunner"/>)
+/// are wired in on the same "buffer only when something will actually act on
+/// it" fork described above -- see <c>PumpSessionsAsync</c>'s own remarks for
+/// exactly where they run and what's deliberately still out of scope. Loaded
+/// .NET extensions' own <c>IAutoTamper</c> hooks (via an optional
+/// <see cref="IExtensionAutoTamperHost"/>) share that exact same fork and
+/// ordering -- see that interface's own remarks for why FiddlerScript's
+/// handler runs first.
 /// </summary>
 public sealed class InterceptingProxyListener
 {
@@ -46,6 +58,8 @@ public sealed class InterceptingProxyListener
     private readonly SessionStore _sessionStore;
     private readonly BreakpointManager _breakpointManager;
     private readonly AutoResponderRules _autoResponderRules;
+    private readonly IFiddlerScriptRunner? _scriptRunner;
+    private readonly IExtensionAutoTamperHost? _extensionHost;
     private readonly TcpListener _listener;
     private CancellationTokenSource? _cts;
 
@@ -54,7 +68,9 @@ public sealed class InterceptingProxyListener
         LeafCertificateProvider leafProvider,
         SessionStore sessionStore,
         BreakpointManager? breakpointManager = null,
-        AutoResponderRules? autoResponderRules = null)
+        AutoResponderRules? autoResponderRules = null,
+        IFiddlerScriptRunner? scriptRunner = null,
+        IExtensionAutoTamperHost? extensionHost = null)
     {
         _leafProvider = leafProvider;
         _sessionStore = sessionStore;
@@ -66,6 +82,18 @@ public sealed class InterceptingProxyListener
         // get behavior identical to before either existed.
         _breakpointManager = breakpointManager ?? new BreakpointManager();
         _autoResponderRules = autoResponderRules ?? new AutoResponderRules();
+        // No default instance here, unlike the two above -- a null
+        // scriptRunner just means "no script loaded," and every call site
+        // below already treats that the same way AutoResponderRules.AnyActive
+        // being false does: HasOnBeforeRequest/HasOnBeforeResponse are read
+        // through a null-conditional, so nothing needs a real no-op
+        // implementation to stay safe.
+        _scriptRunner = scriptRunner;
+        // Same reasoning as _scriptRunner immediately above: a null
+        // extensionHost just means "no .NET extensions loaded," and every
+        // call site reads HasAnyRequestBeforeHandlers/HasAnyResponseBeforeHandlers
+        // through a null-conditional.
+        _extensionHost = extensionHost;
         _listener = new TcpListener(IPAddress.Loopback, port);
     }
 
@@ -91,9 +119,11 @@ public sealed class InterceptingProxyListener
         LeafCertificateProvider leafProvider,
         SessionStore sessionStore,
         BreakpointManager? breakpointManager = null,
-        AutoResponderRules? autoResponderRules = null)
+        AutoResponderRules? autoResponderRules = null,
+        IFiddlerScriptRunner? scriptRunner = null,
+        IExtensionAutoTamperHost? extensionHost = null)
     {
-        var preferred = new InterceptingProxyListener(preferredPort, leafProvider, sessionStore, breakpointManager, autoResponderRules);
+        var preferred = new InterceptingProxyListener(preferredPort, leafProvider, sessionStore, breakpointManager, autoResponderRules, scriptRunner, extensionHost);
         try
         {
             preferred.Start();
@@ -104,7 +134,7 @@ public sealed class InterceptingProxyListener
             // Port 0 tells the OS to hand back any free port -- the same
             // trick ASP.NET Core's test host and countless other tools use
             // to avoid ever hard-failing on a port collision.
-            var fallback = new InterceptingProxyListener(0, leafProvider, sessionStore, breakpointManager, autoResponderRules);
+            var fallback = new InterceptingProxyListener(0, leafProvider, sessionStore, breakpointManager, autoResponderRules, scriptRunner, extensionHost);
             fallback.Start();
             return fallback;
         }
@@ -177,7 +207,8 @@ public sealed class InterceptingProxyListener
             // The upstream connection is NOT made here anymore -- see
             // PumpSessionsAsync's own remarks on why it has to be lazy.
             await PumpSessionsAsync(
-                targetHost, targetPort, client, clientTls, _sessionStore, _breakpointManager, _autoResponderRules, cancellationToken);
+                targetHost, targetPort, client, clientTls, _sessionStore, _breakpointManager, _autoResponderRules,
+                _scriptRunner, _extensionHost, cancellationToken);
         }
         catch (BreakpointAbortedException ex)
         {
@@ -219,6 +250,36 @@ public sealed class InterceptingProxyListener
     /// needs to work with no route to the real server at all, which an
     /// eager upstream connect (the design before AutoResponder existed)
     /// would have broken outright.
+    ///
+    /// <paramref name="scriptRunner"/>'s two hook points run only on the
+    /// "forward to the real server" path below, never for a request
+    /// AutoResponder answers locally (that local-answer branch returns
+    /// before this parameter is ever consulted) -- a deliberate scope cut,
+    /// not confirmed to match real Fiddler's own ordering; see the
+    /// FiddlerScript Compatibility Design doc. On that forward path, each
+    /// hook forces the same body-buffering a matching breakpoint or
+    /// AutoResponder force-flag already forces (see
+    /// <see cref="IFiddlerScriptRunner.HasOnBeforeRequest"/>/
+    /// <see cref="IFiddlerScriptRunner.HasOnBeforeResponse"/>), and runs
+    /// *before* the corresponding breakpoint check -- the same order real
+    /// Fiddler uses (a script can set <c>oSession["x-breakrequest"]</c> to
+    /// arm a pause from inside <c>OnBeforeRequest</c> itself), even though
+    /// nothing here actually reads that flag back yet -- see
+    /// <c>BreakpointManager</c>'s own remarks on the pre-existing gap this
+    /// mirrors rather than silently fixes.
+    ///
+    /// <paramref name="extensionHost"/>'s Before hooks join that exact same
+    /// fork and run immediately after <paramref name="scriptRunner"/>'s own
+    /// (an assumed, not confirmed-against-real-Fiddler ordering -- see
+    /// <see cref="IExtensionAutoTamperHost"/>'s own remarks), so a loaded
+    /// extension always sees whatever FiddlerScript already edited. The
+    /// After hooks (<see cref="IExtensionAutoTamperHost.RunRequestAfter"/>/
+    /// <see cref="IExtensionAutoTamperHost.RunResponseAfter"/>) run
+    /// unconditionally right after the corresponding write completes, on
+    /// both the buffered and relay-live paths -- they never need to force
+    /// buffering (see that interface's own remarks on why), so unlike the
+    /// Before hooks they're called from a single spot after each fork
+    /// rejoins rather than from inside either branch.
     /// </summary>
     private static async Task PumpSessionsAsync(
         string targetHost,
@@ -228,6 +289,8 @@ public sealed class InterceptingProxyListener
         SessionStore sessionStore,
         BreakpointManager breakpointManager,
         AutoResponderRules autoResponderRules,
+        IFiddlerScriptRunner? scriptRunner,
+        IExtensionAutoTamperHost? extensionHost,
         CancellationToken cancellationToken)
     {
         TcpClient? upstreamClient = null;
@@ -337,12 +400,38 @@ public sealed class InterceptingProxyListener
                 // actually going to pause on it, relay it live otherwise.
                 // outcome.ForceBreakpointBeforeRequest folds AutoResponder's
                 // own *bpu into the exact same fork, rather than needing a
-                // second, parallel pause mechanism.
+                // second, parallel pause mechanism -- scriptRunner's own
+                // HasOnBeforeRequest joins that same fork for exactly the
+                // same reason: a loaded script that defines the handler is
+                // always going to want the body, same as a breakpoint would.
+                var mustBufferRequestForScript = scriptRunner?.HasOnBeforeRequest ?? false;
+                var mustBufferRequestForExtensions = extensionHost?.HasAnyRequestBeforeHandlers ?? false;
                 CapturedRequest request;
-                if (breakpointManager.WouldBreakBeforeRequest(outgoingPreamble) || outcome.ForceBreakpointBeforeRequest)
+                if (breakpointManager.WouldBreakBeforeRequest(outgoingPreamble) || outcome.ForceBreakpointBeforeRequest ||
+                    mustBufferRequestForScript || mustBufferRequestForExtensions)
                 {
                     var requestBody = await Http1MessageReader.ReadBodyAsync(clientTls, outgoingPreamble.Headers, cancellationToken);
                     request = outgoingPreamble with { Body = requestBody };
+
+                    // FiddlerScript's OnBeforeRequest, when the loaded
+                    // script defines it, runs before the breakpoint check
+                    // just below -- see this method's own remarks on why
+                    // that ordering (and not the reverse) is what matches
+                    // real Fiddler.
+                    if (mustBufferRequestForScript)
+                    {
+                        var peekedSessionId = sessionStore.PeekNextId();
+                        request = scriptRunner!.RunOnBeforeRequest(peekedSessionId, targetHost, request).Request;
+                    }
+
+                    // Loaded .NET extensions' own AutoTamperRequestBefore
+                    // hooks run next, after FiddlerScript's own handler --
+                    // see this method's own remarks on that ordering.
+                    if (mustBufferRequestForExtensions)
+                    {
+                        var peekedSessionId = sessionStore.PeekNextId();
+                        request = extensionHost!.RunRequestBefore(peekedSessionId, targetHost, request);
+                    }
 
                     // A breakpoint here (Fiddler's "bpu"/bpm/break-on-all-requests,
                     // or AutoResponder's own *bpu) can hold this connection
@@ -358,6 +447,12 @@ public sealed class InterceptingProxyListener
                     request = outgoingPreamble with { Body = requestBody };
                 }
 
+                // Fire-and-observe -- see this method's own remarks on why
+                // this runs unconditionally, from one spot after both
+                // branches above, rather than gated and duplicated inside
+                // each one.
+                extensionHost?.RunRequestAfter(sessionStore.PeekNextId(), targetHost, request);
+
                 var isHeadRequest = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
                 var responsePreamble = await Http1MessageReader.ReadResponsePreambleAsync(upstreamTls, cancellationToken);
                 if (responsePreamble is null)
@@ -369,13 +464,35 @@ public sealed class InterceptingProxyListener
 
                 var responseHasNoBody = Http1MessageReader.ResponseHasNoBody(responsePreamble.StatusCode, isHeadRequest);
 
+                // Same fork as the request side above, for OnBeforeResponse.
+                var mustBufferResponseForScript = scriptRunner?.HasOnBeforeResponse ?? false;
+                var mustBufferResponseForExtensions = extensionHost?.HasAnyResponseBeforeHandlers ?? false;
                 CapturedResponse response;
-                if (breakpointManager.WouldBreakBeforeResponse(request, responsePreamble) || outcome.ForceBreakpointAfterResponse)
+                if (breakpointManager.WouldBreakBeforeResponse(request, responsePreamble) || outcome.ForceBreakpointAfterResponse ||
+                    mustBufferResponseForScript || mustBufferResponseForExtensions)
                 {
                     var responseBody = responseHasNoBody
                         ? Array.Empty<byte>()
                         : await Http1MessageReader.ReadBodyAsync(upstreamTls, responsePreamble.Headers, cancellationToken);
                     response = responsePreamble with { Body = responseBody };
+
+                    // Same ordering rationale as the request side: the
+                    // script's own OnBeforeResponse runs before a human
+                    // ever sees this exchange at a breakpoint.
+                    if (mustBufferResponseForScript)
+                    {
+                        var peekedSessionId = sessionStore.PeekNextId();
+                        response = scriptRunner!.RunOnBeforeResponse(peekedSessionId, targetHost, request, response).Response;
+                    }
+
+                    // Loaded .NET extensions' own AutoTamperResponseBefore
+                    // hooks run next, after FiddlerScript's own handler --
+                    // same ordering as the request side above.
+                    if (mustBufferResponseForExtensions)
+                    {
+                        var peekedSessionId = sessionStore.PeekNextId();
+                        response = extensionHost!.RunResponseBefore(peekedSessionId, targetHost, request, response);
+                    }
 
                     response = await breakpointManager.ApplyResponseBreakpointAsync(
                         targetHost, request, response, cancellationToken);
@@ -395,6 +512,11 @@ public sealed class InterceptingProxyListener
                             upstreamTls, clientTls, responsePreamble.Headers, cancellationToken);
                     response = responsePreamble with { Body = responseBody };
                 }
+
+                // Fire-and-observe -- see this method's own remarks on why
+                // this runs unconditionally, from one spot after both
+                // branches above.
+                extensionHost?.RunResponseAfter(sessionStore.PeekNextId(), targetHost, request, response);
 
                 var session = sessionStore.Add(targetHost, startedAt, request, response);
                 Console.WriteLine(

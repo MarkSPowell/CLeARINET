@@ -49,4 +49,34 @@ public sealed class SessionStore
             return _sessions.ToArray();
         }
     }
+
+    /// <summary>
+    /// A best-effort look at the id the <em>next</em> session recorded via
+    /// <see cref="Add"/> will receive. Exists for FiddlerScript/extension
+    /// code that wants to read <c>oSession.id</c> from inside
+    /// <c>OnBeforeRequest</c>/<c>OnBeforeResponse</c> -- see
+    /// <c>Clearinet.ProxyCore.Scripting.IFiddlerScriptRunner</c> -- before
+    /// the session that exchange belongs to has actually been recorded here;
+    /// <see cref="Add"/> only assigns a real id once both the request and
+    /// the response are known, which for a request-side hook is still in the
+    /// future.
+    ///
+    /// <b>Best-effort under concurrency, not a reservation:</b> another
+    /// connection's own <see cref="Add"/> can run between this call
+    /// returning and the caller's own eventual <see cref="Add"/> call, so
+    /// the id actually assigned to that session can end up higher than
+    /// whatever this returned. There is deliberately no way to reserve an id
+    /// ahead of time -- that would need <see cref="Add"/> itself to change
+    /// shape (pre-allocate, then fill in later), which nothing today
+    /// requires closely enough to justify. This matches how real Fiddler's
+    /// own <c>oSession.id</c> numbering works in spirit: assigned by capture
+    /// order, not requested in advance.
+    /// </summary>
+    public int PeekNextId()
+    {
+        lock (_gate)
+        {
+            return _nextId;
+        }
+    }
 }

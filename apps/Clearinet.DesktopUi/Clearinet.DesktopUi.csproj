@@ -26,6 +26,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Clearinet.ProxyCore\Clearinet.ProxyCore.csproj" />
     <ProjectReference Include="..\..\src\Clearinet.Extensibility\Clearinet.Extensibility.csproj" />
+    <!-- For FiddlerScriptRunner: constructed here (the composition root,
+         same as BreakpointManager/AutoResponderRules above) and handed to
+         InterceptingProxyListener as Clearinet.ProxyCore.Scripting.IFiddlerScriptRunner.
+         See that interface's own remarks on why the dependency only points
+         this one direction. -->
+    <ProjectReference Include="..\..\src\Clearinet.Compatibility\Clearinet.Compatibility.csproj" />
   </ItemGroup>
 
   <!-- clearinet.webp (the splash-screen artwork and app icon) lives here,

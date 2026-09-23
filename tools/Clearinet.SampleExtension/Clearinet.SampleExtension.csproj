@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Clearinet.SampleExtension</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Clearinet.Compatibility\Clearinet.Compatibility.csproj" />
+    <ProjectReference Include="..\..\src\Clearinet.ProxyCore\Clearinet.ProxyCore.csproj" />
+  </ItemGroup>
+
+</Project>

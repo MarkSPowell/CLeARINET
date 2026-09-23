@@ -354,8 +354,48 @@ FiddlerScript compatibility as the higher-priority target — consistent
 with the research above (it's the everyday, lower-friction mechanism;
 compiled `.NET` extensions are the heavier, less-common path). Compiled
 extension support (`IFiddlerExtension`/`IAutoTamper*`/`Inspector2`/
-`ISessionImporter`/`ISessionExporter`) stays a real future target but is
-explicitly deferred, not abandoned.
+`ISessionImporter`/`ISessionExporter`) stayed a real future target but was
+initially deferred, not abandoned.
+
+**Update: compiled extension support has since started too**, prompted by
+a real example (a copy of the closed-source `SAZClipboard.dll` add-on) —
+see the new "CLeARINET .NET Extension Compatibility Design" doc for the
+full design, including an important finding: an already-compiled Fiddler
+Classic extension `.dll` can't bind against a CLeARINET-defined interface
+no matter how exactly it matches Fiddler's own (a CLR type-identity
+constraint, not a research gap), so this is source-level compatibility —
+ported extensions recompiled against CLeARINET's own interfaces — not
+binary compatibility with existing `.dll`s. A theoretical path to real
+binary compatibility (a runtime assembly-identity shim) was scoped but
+deliberately not built, pending Eric Lawrence's own input on it.
+
+**Update: compiled extension support is now wired end-to-end, not just
+the interfaces.** Folder discovery, `RequiredVersion` gating, and
+isolated `AssemblyLoadContext` loading; `IAutoTamper` running against real
+proxied traffic on the same fork FiddlerScript's own listener wiring uses;
+`Inspector2` adapted into the existing inspector tab UI; `ISessionImporter`/
+`ISessionExporter` wired into the File menu; and a read-only "Extensions"
+status panel in the main window (what folder was scanned, how many `.dll`s
+were found, and a per-interface load count) so discovery/loading results
+are visible without a console — see the .NET Extension Compatibility
+Design doc's own Phase 2 section for the full picture, including what's
+still simplified (a real format picker for import/export, and the
+binary-compatibility shim above, still the one deliberately unstarted
+piece).
+
+**Update: validated end-to-end against a real compiled `.dll`.**
+`tools/Clearinet.SampleExtension/` — an original sample extension
+implementing all five compiled-extension interfaces, with its own unit
+tests and a manual-check README — was built specifically to prove
+`ExtensionHost`'s discovery/gating/`AssemblyLoadContext` loading against
+a real, separately-compiled assembly, the one thing this sandbox's own
+in-process tests couldn't cover. Confirmed working on a real machine: the
+Extensions status panel above reported the sample `.dll` found and all six
+of its extension roles loaded. See the .NET Extension Compatibility
+Design doc's "Validation" section for the full detail and what's still
+only self-reported (the `IAutoTamper`/`Inspector2`/Import-Export runtime
+checks in that project's own README, not separately confirmed back to
+this session).
 
 **A load-bearing technical constraint discovered while scoping this,
 before any implementation started:** `Microsoft.JScript` (the JScript.NET
@@ -403,10 +443,35 @@ an *existing* `CustomRules.js` is actually written against. The engine,
 shim types, and JScript.NET-to-ECMAScript preprocessor are built and
 unit-tested (`src/Clearinet.Compatibility/FiddlerScript/`,
 `tests/Clearinet.Compatibility.Tests/`); wiring the result into
-`InterceptingProxyListener`'s real request/response flow, plus the
-Rules-menu/Context-Action/Tools-menu/custom-column UI surfaces the
-"everything" scope decision above covers, are the remaining, separately
-staged phases the design doc lays out.
+`InterceptingProxyListener`'s real request/response flow (Phase A2) is
+also now built — `Handlers.OnBeforeRequest`/`OnBeforeResponse` actually run
+against live traffic, with a small "load/reload a script" panel in the
+desktop app. See the design doc's own "Phase A2" section for the full
+wiring, including what it deliberately still leaves out.
+
+**Update: Phases B/C/D are now built too** — the Rules-menu, Context-Action,
+Tools-menu, and custom-grid-column UI surfaces the "everything" scope
+decision above covers are no longer separately staged future phases. A
+regex-based `FiddlerScriptDirectiveScanner` reads `[RulesOption]`/
+`[RulesString]`/`[BindPref]`/`[ContextAction]`/`[ToolsAction]`/
+`[BindUIColumn]` attributes straight out of a script's raw source (before
+the JScript.NET-to-ECMAScript preprocessor strips them) and wires them into
+a flat, `ItemsSource`-bound Rules menu (real Fiddler nests these under
+submenus; this project renders one flat list with a "Submenu: Option"
+label instead — a deliberate simplification, not a fidelity goal), a
+JSON-backed `FiddlerScriptPreferenceStore` under `%LocalAppData%\CLeARINET\`
+(mirroring `WinInetSystemProxy`'s own backup-file convention, and honoring
+Fiddler's own `fiddlerscript.ephemeral.*` naming as in-memory-only), a
+right-click session Context menu and a top-level Tools menu, and
+script-declared custom `DataGrid` columns. See the FiddlerScript
+Compatibility Design doc's own "Phase B/C/D" section for the full design
+and its flagged scope cuts, chief among them: `ContextAction` only ever
+operates on the single currently-selected session grid row (real Fiddler
+supports multi-select), a `ContextAction`'s edits to a session are never
+written back to `SessionStore`, custom columns are computed once at row
+creation rather than recomputed on script reload, and `BindUIColumn`'s
+`DisplayOrder`/`SortNumerically` parameters are scanned but not yet
+honored by the grid.
 
 ## Still undecided
 

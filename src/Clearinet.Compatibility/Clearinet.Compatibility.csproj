@@ -9,6 +9,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Clearinet.ProxyCore\Clearinet.ProxyCore.csproj" />
+    <!-- Added for Inspector2Adapter, which implements
+         Clearinet.Extensibility.Inspection.IInspector so a compiled
+         extension's IInspector2 can plug into the same inspector registry
+         FiddlerScript-independent inspectors already use. No cycle: this is
+         a new edge (Compatibility -> Extensibility); Extensibility itself
+         only ever references ProxyCore. -->
+    <ProjectReference Include="..\Clearinet.Extensibility\Clearinet.Extensibility.csproj" />
   </ItemGroup>
 
   <!-- Jint: a pure-C# ECMAScript interpreter, not a JScript.NET compiler;

@@ -24,12 +24,30 @@ public sealed class InspectorRegistry
         _inspectors = [.. inspectors];
     }
 
-    public static InspectorRegistry CreateDefault() => new(
-    [
-        new HeadersInspector(),
-        new RawTextInspector(),
-        new HexInspector(),
-    ]);
+    public static InspectorRegistry CreateDefault() => CreateDefault(additional: null);
+
+    /// <summary>
+    /// Same three built-ins as the parameterless overload, plus whatever
+    /// <paramref name="additional"/> inspectors a caller has on hand --
+    /// exactly the seam this class's own remarks anticipated for loading
+    /// third-party inspectors later. Used by <c>Clearinet.DesktopUi.ViewModels.MainWindowViewModel</c>
+    /// to fold in <c>Clearinet.Compatibility.Extensions.Inspector2Adapter</c>-wrapped
+    /// compiled-extension inspectors, discovered separately by
+    /// <c>Clearinet.Compatibility.Extensions.ExtensionHost</c> -- this class
+    /// itself stays unaware of extensions, .NET assemblies, or
+    /// <c>AssemblyLoadContext</c> entirely, only of <see cref="IInspector"/>.
+    /// </summary>
+    public static InspectorRegistry CreateDefault(IEnumerable<IInspector>? additional)
+    {
+        IInspector[] builtins =
+        [
+            new HeadersInspector(),
+            new RawTextInspector(),
+            new HexInspector(),
+        ];
+
+        return new InspectorRegistry(additional is null ? builtins : builtins.Concat(additional));
+    }
 
     /// <summary>
     /// The inspectors that apply to <paramref name="context"/>, sorted by

@@ -77,6 +77,50 @@
       <MenuItem Header="_File">
         <MenuItem Header="_Open SAZ…" Click="OpenSazMenuItem_Click" HotKey="Ctrl+O" />
         <MenuItem Header="_Save SAZ…" Command="{Binding SaveSazCommand}" HotKey="Ctrl+S" />
+        <!-- Enabled only once a loaded .NET extension actually proffers an
+             importer/exporter (see ExtensionHost); always present so the
+             menu's shape doesn't shift around based on what's installed.
+             Deliberately no per-format submenu here: see
+             MainWindowViewModel.ImportViaExtension's own remarks on why
+             this always uses the first loaded importer/exporter. -->
+        <Separator />
+        <MenuItem Header="Import via _Extension…" Command="{Binding ImportViaExtensionCommand}" />
+        <MenuItem Header="Export via Extensio_n…" Command="{Binding ExportViaExtensionCommand}" />
+      </MenuItem>
+
+      <!-- Phase B: one checkable entry per RulesOption/RulesStringChoice the
+           currently-loaded FiddlerScript declares (see
+           MainWindowViewModel.RulesMenuEntries's own remarks): empty, and
+           so effectively an empty dropdown, whenever nothing's loaded or
+           the loaded script declares none. Deliberately ItemsSource-bound
+           rather than a real nested Rules-menu submenu per RulesOption's
+           own SubmenuName: a single flat MenuItem.ItemsSource binding is a
+           well-worn, low-risk Avalonia pattern, where a recursive
+           hierarchical menu template is not; RulesMenuEntryViewModel.Header
+           already carries a "Submenu: Option" prefix for a grouped entry
+           instead, a readable stand-in for real nesting rather than a
+           fidelity goal. ToggleType="CheckBox" is what actually draws the
+           checkmark; IsChecked is two-way so both a click and a
+           script-driven radio-group clear (see RulesMenuEntryViewModel's
+           own SetCheckedWithoutNotifying) redraw correctly. -->
+      <MenuItem Header="_Rules" ItemsSource="{Binding RulesMenuEntries}">
+        <MenuItem.ItemTemplate>
+          <DataTemplate x:DataType="vm:RulesMenuEntryViewModel">
+            <MenuItem Header="{Binding Header}" ToggleType="CheckBox" IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+          </DataTemplate>
+        </MenuItem.ItemTemplate>
+      </MenuItem>
+
+      <!-- Phase C (Tools half): one entry per ToolsAction the
+           currently-loaded script declares: see ContextActionEntries
+           below, and the session grid's own ContextMenu, for the other
+           half (ContextAction). -->
+      <MenuItem Header="_Tools" ItemsSource="{Binding ToolsMenuEntries}">
+        <MenuItem.ItemTemplate>
+          <DataTemplate x:DataType="vm:ActionMenuEntryViewModel">
+            <MenuItem Header="{Binding Header}" Command="{Binding InvokeCommand}" />
+          </DataTemplate>
+        </MenuItem.ItemTemplate>
       </MenuItem>
     </Menu>
 
@@ -193,7 +237,15 @@
          MainWindowViewModel.IsBreakpointsPanelVisible) while a session is
          genuinely paused and blocked, even if every rule got cleared after
          it hit. Otherwise clearing the rules mid-pause would hide the only
-         way to Resume or Abort it. -->
+         way to Resume or Abort it. Wrapped in an Expander (see this
+         project's "reduce panel clutter" UI pass) so a person can collapse
+         it back down without needing to disarm whatever made it visible in
+         the first place: IsExpanded defaults to True, unlike the
+         FiddlerScript/Extensions tabs below, since a genuinely paused,
+         blocked connection is time-critical and shouldn't default to
+         hidden; this only adds a "collapse if you want the room" option on
+         top of the existing IsVisible gating, it doesn't change when the
+         panel shows up at all. -->
     <Border DockPanel.Dock="Top"
             IsVisible="{Binding IsBreakpointsPanelVisible}"
             Background="{DynamicResource AppPanelBrush}"
@@ -204,13 +256,9 @@
             Margin="0,0,0,14"
             MinHeight="48"
             MaxHeight="280">
-      <DockPanel>
-        <TextBlock DockPanel.Dock="Top"
-                   FontWeight="Bold"
-                   Foreground="{DynamicResource AppAccentBrush}"
-                   Margin="0,0,0,8"
-                   Text="{Binding PendingBreakpoints.Count, StringFormat='Breakpoints ({0})'}" />
-        <Grid ColumnDefinitions="260,4,*">
+      <Expander Header="{Binding PendingBreakpoints.Count, StringFormat='Breakpoints ({0})'}"
+                IsExpanded="True">
+        <Grid ColumnDefinitions="260,4,*" Margin="0,8,0,0">
           <ListBox Grid.Column="0"
                     ItemsSource="{Binding PendingBreakpoints}"
                     SelectedItem="{Binding SelectedPendingBreakpoint, Mode=TwoWay}">
@@ -238,7 +286,7 @@
                      FontFamily="Cascadia Mono,Consolas,monospace" />
           </DockPanel>
         </Grid>
-      </DockPanel>
+      </Expander>
     </Border>
 
     <!-- AutoResponder rules editor. Fiddler-Classic-style: an ordered list
@@ -252,7 +300,9 @@
          whenever the AutoResponder checkbox above is checked, regardless of
          whether any rules exist yet: same reasoning as
          IsBreakpointsPanelVisible, the toggle itself is what earns the
-         panel its space, not what's already in it. -->
+         panel its space, not what's already in it. Wrapped in an Expander,
+         same reasoning and default (IsExpanded="True") as the Breakpoints
+         panel above, see this project's "reduce panel clutter" UI pass. -->
     <Border DockPanel.Dock="Top"
             IsVisible="{Binding AutoResponderEnabled}"
             Background="{DynamicResource AppPanelBrush}"
@@ -263,37 +313,102 @@
             Margin="0,0,0,14"
             MinHeight="48"
             MaxHeight="280">
-      <DockPanel>
-        <TextBlock DockPanel.Dock="Top"
-                   FontWeight="Bold"
-                   Foreground="{DynamicResource AppAccentBrush}"
-                   Margin="0,0,0,8"
-                   Text="{Binding AutoResponderRuleRows.Count, StringFormat='AutoResponder rules ({0})'}" />
-        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
-          <Button Content="Add Rule" Command="{Binding AddAutoResponderRuleCommand}" Classes="accent" />
-          <Button Content="Remove" Command="{Binding RemoveAutoResponderRuleCommand}" />
-          <Button Content="Move Up" Command="{Binding MoveAutoResponderRuleUpCommand}" />
-          <Button Content="Move Down" Command="{Binding MoveAutoResponderRuleDownCommand}" />
-        </StackPanel>
-        <ListBox ItemsSource="{Binding AutoResponderRuleRows}"
-                 SelectedItem="{Binding SelectedAutoResponderRule, Mode=TwoWay}">
-          <ListBox.ItemTemplate>
-            <DataTemplate x:DataType="vm:AutoResponderRuleViewModel">
-              <Grid ColumnDefinitions="Auto,2*,3,3*" Margin="0,2">
-                <CheckBox Grid.Column="0" IsChecked="{Binding IsEnabled, Mode=TwoWay}" VerticalAlignment="Center" />
-                <TextBox Grid.Column="1"
-                         Text="{Binding MatchPattern, Mode=TwoWay}"
-                         PlaceholderText="Match: substring, *wildcard*, EXACT:…, regex:…, NOT:…, METHOD:verb …"
-                         FontFamily="Cascadia Mono,Consolas,monospace" />
-                <TextBox Grid.Column="3"
-                         Text="{Binding Action, Mode=TwoWay}"
-                         PlaceholderText="Action: file path, http(s)://url, *redir:, *delay:ms, *header:N=V, *reset, *drop, *bpu, *bpafter…"
-                         FontFamily="Cascadia Mono,Consolas,monospace" />
-              </Grid>
-            </DataTemplate>
-          </ListBox.ItemTemplate>
-        </ListBox>
-      </DockPanel>
+      <Expander Header="{Binding AutoResponderRuleRows.Count, StringFormat='AutoResponder rules ({0})'}"
+                IsExpanded="True">
+        <DockPanel Margin="0,8,0,0">
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+            <Button Content="Add Rule" Command="{Binding AddAutoResponderRuleCommand}" Classes="accent" />
+            <Button Content="Remove" Command="{Binding RemoveAutoResponderRuleCommand}" />
+            <Button Content="Move Up" Command="{Binding MoveAutoResponderRuleUpCommand}" />
+            <Button Content="Move Down" Command="{Binding MoveAutoResponderRuleDownCommand}" />
+          </StackPanel>
+          <ListBox ItemsSource="{Binding AutoResponderRuleRows}"
+                   SelectedItem="{Binding SelectedAutoResponderRule, Mode=TwoWay}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="vm:AutoResponderRuleViewModel">
+                <Grid ColumnDefinitions="Auto,2*,3,3*" Margin="0,2">
+                  <CheckBox Grid.Column="0" IsChecked="{Binding IsEnabled, Mode=TwoWay}" VerticalAlignment="Center" />
+                  <TextBox Grid.Column="1"
+                           Text="{Binding MatchPattern, Mode=TwoWay}"
+                           PlaceholderText="Match: substring, *wildcard*, EXACT:…, regex:…, NOT:…, METHOD:verb …"
+                           FontFamily="Cascadia Mono,Consolas,monospace" />
+                  <TextBox Grid.Column="3"
+                           Text="{Binding Action, Mode=TwoWay}"
+                           PlaceholderText="Action: file path, http(s)://url, *redir:, *delay:ms, *header:N=V, *reset, *drop, *bpu, *bpafter…"
+                           FontFamily="Cascadia Mono,Consolas,monospace" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Expander>
+    </Border>
+
+    <!-- FiddlerScript + Extensions: combined into one tabbed panel instead
+         of two permanently-stacked always-visible Borders (see this
+         project's "reduce panel clutter" UI pass: previously each was
+         its own full-width Border, present on screen at all times whether
+         or not either had anything to say). Neither needs to be visible at
+         the same moment as the other, so a TabControl, a well-worn,
+         low-risk Avalonia pattern (the same reasoning the Rules menu above
+         already gives for preferring a flat ItemsSource binding over a
+         recursive template), replaces two panels' worth of permanent
+         vertical space with one. Each tab keeps its own original content
+         unchanged; only the outer chrome (the per-panel Border + bold
+         header TextBlock) was collapsed into the TabControl's own tab
+         strip. A ScrollViewer around each tab's status text guards against
+         the Border's own MaxHeight clipping a long ExtensionStatus (many
+         LoadErrors) or FiddlerScriptStatus line, something neither panel
+         needed to guard against before this pass since neither had a
+         height cap at all.
+         FiddlerScript: one loaded CustomRules.js-shaped file, wired into
+         InterceptingProxyListener's OnBeforeRequest/OnBeforeResponse hook
+         points (see the FiddlerScript Compatibility Design doc's Phase A2
+         section). Load reads it in, Reload re-reads it after an edit (also
+         reachable from inside a running script via
+         FiddlerObject.ReloadScript(), see FiddlerScriptRunner's remarks).
+         Extensions: read-only status for compiled .NET extensions found by
+         ExtensionHost at startup (see ExtensionHost's own remarks on "load
+         once at startup" scope): built once, entirely from what Load()
+         found, so it stays accurate without depending on console output
+         being visible at all. -->
+    <Border DockPanel.Dock="Top"
+            Background="{DynamicResource AppPanelBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="12"
+            Margin="0,0,0,14"
+            MaxHeight="220">
+      <TabControl>
+        <TabItem Header="FiddlerScript">
+          <DockPanel Margin="0,8,0,0">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8">
+              <TextBox Text="{Binding FiddlerScriptPath, Mode=TwoWay}"
+                       PlaceholderText="Path to a CustomRules.js-shaped script…"
+                       FontFamily="Cascadia Mono,Consolas,monospace"
+                       VerticalAlignment="Center"
+                       Width="420" />
+              <Button Content="Load" Command="{Binding LoadFiddlerScriptCommand}" Classes="accent" />
+              <Button Content="Reload" Command="{Binding ReloadFiddlerScriptCommand}" />
+            </StackPanel>
+            <ScrollViewer>
+              <TextBlock Text="{Binding FiddlerScriptStatus}"
+                         Foreground="{DynamicResource AppMutedTextBrush}"
+                         TextWrapping="Wrap"
+                         Margin="0,8,0,0" />
+            </ScrollViewer>
+          </DockPanel>
+        </TabItem>
+        <TabItem Header="Extensions">
+          <ScrollViewer Margin="0,8,0,0">
+            <TextBlock Text="{Binding ExtensionStatus}"
+                       Foreground="{DynamicResource AppMutedTextBrush}"
+                       TextWrapping="Wrap"
+                       FontFamily="Cascadia Mono,Consolas,monospace" />
+          </ScrollViewer>
+        </TabItem>
+      </TabControl>
     </Border>
 
     <!-- Status bar: docked to the window's bottom edge regardless of where
@@ -342,6 +457,7 @@
            classic reflection bindings rather than fighting the project-wide
            AvaloniaUseCompiledBindingsByDefault default. -->
       <DataGrid Grid.Row="0"
+                x:Name="SessionsDataGrid"
                 x:CompileBindings="False"
                 ItemsSource="{Binding FilteredSessions}"
                 SelectedItem="{Binding SelectedSessionRow, Mode=TwoWay}"
@@ -356,6 +472,26 @@
                 Background="{DynamicResource AppPanelBrush}"
                 RowBackground="Transparent"
                 HorizontalGridLinesBrush="{DynamicResource AppBorderBrush}">
+        <!-- Phase C (Context-menu half): one entry per ContextAction the
+             currently-loaded script declares, operating on
+             SelectedSessionRow (see MainWindowViewModel.InvokeContextAction's
+             own remarks on the single-session scope cut this takes vs. real
+             Fiddler's own multi-select Session[]). Note this menu is set on
+             the grid as a whole, not per row: a right-click doesn't
+             necessarily move SelectedItem the way a left-click does, so
+             worth confirming against the real running app whether a
+             ContextAction ends up operating on the row actually clicked, or
+             on whatever was last left-selected; flagged here rather than
+             assumed. -->
+        <DataGrid.ContextMenu>
+          <ContextMenu ItemsSource="{Binding ContextActionEntries}">
+            <ContextMenu.ItemTemplate>
+              <DataTemplate x:DataType="vm:ActionMenuEntryViewModel">
+                <MenuItem Header="{Binding Header}" Command="{Binding InvokeCommand}" />
+              </DataTemplate>
+            </ContextMenu.ItemTemplate>
+          </ContextMenu>
+        </DataGrid.ContextMenu>
         <DataGrid.Columns>
           <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="50" />
           <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="80" />

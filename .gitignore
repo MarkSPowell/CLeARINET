@@ -40,3 +40,4 @@ Thumbs.db
 # Personal build/test/run shortcut -- convenient locally, not meant to
 # become a maintained, cross-platform project script.
 /test.bat
+/Local Resources
