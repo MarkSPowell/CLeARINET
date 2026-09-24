@@ -9,6 +9,7 @@ using Clearinet.Extensibility.Inspection;
 using Clearinet.ProxyCore.AutoResponder;
 using Clearinet.ProxyCore.Breakpoints;
 using Clearinet.ProxyCore.Certificates;
+using Clearinet.ProxyCore.Extensions;
 using Clearinet.ProxyCore.Proxy;
 using Clearinet.ProxyCore.Sessions;
 using Clearinet.ProxyCore.SystemProxy;
@@ -61,6 +62,19 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private readonly ExtensionHost _extensionHost;
 
+    /// <summary>
+    /// Manages the optional, opt-in launch/stop lifecycle of
+    /// <c>Clearinet.LegacyExtensionHost.exe</c> -- see
+    /// <see cref="AutoLaunchLegacyHost"/> for the opt-in gate, and
+    /// <see cref="LegacyExtensionHostLauncher"/>'s own remarks for why this
+    /// is opt-in rather than automatic. One instance for the app's whole
+    /// lifetime, the same reasoning as <see cref="_fiddlerScriptRunner"/>:
+    /// it needs to remember, across a <see cref="Stop"/> call, whether it
+    /// was the one that actually launched the process, so <see cref="Stop"/>
+    /// never closes a legacy host someone else started.
+    /// </summary>
+    private readonly LegacyExtensionHostLauncher _legacyExtensionHostLauncher = new();
+
     private CertificateAuthority? _authority;
     private InterceptingProxyListener? _proxy;
     private string _statusText;
@@ -76,8 +90,11 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     private string _fiddlerScriptPath = string.Empty;
     private string _fiddlerScriptStatus = "No script loaded.";
     private string _extensionStatus = "Not scanned yet.";
+    private bool _autoLaunchLegacyHost;
+    private string _legacyExtensionHostStatus = "Auto-launch is off -- Tools -> Legacy Extension Host to turn it on, then Start.";
     private bool _showFiddlerScriptPanel;
     private bool _showExtensionsPanel;
+    private bool _showLegacyExtensionHostPanel;
     private bool _showAlsoBreakOnRow;
 
     /// <summary>
@@ -401,6 +418,39 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         private set => SetField(ref _extensionStatus, value);
     }
 
+    /// <summary>
+    /// This app's own opt-in switch for whether <see cref="Start"/> should
+    /// try to launch <c>Clearinet.LegacyExtensionHost.exe</c> itself (via
+    /// <see cref="_legacyExtensionHostLauncher"/>) before probing the
+    /// session bridge, rather than requiring a person to have already
+    /// started it by hand. Defaults to <see langword="false"/> -- see
+    /// <see cref="LegacyExtensionHostLauncher"/>'s own remarks on why this
+    /// is opt-in, not automatic. Purely a switch: flipping it doesn't launch
+    /// or stop anything by itself, only the next <see cref="Start"/>/
+    /// <see cref="Stop"/> click does.
+    /// </summary>
+    public bool AutoLaunchLegacyHost
+    {
+        get => _autoLaunchLegacyHost;
+        set => SetField(ref _autoLaunchLegacyHost, value);
+    }
+
+    /// <summary>
+    /// What the Legacy Extension Host panel's status line shows --
+    /// <see cref="LegacyExtensionHostLauncher.Result.Message"/> from the
+    /// most recent <see cref="Start"/> call (when <see cref="AutoLaunchLegacyHost"/>
+    /// was on), a note that auto-launch is off (when it wasn't), or
+    /// <see cref="LegacyExtensionHostLauncher"/>'s own stop-side log line
+    /// folded in after <see cref="Stop"/>. Purely informational, the same
+    /// role <see cref="ExtensionStatus"/> plays for in-process compiled
+    /// extensions.
+    /// </summary>
+    public string LegacyExtensionHostStatus
+    {
+        get => _legacyExtensionHostStatus;
+        private set => SetField(ref _legacyExtensionHostStatus, value);
+    }
+
     public RelayCommand LoadFiddlerScriptCommand { get; }
     public RelayCommand ReloadFiddlerScriptCommand { get; }
 
@@ -434,6 +484,21 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         get => _showExtensionsPanel;
         set => SetField(ref _showExtensionsPanel, value);
+    }
+
+    /// <summary>
+    /// Whether the Legacy Extension Host panel shows on the main screen --
+    /// the checkable "_Tools -&gt; Legacy Extension Host" entry is this
+    /// property's only writer, same reasoning and default
+    /// (<see langword="false"/>) as <see cref="ShowExtensionsPanel"/>.
+    /// Purely a visibility switch: <see cref="AutoLaunchLegacyHost"/> and
+    /// <see cref="LegacyExtensionHostStatus"/> both work the same whether or
+    /// not this happens to be checked.
+    /// </summary>
+    public bool ShowLegacyExtensionHostPanel
+    {
+        get => _showLegacyExtensionHostPanel;
+        set => SetField(ref _showLegacyExtensionHostPanel, value);
     }
 
     /// <summary>
@@ -803,9 +868,44 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // preferred port first.
             var requestedPort = UseAutomaticPort ? 0 : (int)(PreferredPort ?? DefaultPreferredPort);
 
+            // Opt-in only -- see AutoLaunchLegacyHost's and
+            // LegacyExtensionHostLauncher's own remarks on why this never
+            // runs unless the person has explicitly turned it on. Runs
+            // before the Probe() call just below (not after) so a
+            // freshly-launched process has a real chance of being wired in
+            // for *this* Start, not just discovered on the next one --
+            // LegacyExtensionHostLauncher.EnsureRunning itself waits (up to
+            // a bounded timeout) for the process's pipe to actually come up
+            // before returning, specifically so this ordering works.
+            if (AutoLaunchLegacyHost)
+            {
+                var launchResult = _legacyExtensionHostLauncher.EnsureRunning(
+                    log: message => Console.WriteLine($"[Extension] {message}"));
+                LegacyExtensionHostStatus = launchResult.Message;
+            }
+            else
+            {
+                LegacyExtensionHostStatus = "Auto-launch is off -- Tools -> Legacy Extension Host to turn it on.";
+            }
+
+            // Probed fresh on every Start() click, deliberately unlike
+            // _extensionHost above (loaded once, at app launch, never
+            // reloaded) -- see LegacyExtensionHostBridgeClient's own
+            // remarks for why: the legacy host .exe is a separate,
+            // optional process a person may well launch (or relaunch)
+            // *after* opening CLeARINET, and re-probing here means Stop
+            // then Start picks that up with no restart of this app needed.
+            // Probing never throws and never blocks longer than
+            // SessionBridgeProtocol.ConnectTimeoutMilliseconds -- see that
+            // class's own remarks -- so this stays safe to call
+            // unconditionally whether or not anyone is using the legacy
+            // host at all.
+            var legacyBridge = LegacyExtensionHostBridgeClient.Probe(
+                log: message => Console.WriteLine($"[Extension] {message}"));
+
             _proxy = InterceptingProxyListener.StartOnAvailablePort(
                 requestedPort, leafProvider, _sessionStore, _breakpointManager, _autoResponderRules, _fiddlerScriptRunner,
-                _extensionHost.CreateAutoTamperHost());
+                new CompositeExtensionAutoTamperHost([_extensionHost.CreateAutoTamperHost(), legacyBridge]));
             IsRunning = true;
             PreferredPort = _proxy.Port;
 
@@ -854,6 +954,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _proxy = null;
         WinInetSystemProxy.Disable();
         IsRunning = false;
+
+        // A no-op unless this app's own Start() is what launched the legacy
+        // host in the first place (see LegacyExtensionHostLauncher's own
+        // remarks) -- a legacy host reachable because a person started it
+        // themselves is left running exactly as it was before this Stop
+        // click, matching the "never a hard dependency, never a surprise"
+        // posture the rest of this feature already commits to.
+        _legacyExtensionHostLauncher.StopIfLaunchedByUs(
+            log: message => Console.WriteLine($"[Extension] {message}"));
 
         // Defensive rather than load-bearing -- SessionAdded can't fire
         // while stopped, so nothing would restart the timer from here on.
@@ -1339,6 +1448,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // above and deserves its OnBeforeUnload() call, matching
         // IFiddlerExtension's own paired-lifecycle contract.
         _extensionHost.Unload();
+
+        // Also regardless of whether the proxy is currently running --
+        // unlike the _proxy.Stop() block just below, this can't simply be
+        // reached by falling through the early-return, because EnsureRunning
+        // (see Start()) can succeed even in the rare case where the proxy
+        // listener itself then fails to start, which would otherwise leave
+        // an orphaned legacy host process behind if the app closes (rather
+        // than Stop being clicked first) while _proxy never got set. A
+        // no-op either way unless this app's own Start() actually launched
+        // something -- see LegacyExtensionHostLauncher's own remarks.
+        _legacyExtensionHostLauncher.StopIfLaunchedByUs(
+            log: message => Console.WriteLine($"[Extension] {message}"));
 
         if (_proxy is null)
         {

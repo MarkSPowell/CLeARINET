@@ -48,3 +48,6 @@ Thumbs.db
 # Personal build/test/run shortcut -- convenient locally, not meant to
 # become a maintained, cross-platform project script.
 /test.bat
+tools/Clearinet.LegacyExtensionHost/Retarget-LegacyExtension.ps1
+tools/Clearinet.LegacyExtensionHost/Retarget-LegacyExtension.ps1
+tools/Clearinet.LegacyExtensionHost/Retarget-LegacyExtension.ps1

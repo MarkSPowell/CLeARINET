@@ -116,6 +116,36 @@ jobs:
           -p:InformationalVersion=${{ steps.version.outputs.version }}
           --output publish/win-x64
 
+                # Independently built from the main app on purpose -- see this
+      # project's own csproj header comment ("deliberately NOT referenced
+      # by the main CLeARINET.sln/apps/Clearinet.DesktopUi... so it can
+      # never affect the main app's build or release"). This step exists
+      # only so the installer below has something to package for the
+      # optional "legacyhost" Task; skipping/failing it would never affect
+      # the main app's own publish step above, which already ran.
+      #
+      # Plain `dotnet build` with --output, not `dotnet publish`: this is a
+      # net48 project (framework-dependent, not self-contained the way the
+      # win-x64 net10 app above is -- .NET Framework 4.8 ships with Windows
+      # 10/11 already, the same dependency real Fiddler Classic itself
+      # had), so there's no publish-specific packaging step to gain here.
+      # --output flattens this project's own build output *and* its
+      # ProjectReferences' outputs (Clearinet.CompatShim.dll,
+      # Clearinet.LegacyExtensionHost.Bridge.dll) into one folder, exactly
+      # matching what Clearinet.LegacyExtensionHost.csproj's own
+      # CopyOutputToDesktopUiLegacyHostFolder dev-build step already copies
+      # into a local LegacyHost folder -- see that target's own remarks.
+      # No explicit --runtime win-x86: the project's own PlatformTarget=x86
+      # (pinned for real extensions like AustralianImages.dll that only
+      # load 32-bit) already governs the bitness of what gets built; win-x86
+      # would ask for a self-contained-style RID-qualified output this
+      # framework-dependent project doesn't need.
+      - name: Build legacy extension host (optional installer component)
+        run: >-
+          dotnet build tools/Clearinet.LegacyExtensionHost/Clearinet.LegacyExtensionHost/Clearinet.LegacyExtensionHost.csproj
+          --configuration Release
+          --output publish/legacyhost
+          
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
@@ -126,6 +156,7 @@ jobs:
             "/DMyAppVersion=${{ steps.version.outputs.version }}" `
             "/DMyFileVersion=${{ steps.version.outputs.fileVersion }}" `
             "/DPublishDir=${{ github.workspace }}\publish\win-x64" `
+            "/DLegacyHostDir=${{ github.workspace }}\publish\legacyhost" `
             installer\CLeARINET.iss
 
       - name: Upload installer as a build artifact

@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The wire contract shared by both sides of the session bridge (see the
+    design doc's "Session bridge" section): CLeARINET's main app
+    (net10.0, apps/Clearinet.DesktopUi via src/Clearinet.Compatibility) on
+    one end, and this repo's own Clearinet.LegacyExtensionHost (net48) on
+    the other. netstandard2.0 is the one target both of those can actually
+    reference: net10.0 accepts it directly, and net48 has supported
+    netstandard2.0 since its own release, so this is the natural meeting
+    point rather than picking either side's own TFM and asking the other
+    to cross-target.
+
+    Deliberately just data shapes and framing here, no pipe I/O and no
+    reference to Fiddler.Session or Clearinet.ProxyCore.Http.CapturedRequest/
+    CapturedResponse on either side. Keeping this project dependency-free
+    (nothing but System.Text.Json) is what lets it sit in the middle
+    without dragging net48-only or net10.0-only types across the boundary.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>10.0</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Clearinet.LegacyExtensionHost.Bridge</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- netstandard2.0 has no built-in System.Text.Json (that only ships
+         in-box starting net5.0). Needed explicitly here so both a net48
+         and a net10.0 consumer get the same serializer behavior rather
+         than each reaching for a different JSON library. -->
+    <PackageReference Include="System.Text.Json" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>

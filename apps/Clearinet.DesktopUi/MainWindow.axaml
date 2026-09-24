@@ -145,6 +145,7 @@
       <MenuItem Header="_Tools">
         <MenuItem Header="FiddlerScript" ToggleType="CheckBox" IsChecked="{Binding ShowFiddlerScriptPanel, Mode=TwoWay}" />
         <MenuItem Header="Extensions" ToggleType="CheckBox" IsChecked="{Binding ShowExtensionsPanel, Mode=TwoWay}" />
+        <MenuItem Header="Legacy Extension Host" ToggleType="CheckBox" IsChecked="{Binding ShowLegacyExtensionHostPanel, Mode=TwoWay}" />
         <MenuItem Header="Break on Requests" ToggleType="CheckBox" IsChecked="{Binding BreakOnAllRequests, Mode=TwoWay}" />
         <MenuItem Header="Break on Responses" ToggleType="CheckBox" IsChecked="{Binding BreakOnAllResponses, Mode=TwoWay}" />
         <MenuItem Header="Also Break On" ToggleType="CheckBox" IsChecked="{Binding ShowAlsoBreakOnRow, Mode=TwoWay}" />
@@ -541,6 +542,45 @@
                    Text="Extensions" />
         <ScrollViewer>
           <TextBlock Text="{Binding ExtensionStatus}"
+                     Foreground="{DynamicResource AppMutedTextBrush}"
+                     TextWrapping="Wrap"
+                     FontFamily="Cascadia Mono,Consolas,monospace" />
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <!-- Legacy Extension Host: the opt-in checkbox and status line for
+         LegacyExtensionHostLauncher (see that class's own remarks and the
+         .NET Extension Compatibility Design doc's "session bridge" section
+         for the full picture). Same Border/DockPanel shape as the Extensions
+         panel just above (own visibility toggle, own "_Tools -&gt; Legacy
+         Extension Host" entry), plus one CheckBox this panel alone needs:
+         AutoLaunchLegacyHost defaults to false, so this checkbox is the only
+         way it ever becomes true. A ScrollViewer around the status text for
+         the same reason as the two panels above: a launch-failure message
+         naming a full path can run long. -->
+    <Border DockPanel.Dock="Top"
+            IsVisible="{Binding ShowLegacyExtensionHostPanel}"
+            Background="{DynamicResource AppPanelBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="12"
+            Margin="0,0,0,14"
+            MaxHeight="220">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top"
+                   FontWeight="Bold"
+                   Foreground="{DynamicResource AppAccentBrush}"
+                   Margin="0,0,0,8"
+                   Text="Legacy Extension Host" />
+        <CheckBox DockPanel.Dock="Top"
+                   IsChecked="{Binding AutoLaunchLegacyHost, Mode=TwoWay}"
+                   Margin="0,0,0,8"
+                   Content="Launch Clearinet.LegacyExtensionHost.exe automatically on Start"
+                   ToolTip.Tip="Off by default -- when on, clicking Start also tries to launch the legacy extension host from its expected LegacyHost subfolder (if it isn't already running) before wiring up the session bridge. Never a hard dependency either way: Start still works exactly as before if this is off, or if the process can't be found." />
+        <ScrollViewer>
+          <TextBlock Text="{Binding LegacyExtensionHostStatus}"
                      Foreground="{DynamicResource AppMutedTextBrush}"
                      TextWrapping="Wrap"
                      FontFamily="Cascadia Mono,Consolas,monospace" />

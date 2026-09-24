@@ -16,6 +16,16 @@
          a new edge (Compatibility -> Extensibility); Extensibility itself
          only ever references ProxyCore. -->
     <ProjectReference Include="..\Clearinet.Extensibility\Clearinet.Extensibility.csproj" />
+    <!-- LegacyExtensionHostBridgeClient's wire contract with the out-of-process
+         legacy host (tools\Clearinet.LegacyExtensionHost\). See the design
+         doc's "Session bridge" section, and that project's own csproj
+         remarks on why netstandard2.0 is the shared meeting point. This is
+         the one edge connecting the main CLeARINET.sln to anything under
+         tools\Clearinet.LegacyExtensionHost\: deliberately just the
+         dependency-free wire-contract project, never
+         Clearinet.LegacyExtensionHost/.CompatShim/.Tests themselves, so
+         nothing net48-only crosses into the main app's build. -->
+    <ProjectReference Include="..\..\tools\Clearinet.LegacyExtensionHost\Clearinet.LegacyExtensionHost.Bridge\Clearinet.LegacyExtensionHost.Bridge.csproj" />
   </ItemGroup>
 
   <!-- Jint: a pure-C# ECMAScript interpreter, not a JScript.NET compiler;

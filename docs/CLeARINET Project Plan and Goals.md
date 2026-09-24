@@ -59,6 +59,25 @@ itself (see `CONTRIBUTING.md`'s no-relicensing commitment).
    dependency on Avalonia or any other UI toolkit — `SessionQuery`,
    `BreakpointRules`, and the `IInspector` contract are all plain,
    UI-framework-neutral types for exactly this reason.
+5. **Don't get sued.** Discovered as an explicit, named tenet during the
+   legacy-extension-compatibility work (see
+   `docs/CLeARINET .NET Extension Compatibility Design.md`, "Strategy 5 —
+   adopted"), where it overrode a real usability regression: the
+   compat shim's assembly identity was deliberately changed from
+   `Fiddler` to `Clearinet.Fiddler`, which means none of the five real,
+   unmodified sample extensions this project validated load out of the
+   box anymore — trading that away specifically to remove the sharpest
+   trademark-exposure fact pattern (a binary presenting itself, at the
+   CLR-binder level, as genuine third-party software) rather than wait on
+   a pending legal question to resolve itself. Carried a step further
+   since (see the design doc's "Update — naming question closed: the
+   second rename"): the shim's current name is `Clearinet.CompatShim`,
+   dropping `Fiddler` from its own identity entirely, and the project has
+   decided to treat the naming question as resolved on that basis rather
+   than wait on outside sign-off before shipping. This tenet ranks above
+   tenet 1's compatibility goal whenever the two conflict: fidelity to
+   Fiddler Classic's own behavior is this project's means, not an end
+   worth legal risk on its own.
 
 ## Clean-room policy
 
@@ -366,8 +385,12 @@ no matter how exactly it matches Fiddler's own (a CLR type-identity
 constraint, not a research gap), so this is source-level compatibility —
 ported extensions recompiled against CLeARINET's own interfaces — not
 binary compatibility with existing `.dll`s. A theoretical path to real
-binary compatibility (a runtime assembly-identity shim) was scoped but
-deliberately not built, pending Eric Lawrence's own input on it.
+binary compatibility (a runtime assembly-identity shim) was scoped here;
+at the time this was written it was deliberately not built, pending Eric
+Lawrence's own input on it. It has since been built regardless (see the
+next update and tenet 5 above) — the design doc's "Update — naming
+question closed: the second rename" has the full reasoning for why this
+stopped waiting on that input.
 
 **Update: compiled extension support is now wired end-to-end, not just
 the interfaces.** Folder discovery, `RequiredVersion` gating, and
@@ -379,9 +402,9 @@ status panel in the main window (what folder was scanned, how many `.dll`s
 were found, and a per-interface load count) so discovery/loading results
 are visible without a console — see the .NET Extension Compatibility
 Design doc's own Phase 2 section for the full picture, including what's
-still simplified (a real format picker for import/export, and the
-binary-compatibility shim above, still the one deliberately unstarted
-piece).
+still simplified (a real format picker for import/export). The
+binary-compatibility shim mentioned as deliberately unstarted above has
+since been built — see the two updates below.
 
 **Update: validated end-to-end against a real compiled `.dll`.**
 `tools/Clearinet.SampleExtension/` — an original sample extension
@@ -396,6 +419,39 @@ Design doc's "Validation" section for the full detail and what's still
 only self-reported (the `IAutoTamper`/`Inspector2`/Import-Export runtime
 checks in that project's own README, not separately confirmed back to
 this session).
+
+**Update: a whole second, out-of-process extension path is now built
+too, for the extensions the in-process approach above can never reach.**
+`ExtensionHost` above only ever runs *source-recompiled* extensions
+in-process, inside CLeARINET's own .NET 10 process — a Fiddler Classic
+extension `.dll` that reaches into WinForms UI types Microsoft removed
+from .NET 5+ (`MenuItem`, `MainMenu`, `ContextMenu`, `StatusBarPanel`)
+can't run there at all, no matter how faithfully `ExtensionHost`'s own
+interfaces are reproduced — a .NET Core/5+ process simply has nowhere to
+put those types. `tools/Clearinet.LegacyExtensionHost/` is the answer: a
+separate, optional, `net48` WinForms process that hosts these extensions
+against a real WinForms window instead. Not a drop-in-the-unmodified-`.dll`
+story, though, same as tenet 5's rename history above already implies:
+the CompatShim assembly this section's own rename history is about no
+longer presents itself as the real `Fiddler` assembly at the binder
+level, so a real extension still needs to be recompiled (if its source is
+available) or have its own `AssemblyRef` metadata retargeted (a
+metadata-only edit, not a source or behavior change — see
+`AssemblyMismatch`'s own remarks and `Retarget-LegacyExtension.ps1`)
+before it binds here at all.
+Built in stages, each with its own design doc section: discovery/loading
+against real extension `.dll`s (Phase 1); a named-pipe session bridge so
+a loaded extension's `IAutoTamper` hooks run against CLeARINET's own real
+proxied traffic, not synthetic data ("The legacy host's session bridge");
+`apps/Clearinet.DesktopUi` itself starting and stopping the process,
+opt-in and off by default ("The legacy host's launch/stop lifecycle");
+and, most recently, an optional, unchecked-by-default Inno Setup
+component so a real installed release can carry this process too, not
+just a `dotnet run` dev checkout. See that tool's own README and the
+.NET Extension Compatibility Design doc for the full detail, including
+what still isn't bridged (`Inspector2`, `ISessionImporter`/
+`ISessionExporter`, `IHandleExecAction`) and what's still unconfirmed
+back to this session for lack of a Windows machine to run any of it on.
 
 **A load-bearing technical constraint discovered while scoping this,
 before any implementation started:** `Microsoft.JScript` (the JScript.NET

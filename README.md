@@ -53,6 +53,14 @@ here yet. Feedback and issues are welcome.
   startup — AutoTamper hooks, request/response inspectors, and session
   import/export are all supported; see the .NET Extension Compatibility
   Design doc.
+- Optional legacy extension host: a separate, opt-in tool
+  (`tools/Clearinet.LegacyExtensionHost`) that runs real, unmodified-source
+  Fiddler Classic extensions against real proxied traffic, bridged to the
+  main app over a local IPC connection, for extensions that reach into UI
+  surface removed from modern .NET — not part of the main app's own build,
+  but available as an unchecked-by-default optional component in the
+  Windows installer; see that tool's own README and the .NET Extension
+  Compatibility Design doc.
 - A **Tools** menu of checkable toggles that show or hide the
   FiddlerScript, Extensions, breakpoint-condition, and AutoResponder
   panels on the main screen, so only what you're actually using takes up
@@ -119,6 +127,12 @@ captured ever leaves the device on its own.
   extension used to validate `ExtensionHost` against a real `.dll` rather
   than only in-process fakes; see its own README for what it demonstrates
   and how to build it.
+- `tools/Clearinet.LegacyExtensionHost` — the optional, separate legacy
+  extension host: a `net48` process that can run real, unmodified-source
+  Fiddler Classic extensions, bridged to the main app's own proxied
+  traffic. Deliberately kept out of `CLeARINET.sln`/the main app's build
+  entirely, so nothing about it can affect either — see its own README and
+  the .NET Extension Compatibility Design doc.
 - `tests/` — unit tests for the projects above.
 
 ## Known limitations
@@ -139,10 +153,17 @@ way:
   doc.)
 - **No HAR or Chromium Netlog import**, and no explicit HTTP/2 or TLS 1.3
   handling yet.
-- **No compiled-extension binary-compatibility shim.** An already-compiled
-  Fiddler Classic extension `.dll` can't be loaded as-is; a new extension
-  has to be built against CLeARINET's own (source-level compatible)
-  interfaces. See the .NET Extension Compatibility Design doc.
+- **The main app's own compiled-extension support is source-level, not
+  binary.** An already-compiled Fiddler Classic extension `.dll` can't be
+  dropped straight into CLeARINET's own Extensions folder as-is; a new
+  extension has to be built against CLeARINET's own (source-level
+  compatible) interfaces. Real binary compatibility does exist, just not
+  here — see `tools/Clearinet.LegacyExtensionHost`, the separate, optional
+  legacy extension host above, which runs real unmodified-*source*
+  extensions (recompiled against its own compat assembly) against real
+  proxied traffic; it's not part of the main app's own build, but the
+  Windows installer can include it as an unchecked-by-default optional
+  component.
 - **No import/export format picker.** With more than one loaded extension
   proffering session import or export, File > Import/Export via Extension
   always uses the first one found rather than letting you choose.

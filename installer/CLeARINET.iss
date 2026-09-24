@@ -1,10 +1,11 @@
 ; CLeARINET Windows installer (Inno Setup).
 ;
 ; Built by .github/workflows/release-windows.yml, which passes MyAppVersion,
-; MyFileVersion, and PublishDir on the command line via /D; the #ifndef
-; fallbacks below exist purely so this script still compiles (with
-; placeholder values) if someone runs ISCC.exe against it directly while
-; testing, without having to remember all three /D switches every time.
+; MyFileVersion, PublishDir, and LegacyHostDir on the command line via /D;
+; the #ifndef fallbacks below exist purely so this script still compiles
+; (with placeholder values) if someone runs ISCC.exe against it directly
+; while testing, without having to remember all four /D switches every
+; time.
 ;
 ; MyAppVersion and MyFileVersion are deliberately two different strings,
 ; not one reused in two places: MyAppVersion can be anything (this
@@ -46,6 +47,9 @@
 #endif
 #ifndef PublishDir
   #define PublishDir "..\publish\win-x64"
+#endif
+#ifndef LegacyHostDir
+  #define LegacyHostDir "..\publish\legacyhost"
 #endif
 
 #define MyAppName "CLeARINET"
@@ -107,6 +111,15 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+; Off by default, deliberately -- mirrors the main app's own posture for
+; this feature (MainWindowViewModel.AutoLaunchLegacyHost also defaults to
+; false; see LegacyExtensionHostLauncher's own remarks: "not just 'safe if
+; it isn't running,' but 'won't even try to make it exist unless asked'").
+; A Task, not a [Components]/[Types] split: this installer only ever
+; produces one product either way, and a Task is the simplest mechanism
+; that already exists in this file (see "desktopicon" above) for "only
+; copy these files if the person checked this box."
+Name: "legacyhost"; Description: "Legacy Fiddler Classic extension host (runs real, unmodified compiled Fiddler Classic extensions against CLeARINET's own traffic -- optional, and unrelated to normal use)"; GroupDescription: "Optional components:"; Flags: unchecked
 
 [Files]
 ; Everything dotnet publish produced -- the single-file app exe, its
@@ -116,6 +129,19 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 ; the exe itself. recursesubdirs/createallsubdirs so that Documentation
 ; folder comes along intact.
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; Only copied if the "legacyhost" Task above is checked. DestDir matches
+; LegacyExtensionHostLauncher.ExpectedExecutablePath's own fixed path
+; convention exactly (<main app's own exe folder>\LegacyHost\...) -- see
+; that class's own remarks and the .NET Extension Compatibility Design
+; doc's "legacy host launch/stop lifecycle" section for why this is a
+; convention, not a setting. {#LegacyHostDir} is release-windows.yml's own
+; `dotnet build ... --output publish\legacyhost` step's output -- a plain
+; framework-dependent net48 build (this is a net48 app; .NET Framework 4.8
+; ships with Windows 10/11 already), flattened to include its own
+; ProjectReferences (Clearinet.CompatShim.dll,
+; Clearinet.LegacyExtensionHost.Bridge.dll) alongside the host .exe itself.
+Source: "{#LegacyHostDir}\*"; DestDir: "{app}\LegacyHost"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: legacyhost
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

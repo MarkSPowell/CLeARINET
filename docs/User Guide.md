@@ -69,6 +69,7 @@ in it):
 |---|---|
 | FiddlerScript | The FiddlerScript panel (see below) |
 | Extensions | The Extensions status panel (see below) |
+| Legacy Extension Host | The Legacy Extension Host panel (see below) |
 | Break on Requests | Pauses every outgoing request at a breakpoint |
 | Break on Responses | Pauses every incoming response at a breakpoint |
 | Also Break On | A row of narrower breakpoint conditions (URL contains, method, status code) |
@@ -179,6 +180,40 @@ Both are disabled (greyed out, with a tooltip explaining why) until a
 loaded extension actually supports that direction. There's no per-format
 picker if more than one extension or format is available — the first loaded
 extension and its first proffered format are always used.
+
+## Legacy Fiddler Classic extensions
+
+A separate, optional tool for a specific case the Extensions feature above
+can't cover: an already-compiled Fiddler Classic extension `.dll` whose UI
+hooks reach directly into Windows Forms menu/toolbar/tab controls that
+Microsoft removed from .NET 5 and later. Those extensions can't run inside
+CLeARINET's own process at all — not a bug, a platform limitation — so
+`Clearinet.LegacyExtensionHost.exe`, a separate program included with
+CLeARINET, runs them instead, in its own window, wired up to your real
+captured traffic.
+
+This is off by default and entirely optional; skip this section if you
+don't have an existing compiled Fiddler Classic extension you specifically
+want to keep using.
+
+1. Drop the extension's `.dll` into `Documents\CLeARINET\LegacyExtensions\`.
+   An extension still compiled against the real Fiddler assembly won't load
+   as-is — see the pop-up/log message it produces for what to do, which
+   comes down to recompiling it (if you have its source) or re-targeting
+   its compiled metadata with the `Retarget-LegacyExtension.ps1` script
+   included alongside `Clearinet.LegacyExtensionHost.exe`.
+2. Check **Tools > Legacy Extension Host** to show the panel, then check
+   "Launch Clearinet.LegacyExtensionHost.exe automatically on Start". With
+   that on, clicking **Start** also launches the legacy host (if it isn't
+   already running) and connects it to your real traffic; the panel's
+   status line reports what happened (already running, launched, not
+   found, or launch failed). Leave the checkbox off and nothing about your
+   normal CLeARINET usage changes.
+3. The legacy host opens as its own separate window, not merged into
+   CLeARINET's own — that's a known, permanent limitation, not a bug.
+   Loaded extensions' request/response-tampering hooks run against your
+   real traffic either way; anything the extension shows in its own
+   window's session list is separate demo data, not your real sessions.
 
 ## Saving and loading captured sessions
 
