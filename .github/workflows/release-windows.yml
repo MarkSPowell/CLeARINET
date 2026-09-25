@@ -145,7 +145,7 @@ jobs:
           dotnet build tools/Clearinet.LegacyExtensionHost/Clearinet.LegacyExtensionHost/Clearinet.LegacyExtensionHost.csproj
           --configuration Release
           --output publish/legacyhost
-          
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
@@ -160,7 +160,7 @@ jobs:
             installer\CLeARINET.iss
 
       - name: Upload installer as a build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CLeARINET-Setup-${{ steps.version.outputs.version }}
           path: installer/Output/CLeARINET-Setup-*.exe
