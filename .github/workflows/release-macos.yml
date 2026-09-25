@@ -65,6 +65,19 @@ jobs:
               version="0.0.0"
             fi
           fi
+
+          # Strip a leading v/V if one snuck in -- most commonly from a
+          # manual workflow_dispatch run where someone typed the version
+          # the same way a real tag names it ("v0.1.1-preview.1"), which
+          # is a very natural thing to type but not valid SemVer for
+          # -p:Version/CFBundleShortVersionString. The tag-push branch
+          # above already strips this from the ref itself, but stripping
+          # it again here too (a harmless no-op there) keeps this one
+          # rule in one place instead of splitting it across both
+          # branches.
+          version="${version#v}"
+          version="${version#V}"
+
           echo "Building installer version $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
