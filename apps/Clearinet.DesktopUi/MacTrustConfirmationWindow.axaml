@@ -10,12 +10,12 @@
         Icon="avares://Clearinet.DesktopUi/Assets/clearinet.webp"
         Background="{DynamicResource AppBackgroundBrush}">
 
-  <!-- No bindings, no DataContext: same reasoning as AboutWindow.axaml --
+  <!-- No bindings, no DataContext, same reasoning as AboutWindow.axaml:
        this dialog has exactly one job (get an explicit yes/no before
        CertificateAuthority ever touches the login keychain on macOS) and
        nothing here is state that changes while it's open. See the
        Interception Certificate Design doc's "silent-install tension"
-       section for why this dialog exists at all -- on Windows, adding to
+       section for why this dialog exists at all. On Windows, adding to
        CurrentUser\Root is what triggers the OS's own install-certificate
        prompt; `security add-trusted-cert` on macOS has no equivalent, so
        this dialog is what keeps that same "never silent" guarantee, as
