@@ -138,22 +138,173 @@ it silently drops one of the client's connections.
 **Windows**: fully implemented — this entire document describes the
 Windows half of the design, and it's what's actually running today.
 
-**macOS**: not implemented. Every reference to "the macOS gap" in the
-codebase points here. The equivalent work would be: installing the root
-CA into the macOS Keychain (as a trusted certificate, with the
-`kSecTrustSettingsResult` policy needed for it to be honored by Chromium
-and Safari) and the removal path for it. Nobody has designed this half
-yet.
+**macOS**: built this pass, answering the three open questions this
+section used to pose. Mark's own calls, in order:
 
-> **Needs your input:** the Keychain trust APIs to use (Security.framework
-> via P/Invoke vs. shelling out to `security add-trusted-cert`), whether
-> Keychain installation needs the user's login password the same way
-> Windows' prompt needs a click, and how per-user vs. system Keychain
-> should map to CLeARINET's current per-user design.
+1. **Shell out to the `security` command-line tool**, not P/Invoke
+   `Security.framework` directly. `SecTrustSettingsSetTrustSettings` and
+   friends have notoriously fiddly `CFType`/`CFDictionary` marshaling in
+   .NET, and with no Mac available to this session to compile or run
+   against, blind P/Invoke declarations carried real risk of shipping
+   something subtly wrong in a way nothing here could catch. Shelling out
+   is also precedented: it's the same approach `dotnet dev-certs
+   https --trust` itself uses on macOS for the identical problem (trust a
+   locally-generated root for local HTTPS).
+2. **Per-user login keychain, not the system keychain** — matching the
+   existing Windows design (`CurrentUser\Root`, no admin elevation)
+   exactly, at the cost of only that one user account being able to see
+   decrypted traffic, same trade-off Windows already made.
+3. **Both cert trust and system proxy registration, together, in this
+   pass** — cert trust alone doesn't produce a usable macOS build; without
+   also pointing the system proxy at CLeARINET, a Mac user would have to
+   set that by hand in System Settings every session. See "System proxy
+   registration," below.
+
+**Unconfirmed back to this session, the same caveat every Windows-only
+piece of this project has carried the other way around: nothing here has
+run on a real Mac.** The commands below are correct as documented by
+Apple and as `security`'s own man page describes them, and the pattern
+(shell out, don't P/Invoke) is deliberately the lower-risk choice for
+exactly this reason — but the actual end-to-end behavior (does Chrome
+honor the trust setting immediately, does a fresh macOS installation's
+default keychain unlock without a password prompt for this operation,
+does the leaf certificate's 7-day validity clear whatever leaf-specific
+policy Apple's Transport Security enforces) is unverified.
+
+### Keychain trust, mechanically
+
+`MacOSCertificateTrust` (`src/Clearinet.ProxyCore/Certificates/`) shells
+out to two commands, called from `CertificateAuthority.EnsureTrusted`/
+`Uninstall` exactly where the Windows `X509Store(StoreName.Root, ...)`
+calls already were — see that class's own remarks for the per-platform
+dispatch, which also closes a latent gap: those two methods had no
+platform guard at all before this pass, so running on Linux (or any
+platform that isn't Windows) would already have hit an unhandled
+`CryptographicException` from the Windows-only `X509Store` call, not a
+clean "unsupported platform" message. Both are fixed now.
+
+- **Install**: exports the root to a temporary DER-encoded (`.cer`) file,
+  then runs `security add-trusted-cert -r trustRoot <path>` — no `-k`
+  (defaults to the user's own default keychain, normally
+  `login.keychain-db`, rather than hardcoding that path, which can
+  legitimately differ) and no `-d` (that flag is specifically what adds
+  the *admin* cert store, i.e. system-wide trust, which needs elevation;
+  omitting it is what keeps this per-user and unelevated). The temp file
+  is deleted in a `finally` whether or not the command succeeds.
+- **Uninstall**: `security delete-certificate -Z <SHA-1 thumbprint>` —
+  matched by hash (`X509Certificate2.Thumbprint` is exactly the uppercase
+  hex `security` expects for `-Z`), not by common name, so there's no
+  ambiguity if more than one CLeARINET root ever ends up in the same
+  keychain (an old one from a previous install that was never cleanly
+  uninstalled, say). Deleting the certificate item removes its trust
+  settings along with it as far as this session's own reading of
+  `security`'s documented behavior goes; genuinely unconfirmed without a
+  real keychain to test the edge cases against (a cert re-added after a
+  previous partial removal, for instance).
+- **Both invocations** go through `Process.Start`, capture stdout/stderr,
+  and throw a `CertificateTrustException` (carrying the exit code and
+  captured stderr) on a non-zero exit rather than swallowing the failure
+  -- matches this project's own "surfaced, not silently dropped" posture
+  everywhere else.
+
+### The silent-install tension, and how it's resolved
+
+This document's own "Installing trust" section above states the
+principle plainly: "a silent, unprompted root-CA install would be
+indistinguishable from malware behavior." Windows satisfies that for
+free — adding to `CurrentUser\Root` is what *triggers* the OS's own "do
+you want to install this certificate?" dialog. `security
+add-trusted-cert` has no equivalent: run from a process that already has
+an unlocked login keychain (the normal case for a logged-in user's own
+GUI app), it modifies trust settings with no OS-level prompt at all.
+
+Shelling out was still the right call (see above), so the fix is
+CLeARINET's own: before ever invoking `security add-trusted-cert`,
+`MainWindow` shows a small, explicit confirmation dialog naming exactly
+what's about to happen (installing a root CA that can decrypt this
+account's HTTPS traffic) and requires an explicit click before
+`CertificateAuthority`'s constructor is even called on macOS. This keeps
+the "never silent" principle intact by CLeARINET's own doing, rather than
+depending on the OS to provide it the way Windows' design happened to.
+One more honest flag: `MainWindowViewModel.Start()` is fully synchronous
+(see `LegacyExtensionHostLauncher`'s own remarks on why), and Avalonia's
+`Window.ShowDialog` is `Task`-returning, so the confirmation callback
+blocks on it synchronously
+(`ShowDialog<bool>(owner).GetAwaiter().GetResult()`) rather than
+restructuring `Start()` to be `async` for this one platform-specific
+step. Avalonia's own `ShowDialog` is built on a nested dispatcher frame
+(`Dispatcher.UIThread.PushFrame` under the hood) specifically so a
+synchronous wait on its `Task` from the UI thread keeps pumping the
+message loop instead of deadlocking — the same reason `AboutWindow`'s own
+`ShowDialog` call site elsewhere in this app doesn't need to be `async`
+either. Believed correct, not run on a real Mac to confirm.
+
+### System proxy registration
+
+A second, separate gap from the Keychain one above, closed in the same
+pass since cert trust alone isn't a usable macOS build: `WinInetSystemProxy`
+(`src/Clearinet.ProxyCore/SystemProxy/`) is Windows-only (a single global
+WinINET registry setting); its new sibling, `MacOSSystemProxy`, shells out
+to `networksetup` instead. macOS has no single global proxy setting the
+way Windows does — proxy configuration is per network *service* (Wi-Fi,
+Ethernet, and so on, each configurable independently) — so `Enable`/
+`Disable` iterate every service `networksetup -listallnetworkservices`
+reports (skipping ones prefixed `*`, which denotes disabled) rather than
+trying to guess which one is "the" active one. `-setwebproxy`/
+`-setsecurewebproxy` point HTTP and HTTPS traffic at
+`127.0.0.1:<port>`; `-setwebproxystate`/`-setsecurewebproxystate` toggle
+them back off on `Disable`. The same crash-safety shape
+`WinInetSystemProxy` already established: a JSON backup file (one entry
+per network service this time, not one flat record) written before the
+first `Enable` in a run, restored and deleted by `Disable`, and replayed
+by `RecoverFromCrash` on the next launch if a previous run's own `Disable`
+never got the chance to run. Proxy bypass-domain lists
+(`networksetup -setproxybypassdomains`) are deliberately left untouched
+this pass, unlike `WinInetSystemProxy`'s own `<local>` merge -- a
+narrower scope, not an oversight, since parsing
+`-getproxybypassdomains`' output correctly without a real macOS network
+service list to test against felt like more unverified surface than this
+pass should add. A `SystemProxyController` facade
+(`src/Clearinet.ProxyCore/SystemProxy/`) dispatches to whichever of the
+two platform implementations applies, so `MainWindowViewModel`'s call
+sites don't carry their own platform branching.
+
+**A real open risk, not just an unverified detail: whether `networksetup`
+needs admin elevation at all.** Windows' own no-admin-required story
+(`CurrentUser` registry keys, no UAC prompt) was part of why per-user
+Keychain trust was chosen over system-wide above -- but plenty of
+real-world `networksetup` usage in the wild runs it under `sudo`, and
+this session found no way to confirm from here whether `-setwebproxy`/
+`-setsecurewebproxy` genuinely work for a plain logged-in user against
+their own network service, or silently fail (or prompt) without
+elevation. If it turns out elevation is required, that's a real
+follow-up, not a quick fix: either accept the admin-prompt regression
+system proxy registration would then carry (asymmetric with the Keychain
+half of this same pass), or fall back to *not* auto-registering the
+system proxy on macOS and documenting the manual System Settings steps
+instead. Flagged here rather than assumed away.
+
+**Testing scope, deliberately narrow.** `ci.yml`'s own test matrix
+already runs on `macos-latest` (a real Mac, via GitHub Actions), which
+means unit tests actually could exercise real `security`/`networksetup`
+invocations there in a way nothing else in this project's macOS work can
+be verified. This pass doesn't take that step -- mutating the CI runner's
+own keychain and network-service proxy state as a side effect of `dotnet
+test`, with the elevation question above still open, felt like more risk
+to an otherwise-green CI matrix than this pass should introduce
+unreviewed. `MacOSCertificateTrustTests`/`MacOSSystemProxyTests` stick to
+the same pure-logic-only shape `WinInetSystemProxyTests` already
+established for the Windows side (argument/JSON construction, no real
+process invocation) -- a real macOS integration test, gated to only run
+when `OperatingSystem.IsMacOS()`, is a reasonable next step once the
+elevation question above has an answer.
 
 ## Open risks summary
 
-- macOS Keychain trust path — not designed, not built.
+- macOS Keychain trust and system proxy registration — built this pass,
+  entirely unconfirmed against a real Mac; see "Platform status" above
+  for every specific unverified claim.
 - Leaf certificate key-container cleanup on cache eviction — tracked, not
   built.
-- `Uninstall()` — implemented, not wired to any UI or CLI entry point.
+- `Uninstall()` — implemented, not wired to any UI or CLI entry point (on
+  either platform).

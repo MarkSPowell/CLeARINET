@@ -8,9 +8,9 @@ namespace Clearinet.ProxyCore.Certificates;
 /// generating it, persisting its private key with a non-exportable storage
 /// flag, and installing it into the current user's trusted-root store. See
 /// the "CLeARINET Interception Certificate Design" doc for the reasoning
-/// behind these choices; this class is a first implementation of the
-/// Windows half of that design, written to be validated against a real
-/// browser before the macOS path is tackled.
+/// behind these choices, including "Platform status" for the macOS half
+/// (<see cref="MacOSCertificateTrust"/>) built alongside the original,
+/// validated-on-a-real-browser Windows half below.
 /// </summary>
 public sealed class CertificateAuthority
 {
@@ -132,7 +132,43 @@ public sealed class CertificateAuthority
         }
     }
 
+    /// <summary>
+    /// Platform dispatch lives here, not spread across call sites -- see
+    /// the design doc's "Platform status" section for the reasoning behind
+    /// each platform's own approach. Previously unguarded entirely (always
+    /// ran the Windows-only <c>X509Store(StoreName.Root, ...)</c> path
+    /// regardless of platform) -- a latent bug on anything but Windows,
+    /// since that call throws an unhelpful native
+    /// <see cref="CryptographicException"/> there rather than a clear
+    /// "unsupported platform" message. Fixed here alongside adding the
+    /// macOS path itself.
+    /// </summary>
     private static void EnsureTrusted(X509Certificate2 rootCert)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            EnsureTrustedWindows(rootCert);
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            // No "already trusted" short-circuit here the way Windows has
+            // one -- MacOSCertificateTrust.Install always runs
+            // `security add-trusted-cert`, which is itself already
+            // idempotent (re-adding an already-trusted cert is a no-op,
+            // not an error), so there's no correctness reason to duplicate
+            // that check on this side too.
+            MacOSCertificateTrust.Install(rootCert);
+        }
+        else
+        {
+            throw new PlatformNotSupportedException(
+                "CLeARINET's certificate trust-store installation is only implemented for Windows and macOS " +
+                "-- see the Interception Certificate Design doc's 'Platform status' section.");
+        }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void EnsureTrustedWindows(X509Certificate2 rootCert)
     {
         using var store = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
         store.Open(OpenFlags.ReadWrite);
@@ -147,7 +183,12 @@ public sealed class CertificateAuthority
             // install this certificate?" dialog -- the same prompt
             // Fiddler Classic's own docs walk users through. Installation
             // should never be silent; this relies on that OS behavior
-            // rather than trying to suppress or replace it.
+            // rather than trying to suppress or replace it. macOS has no
+            // equivalent OS-level prompt for the shelled-out `security`
+            // command this project's own MacOSCertificateTrust uses
+            // instead -- see the design doc's "silent-install tension"
+            // section for how that's resolved on that side (CLeARINET's
+            // own confirmation dialog, not an OS one).
             store.Add(rootCert);
         }
     }
@@ -155,20 +196,34 @@ public sealed class CertificateAuthority
     /// <summary>
     /// Removes this root from both the personal and trusted-root stores.
     /// Implements the design doc's "one-click removal" mechanics; not yet
-    /// wired to any UI or CLI command.
+    /// wired to any UI or CLI command, on either platform.
     /// </summary>
     public void Uninstall()
     {
-        using (var rootStore = new X509Store(StoreName.Root, StoreLocation.CurrentUser))
+        if (OperatingSystem.IsWindows())
         {
+            using var rootStore = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
             rootStore.Open(OpenFlags.ReadWrite);
             rootStore.Remove(RootCertificate);
         }
-
-        using (var myStore = new X509Store(StoreName.My, StoreLocation.CurrentUser))
+        else if (OperatingSystem.IsMacOS())
         {
-            myStore.Open(OpenFlags.ReadWrite);
-            myStore.Remove(RootCertificate);
+            MacOSCertificateTrust.Uninstall(RootCertificate);
         }
+        else
+        {
+            throw new PlatformNotSupportedException(
+                "CLeARINET's certificate trust-store removal is only implemented for Windows and macOS " +
+                "-- see the Interception Certificate Design doc's 'Platform status' section.");
+        }
+
+        // The personal ("My") store, unlike the trust store above, is
+        // already cross-platform in .NET's own X509Store implementation
+        // (it's how the macOS half of LoadOrCreateRoot's own store access
+        // already works too, with no platform split needed there either)
+        // -- no per-platform dispatch needed for this half.
+        using var myStore = new X509Store(StoreName.My, StoreLocation.CurrentUser);
+        myStore.Open(OpenFlags.ReadWrite);
+        myStore.Remove(RootCertificate);
     }
 }

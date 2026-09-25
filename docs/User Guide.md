@@ -13,24 +13,28 @@ guide from inside the app itself via **Help > Documentation**.
    port — the simplest choice unless something else on your machine expects
    CLeARINET on a specific port. **Specify** lets you type one in.
 2. Click **Start**.
-3. The first time you do this, Windows will show its own "Do you want to
-   install this certificate?" prompt for a certificate named
-   `DO_NOT_TRUST_ClearinetRoot...`. This is expected — it's what lets
-   CLeARINET see inside HTTPS traffic on this machine, the same mechanism
-   Fiddler Classic uses. Accept it to continue. Nothing captured ever leaves
-   your device on its own.
+3. The first time you do this, you'll be asked to trust a new certificate
+   named `DO_NOT_TRUST_ClearinetRoot...`. This is expected — it's what
+   lets CLeARINET see inside HTTPS traffic on this machine, the same
+   mechanism Fiddler Classic uses. On Windows this is the OS's own "Do you
+   want to install this certificate?" prompt; on macOS it's a confirmation
+   dialog CLeARINET shows itself (macOS has no equivalent OS-level prompt
+   for the way CLeARINET installs it) before it ever touches your login
+   keychain. Accept it to continue. Nothing captured ever leaves your
+   device on its own.
 4. Once running, the status bar at the bottom shows which port you're
-   listening on and whether CLeARINET successfully registered itself as the
-   Windows system proxy. If it couldn't (some other tool already has that
+   listening on and whether CLeARINET successfully registered itself as
+   the system proxy. If it couldn't (some other tool already has that
    role, for example), you'll still capture traffic from anything you point
    at the port manually.
 
 Click **Stop** to release the port and stop capturing. Sessions already
 captured stay in the list until you close the app.
 
-CLeARINET currently only implements the certificate-trust half of HTTPS
-interception on Windows — see [README.md](../README.md)'s Known limitations
-section.
+CLeARINET's HTTPS interception (certificate trust and system proxy
+registration) is implemented on both Windows and macOS. The macOS side is
+new and hasn't been verified against a real Mac yet — see
+[README.md](../README.md)'s Known limitations section for the specifics.
 
 ## The session list and inspectors
 
@@ -237,6 +241,7 @@ want to keep using.
 
 CLeARINET is an early, working MVP, not a 1.0 release. See
 [README.md](../README.md)'s Known limitations section for what's
-deliberately not here yet (macOS support, settings persistence across runs,
-HAR/Netlog import, replay beyond AutoResponder, and more) — that list is
-kept in one place, in README.md, rather than duplicated here.
+deliberately not here yet (settings persistence across runs, HAR/Netlog
+import, replay beyond AutoResponder, macOS support unverified on a real
+Mac, and more) — that list is kept in one place, in README.md, rather than
+duplicated here.

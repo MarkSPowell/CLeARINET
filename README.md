@@ -16,9 +16,10 @@ here yet. Feedback and issues are welcome.
   per-install root certificate installed into the current user's trusted
   root store so HTTPS traffic can be inspected — the same mechanism
   Fiddler Classic uses.
-- On Windows, registers itself as the system proxy (WinINET) while
-  running, and recovers cleanly if a previous run didn't shut down
-  properly (crash, kill, unclean shutdown).
+- Registers itself as the system proxy while running — WinINET on
+  Windows, per network service via `networksetup` on macOS — and recovers
+  cleanly if a previous run didn't shut down properly (crash, kill,
+  unclean shutdown).
 - A session list with live filtering: free-text search across the URL
   and headers (never body content — see the filter grammar's own remarks
   on why), plus `method:`, `host:`, and `status:` query tokens (exact,
@@ -83,11 +84,14 @@ dotnet test CLeARINET.sln
 dotnet run --project apps/Clearinet.DesktopUi
 ```
 
-The first time you click Start, Windows will prompt you to trust a new
-local root certificate (named `DO_NOT_TRUST_ClearinetRoot...`, following
-Fiddler Classic's own naming convention for the same purpose) — this is
-what lets CLeARINET see inside HTTPS traffic on this machine. Nothing
-captured ever leaves the device on its own.
+The first time you click Start, you'll be asked to trust a new local root
+certificate (named `DO_NOT_TRUST_ClearinetRoot...`, following Fiddler
+Classic's own naming convention for the same purpose) — this is what lets
+CLeARINET see inside HTTPS traffic on this machine. On Windows that's the
+OS's own native prompt; on macOS, where the `security` CLI CLeARINET uses
+has no equivalent OS-level prompt, it's a confirmation dialog CLeARINET
+shows itself before ever touching your login keychain. Nothing captured
+ever leaves the device on its own.
 
 ## Documentation
 
@@ -111,7 +115,7 @@ captured ever leaves the device on its own.
   Fiddler feature/tier inventory, and breakpoints research notes.
 - `src/Clearinet.ProxyCore` — the proxy engine: the listener, HTTP
   message parsing, sessions, breakpoints, AutoResponder, certificates,
-  SAZ export, and Windows system-proxy registration.
+  SAZ export, and system-proxy registration on both Windows and macOS.
 - `src/Clearinet.Extensibility` — the inspector contract and the built-in
   inspectors (Headers, Raw, Hex).
 - `src/Clearinet.Compatibility` — FiddlerScript compatibility
@@ -140,10 +144,24 @@ captured ever leaves the device on its own.
 Listed here on purpose, rather than left for someone to discover the hard
 way:
 
-- **Windows only, for now.** Only the Windows certificate trust-store
-  path is implemented — macOS trust-store installation hasn't been built
-  yet, even though every project targets plain `net10.0` and the UI
-  itself (Avalonia) already runs on macOS.
+- **macOS support is built, but unverified on a real Mac.** Certificate
+  trust (via the `security` CLI, into the login keychain, behind
+  CLeARINET's own confirmation dialog since `security` has no OS-level
+  install prompt the way Windows does) and system proxy registration (via
+  `networksetup`, per network service) are both implemented — see the
+  Interception Certificate Design doc's "Platform status" section for the
+  full design, including one real open question this session couldn't
+  resolve: whether `networksetup` needs admin elevation at all. Nothing
+  here has run against a real Mac from this session; `ci.yml`'s own test
+  matrix does run on `macos-latest`, but the tests themselves are
+  deliberately pure-logic-only (argument/output parsing, no real `security`/
+  `networksetup` invocation) rather than live integration tests.
+  `.github/workflows/release-macos.yml` builds an installable `.dmg` from
+  every tagged release the same way `release-windows.yml` builds the
+  Windows one, but it's **unsigned** (no Apple Developer account
+  available to this project) — Gatekeeper will warn on first launch;
+  see `installer/macos/build-installer.sh`'s own remarks for exactly
+  what that means and the one open question it leaves.
 - **No app-level settings persistence.** Port choice, which Tools-menu
   panels are checked, breakpoint conditions, and filter text all reset to
   their defaults on every run — nothing about the app's own UI state is

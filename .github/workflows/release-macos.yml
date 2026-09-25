@@ -1,0 +1,138 @@
+name: Release macOS Installer
+
+# The macOS counterpart to release-windows.yml: publishes a self-contained
+# osx-arm64 build of the desktop app, assembles it into a real CLeARINET.app
+# bundle and packages that into a .dmg (installer/macos/build-installer.sh
+# does the actual assembly -- there's no macOS equivalent of Inno Setup to
+# hand this off to), and attaches that .dmg to the GitHub Release for the
+# pushed tag. Separate from release-windows.yml for the same reason that
+# one is separate from ci.yml: this only runs on an actual version tag (or
+# by hand), and its whole job is producing a release artifact, not
+# verifying the code -- ci.yml's own macos-latest leg already does that.
+#
+# Three deliberate scope decisions here, all made with the repo owner
+# rather than assumed -- see the Project Plan doc's own "macOS release
+# pipeline" update paragraph for the full reasoning behind each:
+#   - Unsigned. No Apple Developer account was available to wire up
+#     signing/notarization with. Gatekeeper will warn on first launch;
+#     see build-installer.sh's own header remarks for exactly what that
+#     means and the one open question it leaves (whether a real Mac
+#     refuses to launch this at all, as "damaged," rather than just
+#     warning -- genuinely unconfirmed).
+#   - .dmg, not a bare .zip of the .app -- the standard drag-to-
+#     Applications Mac install experience.
+#   - arm64 only, no Intel/universal build.
+#
+# Also runnable by hand (workflow_dispatch) for a test build without
+# cutting a real tag/Release -- see release-windows.yml's own remarks on
+# this, which apply here unchanged.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Version to stamp a manual test build with (e.g. 0.1.0). Ignored
+          on a real tag push, which derives this from the tag itself
+          instead.
+        required: false
+        default: "0.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Determine version
+        id: version
+        run: |
+          # A tag push always wins over the workflow_dispatch input -- see
+          # release-windows.yml's own remarks on this, which apply
+          # unchanged here.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+          else
+            version="${{ inputs.version }}"
+            if [[ -z "$version" ]]; then
+              version="0.0.0"
+            fi
+          fi
+          echo "Building installer version $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # A separate, strictly-numeric X.X.X.X derivative of the version
+          # above, for the two places downstream that can't take a
+          # prerelease suffix like "-preview.1" at all: dotnet publish's
+          # own AssemblyVersion/FileVersion and build-installer.sh's own
+          # CFBundleVersion -- see release-windows.yml's own remarks on
+          # this, which apply unchanged here, just for CFBundleVersion
+          # instead of Inno Setup's VersionInfoVersion.
+          versionCore="${version%%-*}"
+          IFS='.' read -r -a parts <<< "$versionCore"
+          while [[ ${#parts[@]} -lt 4 ]]; do
+            parts+=("0")
+          done
+          bundleVersion="${parts[0]}.${parts[1]}.${parts[2]}.${parts[3]}"
+          echo "Numeric bundle version: $bundleVersion"
+          echo "bundleVersion=$bundleVersion" >> "$GITHUB_OUTPUT"
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore CLeARINET.sln
+
+      # Self-contained, single-file, arm64 only -- see this workflow's own
+      # header remarks on the arm64-only decision. Publishing only the
+      # desktop app project, not the whole solution, matches
+      # release-windows.yml's own reasoning (DevHost/FiddlerScriptDemo/
+      # SampleExtension and the test projects are developer-only tools).
+      # No legacy extension host build here: that tool is net48-only
+      # (Windows Forms, .NET Framework), so it has nothing to contribute
+      # to a macOS build -- see its own README's "Windows-only by nature"
+      # remarks.
+      - name: Publish self-contained osx-arm64 build
+        run: >-
+          dotnet publish apps/Clearinet.DesktopUi/Clearinet.DesktopUi.csproj
+          --configuration Release
+          --runtime osx-arm64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:InformationalVersion=${{ steps.version.outputs.version }}
+          --output publish/osx-arm64
+
+      - name: Build .app bundle and .dmg
+        run: >-
+          bash installer/macos/build-installer.sh
+          "${{ steps.version.outputs.version }}"
+          "${{ steps.version.outputs.bundleVersion }}"
+          "${{ github.workspace }}/publish/osx-arm64"
+          "${{ github.workspace }}/installer/Output/CLeARINET-${{ steps.version.outputs.version }}-macos-arm64.dmg"
+
+      - name: Upload installer as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CLeARINET-macOS-${{ steps.version.outputs.version }}
+          path: installer/Output/CLeARINET-*-macos-arm64.dmg
+          if-no-files-found: error
+
+      # Only on a real tag push -- see release-windows.yml's own remarks
+      # on this, which apply unchanged here.
+      - name: Attach installer to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/CLeARINET-*-macos-arm64.dmg
+          fail_on_unmatched_files: true

@@ -75,6 +75,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private readonly LegacyExtensionHostLauncher _legacyExtensionHostLauncher = new();
 
+    /// <summary>
+    /// Only ever invoked on macOS, only once per <see cref="_authority"/>
+    /// (re-asked on a later <see cref="Start"/> click if declined, since
+    /// <see cref="_authority"/> stays null until it's accepted) --
+    /// see the design doc's "silent-install tension" section for why this
+    /// exists at all: unlike Windows' native trust-install dialog, the
+    /// shelled-out <c>security</c> command CLeARINET's own
+    /// <c>MacOSCertificateTrust</c> uses has no OS-level confirmation of
+    /// its own. Supplied by <c>App.axaml.cs</c> (a real modal dialog,
+    /// synchronously blocked on -- see that class's own remarks); null
+    /// here means "always decline," which is the safe default for any
+    /// caller (tests, tooling) that never supplies one -- see
+    /// <see cref="Start"/>'s own use of it.
+    /// </summary>
+    private readonly Func<bool>? _confirmMacOSCertificateTrust;
+
     private CertificateAuthority? _authority;
     private InterceptingProxyListener? _proxy;
     private string _statusText;
@@ -593,11 +609,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Whether this build can intercept at all. Only the Windows
-    /// certificate trust-store path is implemented so far -- see the
-    /// Interception Certificate Design doc's open risks for the macOS gap.
+    /// Whether this build can intercept at all. Windows and macOS both
+    /// have a real certificate trust-store and system-proxy-registration
+    /// path now -- see the Interception Certificate Design doc's "Platform
+    /// status" section, including what's still unconfirmed on macOS
+    /// specifically without a real Mac to run it against. Anything else
+    /// (Linux, in practice, since this app targets plain <c>net10.0</c>
+    /// and could technically run there) has neither.
     /// </summary>
-    public bool IsSupported { get; } = OperatingSystem.IsWindows();
+    public bool IsSupported { get; } = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
 
     public string StatusText
     {
@@ -720,15 +740,23 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand ExportViaExtensionCommand { get; }
     public RelayCommand OpenDocumentationCommand { get; }
 
-    public MainWindowViewModel()
+    /// <param name="confirmMacOSCertificateTrust">
+    /// See <see cref="_confirmMacOSCertificateTrust"/>'s own remarks.
+    /// Optional (defaults to null, meaning "always decline on macOS") so
+    /// every other caller -- tests, and the Windows path, which never
+    /// consults this at all -- doesn't need to pass one.
+    /// </param>
+    public MainWindowViewModel(Func<bool>? confirmMacOSCertificateTrust = null)
     {
-        // Must run before anything below touches the registry itself: a
-        // backup file still sitting on disk means the *previous* run of
+        _confirmMacOSCertificateTrust = confirmMacOSCertificateTrust;
+
+        // Must run before anything below touches the system proxy itself:
+        // a backup file still sitting on disk means the *previous* run of
         // this app never reached Stop/Dispose (crash, kill, an unclean
-        // Windows shutdown) and left the system proxy pointed at a port
-        // nothing is listening on any more. See WinInetSystemProxy's own
-        // remarks for the full design.
-        WinInetSystemProxy.RecoverFromCrash();
+        // shutdown) and left the system proxy pointed at a port nothing is
+        // listening on any more. See SystemProxyController's own remarks
+        // for the full design, on both platforms it dispatches to.
+        SystemProxyController.RecoverFromCrash();
 
         // Loaded once, synchronously, here at startup -- see ExtensionHost's
         // own remarks on why compiled extensions don't get FiddlerScript's
@@ -848,7 +876,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _statusText = IsSupported
             ? "Not started. Pick a port and click Start."
-            : "This build only implements the Windows certificate trust-store path so far " +
+            : "This build only implements the certificate trust-store path for Windows and macOS so far " +
               "-- see the Interception Certificate Design doc's open risks.";
     }
 
@@ -856,6 +884,22 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
+            // Only relevant the very first time this runs on macOS (or
+            // again on a later Start click if declined last time --
+            // _authority stays null until this is accepted, so this check
+            // naturally re-asks). Windows never reaches this branch at
+            // all: its own trust-install confirmation is the native OS
+            // dialog X509Store.Add triggers, not this one -- see
+            // _confirmMacOSCertificateTrust's own remarks and the design
+            // doc's "silent-install tension" section.
+            if (_authority is null && OperatingSystem.IsMacOS() && _confirmMacOSCertificateTrust?.Invoke() != true)
+            {
+                StatusText =
+                    "Not started -- installing the trusted root certificate was declined. CLeARINET can't " +
+                    "decrypt HTTPS traffic without it, so there's no way to proceed without installing it.";
+                return;
+            }
+
             // Reused across Start/Stop/Start cycles within one run of the
             // app -- there's no reason to re-install a new trust-store
             // root every time, only a fresh leaf provider (cheap, and it
@@ -924,16 +968,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // system default.
             try
             {
-                WinInetSystemProxy.Enable(_proxy.Port);
+                SystemProxyController.Enable(_proxy.Port);
                 StatusText =
-                    $"Listening on 127.0.0.1:{_proxy.Port}{portNote} and registered as the Windows system proxy -- " +
-                    "browsers and most other WinINET-aware apps on this machine will route through here " +
-                    "automatically until you click Stop.";
+                    $"Listening on 127.0.0.1:{_proxy.Port}{portNote} and registered as the system proxy -- " +
+                    "browsers and most other apps on this machine will route through here automatically " +
+                    "until you click Stop.";
             }
             catch (Exception ex)
             {
                 StatusText =
-                    $"Listening on 127.0.0.1:{_proxy.Port}{portNote}, but couldn't register as the Windows system " +
+                    $"Listening on 127.0.0.1:{_proxy.Port}{portNote}, but couldn't register as the system " +
                     $"proxy ({ex.Message}) -- point a browser's HTTPS proxy here manually instead.";
             }
         }
@@ -952,7 +996,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _proxy.Stop();
         _proxy = null;
-        WinInetSystemProxy.Disable();
+        SystemProxyController.Disable();
         IsRunning = false;
 
         // A no-op unless this app's own Start() is what launched the legacy
@@ -1468,7 +1512,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
         _proxy.Stop();
         _proxy = null;
-        WinInetSystemProxy.Disable();
+        SystemProxyController.Disable();
     }
 
     /// <summary>

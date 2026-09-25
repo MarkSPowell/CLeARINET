@@ -188,8 +188,13 @@ docs' intentions:
   Avalonia was picked specifically for cross-platform reach from day one
   (see Platform and technology, above) rather than the WinForms lock-in
   that kept Fiddler Classic Windows-only for its whole life. The macOS
-  trust-store path isn't built yet, but nothing in the architecture blocks
-  it the way WinForms did.
+  trust-store and system-proxy paths are now built too
+  (`MacOSCertificateTrust`, `MacOSSystemProxy`, both dispatched to from
+  their existing Windows siblings via `CertificateAuthority` and the new
+  `SystemProxyController` facade — see the Interception Certificate
+  Design doc's "Platform status" section for the full design) — unverified
+  against a real Mac from this session, but nothing in the architecture
+  blocked building it the way WinForms would have.
 - *Extensibility as an afterthought.* Lawrence calls Fiddler's
   scripting/extension model — born from not wanting to build a filter UI
   — one of its best decisions. `IInspector` and `InspectorRegistry`'s
@@ -532,7 +537,74 @@ creation rather than recomputed on script reload, and `BindUIColumn`'s
 `DisplayOrder`/`SortNumerically` parameters are scanned but not yet
 honored by the grid.
 
-## Still undecided
+**Update: macOS support is now built too** — both halves of HTTPS
+interception the "Windows only, for now" limitation above used to name
+specifically. `MacOSCertificateTrust` shells out to the `security` CLI
+(`add-trusted-cert`/`delete-certificate`) against the user's own login
+keychain, matching the Windows `CurrentUser\Root` design's per-user, no-
+elevation scope; since `security` has no OS-level install prompt the way
+adding to that Windows store does, `MainWindow` shows its own explicit
+confirmation dialog first, so the "never silent" principle stays intact
+by CLeARINET's own doing rather than depending on the OS to provide it.
+`MacOSSystemProxy` shells out to `networksetup` instead of writing a
+single WinINET registry value, since macOS tracks proxy configuration
+per network service rather than as one global setting — it iterates every
+enabled service, backing up and restoring each one's prior settings the
+same crash-safe way `WinInetSystemProxy` already does. A new
+`SystemProxyController` facade dispatches to whichever platform
+implementation applies, so `MainWindowViewModel`'s own call sites carry no
+platform branching for this. See the Interception Certificate Design
+doc's "Platform status" section for the full design, including the two
+things flagged there as genuinely open rather than just unverified: this
+session had no real Mac to confirm any of it against, and it's still an
+open question whether `networksetup` needs admin elevation at all, which
+could force a design change if it turns out to.
+
+**Update: a macOS release pipeline is now built too** —
+`.github/workflows/release-macos.yml`, the macOS counterpart to
+`release-windows.yml`. Three scope decisions, made with you directly
+rather than assumed:
+
+- **Unsigned.** No Apple Developer account was available to this session
+  to wire up Developer ID signing or notarization with. Gatekeeper will
+  show its "unidentified developer" warning on first launch (right-click
+  > Open, or `xattr -cr`, gets past it) — the same tradeoff
+  `installer/macos/build-installer.sh`'s own header comment spells out.
+  One thing this genuinely can't confirm without a real Mac: whether
+  Gatekeeper's assessment of a from-scratch-assembled bundle like this
+  one (no bundle-level signature at all, only the individual executable's
+  own ad-hoc signature that the .NET SDK already applies as an arm64
+  kernel requirement, unrelated to Gatekeeper trust) stops at that
+  warning, or refuses to launch it outright as "damaged" instead — those
+  are two different Gatekeeper code paths, and this session had no way to
+  exercise the second one. If it turns out to be the latter, ad-hoc
+  signing the whole assembled bundle (`codesign --force --deep --sign -`)
+  is a small, still-free, still-no-account-needed follow-up, not a
+  redesign.
+- **A `.dmg`, not a bare `.zip` of the `.app`.** The standard
+  drag-to-Applications Mac install experience, matching what
+  `release-windows.yml`'s Inno Setup installer aims for on the Windows
+  side.
+- **arm64 only, no Intel/universal build.** Covers any Mac sold since
+  late 2020. Adding `osx-x64` alongside it later, if Intel support turns
+  out to matter, is a small follow-up (a second `dotnet publish` leg plus
+  either a second `.dmg` or a `lipo`-merged universal one) rather than a
+  redesign.
+
+There's no macOS equivalent of Inno Setup to hand the actual packaging
+off to, so `installer/macos/build-installer.sh` does by hand what
+`installer/CLeARINET.iss` gets from that tool for free: assembling the
+`dotnet publish -r osx-arm64` output into a real `CLeARINET.app` bundle
+(a hand-written minimal `Info.plist` — no `NSPrincipalClass`, since
+Avalonia manages its own native macOS window/application lifecycle
+rather than relying on Info.plist to wire one up the way an
+Xcode-generated app would; no `CFBundleIconFile`, matching
+`CLeARINET.iss`'s own precedent of shipping no standalone `.ico` today
+either), then `hdiutil` to package that bundle into a `.dmg` with an
+`Applications` symlink alongside it. Plain, runnable-by-hand script
+rather than another CI-only YAML blob — nothing about it is
+CI-specific, so it doubles as a way to build and test this locally once
+a real Mac is in hand.
 
 Carried over from the original plan as genuinely open, not just
 undocumented:

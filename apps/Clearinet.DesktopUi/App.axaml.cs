@@ -38,8 +38,28 @@ public partial class App : Application
     {
         await Task.Delay(SplashDuration);
 
-        var viewModel = new MainWindowViewModel();
-        var mainWindow = new MainWindow { DataContext = viewModel };
+        // Forward-declared and assigned below, rather than the other way
+        // around: MainWindowViewModel's constructor needs a
+        // confirmMacOSCertificateTrust callback that can own a
+        // MacTrustConfirmationWindow by the real MainWindow (so it centers
+        // and blocks correctly), but MainWindow itself can't be
+        // constructed until after the view model that becomes its
+        // DataContext exists. The lambda captures this local by reference,
+        // not by value, so it sees the real MainWindow once the assignment
+        // a few lines down runs -- and since the callback is only ever
+        // invoked later, from MainWindowViewModel.Start() after the user
+        // clicks Start (well after mainWindow.Show() below), it's never
+        // actually called while still null. See the Interception
+        // Certificate Design doc's "silent-install tension" section and
+        // MacTrustConfirmationWindow's own remarks for why this dialog
+        // exists at all.
+        MainWindow? mainWindow = null;
+
+        var viewModel = new MainWindowViewModel(
+            confirmMacOSCertificateTrust: () =>
+                new MacTrustConfirmationWindow().ShowDialog<bool>(mainWindow!).GetAwaiter().GetResult());
+
+        mainWindow = new MainWindow { DataContext = viewModel };
 
         // The proxy listener and its TcpListener socket need an explicit
         // Stop() -- there's no window "closed" event that would run this
