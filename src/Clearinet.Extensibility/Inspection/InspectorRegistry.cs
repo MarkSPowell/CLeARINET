@@ -44,6 +44,8 @@ public sealed class InspectorRegistry
             new HeadersInspector(),
             new RawTextInspector(),
             new HexInspector(),
+            new CookiesInspector(),
+            new NotesInspector(),
         ];
 
         return new InspectorRegistry(additional is null ? builtins : builtins.Concat(additional));

@@ -3,7 +3,7 @@
 Detailed design for the `Clearinet.Compatibility.Extensions` namespace,
 sibling to `Clearinet.Compatibility.FiddlerScript` (see that design doc).
 Read the Project Plan's "Fiddler Classic compatibility review" section
-first for the business context (Eric Lawrence's feedback, the decision to
+first for the context (the need to port existing extensions, the decision to
 build FiddlerScript first and defer compiled extensions) and this doc's
 own "Decision: FiddlerScript first" paragraph, which this work picks back
 up.
@@ -41,8 +41,8 @@ it's how the CLR works.
 This project's own interfaces (below) are therefore **source-level
 compatible, not binary-level compatible**: an engineer with an existing
 extension's *source* can port it here with a new `using`/base-interface
-and a recompile — matching Eric Lawrence's own stated need ("easily
-ported with minimal effort," which presupposes having the source) — but
+and a recompile — matching the goal of porting existing extensions with
+minimal effort (which presupposes having the source) — but
 an already-compiled `.dll` like `SAZClipboard.dll` can't be dropped in
 unmodified.
 
@@ -133,26 +133,20 @@ above — trademark use of the `Fiddler` name, and whether shipping
 something old binaries bind to unmodified reads as interoperability or
 as redistributing Fiddler's own surface. This is still left as a flagged
 future option, not a plan: it raises real questions this project isn't
-positioned to resolve on its own. Eric Lawrence — the original author of
-Fiddler, and already directly engaged with this project — is the right
-person to ask before any of this is built, and specifically to ask about
-*this* approach (an assembly literally named `Fiddler` that old binaries
-bind to unmodified) rather than to infer sign-off from his separate,
-general comment that a compiled-extension shim would be "high value."
-(See "Update — Fiddler's own licensing history, and what changed in
-August 2026" near the end of the Phase 1 section below: new information
-that raises this question's stakes, and reframes what his sign-off can
-and can't cover. Superseded in turn by "Update — naming question closed:
-the second rename," further below: the project has since dropped
-`Fiddler` from the shim's own identity entirely and closed this question
-without waiting on that sign-off.)
+positioned to resolve on its own, specifically for *this* approach (an
+assembly literally named `Fiddler` that old binaries bind to
+unmodified). (See "Update — Fiddler's own licensing history, and what
+changed in August 2026" near the end of the Phase 1 section below: new
+information that raises this question's stakes. Superseded in turn by
+"Update — naming question closed: the second rename," further below: the
+project has since dropped `Fiddler` from the shim's own identity entirely
+and closed this question.)
 
 ## `frmViewer`/`frmPrompt` member-level findings — and a hard, non-CLeARINET-specific wall
 
 Decided to pursue a technical solution here regardless of the trademark
-question above, on the working assumption Eric approves — reversible if
-he doesn't (see "Update — naming question closed: the second rename,"
-further below — this assumption is no longer live). Extended the metadata
+question above (see "Update — naming question closed: the second rename,"
+further below, for how that question was settled). Extended the metadata
 reader to decode `MemberRef` signature
 blobs (ECMA-335 II.23.2.1/.4: method/field name plus parameter and return
 *types* — still no IL method bodies read) for every member these five
@@ -234,8 +228,8 @@ other four are.
 
 None of this resolves the trademark/naming question above either — it's
 additive. At the time this was written, whichever of the three (or a mix)
-got pursued was thought to still need Eric's sign-off on the
-`Fiddler`-identity approach before shipping; see "Update — naming question
+got pursued was thought to still need the `Fiddler`-identity question
+settled before shipping; see "Update — naming question
 closed: the second rename," further below, for why that's no longer the
 gate.
 
@@ -337,11 +331,10 @@ of the main release cadence.
 
 ## Phase 1 — built: `tools/Clearinet.LegacyExtensionHost/`
 
-Decided to proceed building the out-of-process legacy host on the working
-assumption Eric approves the naming question — reversible if he doesn't
-(see "Decided to pursue a technical solution" above, same standing
-decision; superseded by "Update — naming question closed: the second
-rename," further below). A standalone solution, deliberately **not**
+Decided to proceed building the out-of-process legacy host (see "Decided
+to pursue a technical solution" above, same standing decision; the naming
+question was later settled by "Update — naming question closed: the
+second rename," further below). A standalone solution, deliberately **not**
 referenced by
 `CLeARINET.sln` or `apps/Clearinet.DesktopUi`, so it can't affect the main
 app's build and can be deleted entirely with no trace if it needs to be
@@ -864,28 +857,16 @@ is close to the least sympathetic thing this project could be doing from
 their side of the table right now. That doesn't change the legal test
 being applied, but it plausibly raises the odds of it actually being
 applied. At the time this was written, the conclusion drawn from that was
-to treat the "pending Eric Lawrence's sign-off" gate as more urgent, not
-less — see "Update — naming question closed: the second rename," further
-below, for how this project actually resolved it instead.
+to treat the naming question as more urgent, not less — see "Update —
+naming question closed: the second rename," further below, for how this
+project actually resolved it.
 
-It also reframes what that sign-off was ever worth. Eric Lawrence does
-not own the Fiddler trademark — Progress does, by way of the Telerik
-acquisition — so his blessing was always closer to "informed opinion from
-the tool's original creator, offered out of professional courtesy and
-unmatched familiarity with the surface" than a binding release from the
-actual rights-holder. That gap matters more now: he's publicly critical
-of Progress's own conduct here, which may make him sympathetic in spirit,
-but doesn't give him authority to grant what only Progress can grant. And
-given Progress has just demonstrated it will walk back an explicit
+It also matters who holds the trademark: Progress does, by way of the
+Telerik acquisition, so only Progress could ever grant a binding release.
+And given Progress has just demonstrated it will walk back an explicit
 written commitment when it suits them, even an assurance obtained
-directly from Progress itself would carry some of the same residual
-risk the "free forever" promise turned out to carry. None of this is a
-reason to stop pursuing his input — it's still worth having, and still
-the right first step — just a reason not to treat it as the last one.
-
-*(Superseded — see "Update — naming question closed: the second rename,"
-further below. The project decided not to wait on that input before
-shipping a further change that addresses the naming question directly.)*
+directly from Progress itself would carry some of the same residual risk
+the "free forever" promise turned out to carry.
 
 **What this doesn't touch:** nothing this project has actually done
 depends on Fiddler Classic's EULA, old or new. The clean-room research
@@ -1014,8 +995,8 @@ Prompted directly by Mark, reviewing the finished main-app integration
 work above: since the project had already decided not to imitate the
 `Fiddler` assembly (the whole point of Strategy 5, immediately above),
 did it make sense to go one step further and drop `Fiddler` from the
-shim's own name entirely — and if so, retire the "pending Eric Lawrence's
-sign-off" framing that runs throughout this document?
+shim's own name entirely — and if so, retire the "pending sign-off"
+framing that runs throughout this document?
 
 **What changed, mechanically.** The compat shim was renamed a second
 time: `Clearinet.Fiddler` → **`Clearinet.CompatShim`** — both the C#
@@ -1047,19 +1028,15 @@ the project's assessment changed.
 **What did change is the project's decision.** Reviewing this rename
 against everything else in this document — the first rename already
 having removed the sharpest, binder-level fact pattern; what remains
-being ordinary nominative/descriptive use; and Eric Lawrence's own
-sign-off never having been able to bind Progress, the actual
-trademark-holder, in the first place (see the licensing-history update
-above) — the project has decided to treat the naming question as
-resolved on this basis, and to ship without waiting on Eric's sign-off or
-on independent legal counsel first. The "pending Eric Lawrence's
+being ordinary nominative/descriptive use; and only Progress, the actual
+trademark-holder, ever being able to grant a binding release (see the
+licensing-history update above) — the project has decided to treat the
+naming question as resolved on this basis, and to ship without waiting on
+outside sign-off or independent legal counsel first. The "pending
 sign-off"/"needs real legal counsel before shipping" framing that recurs
 earlier in this document reflects the reasoning process that led here,
-not this project's current position; it's left in place as an honest
-record of how the decision was reached, not as a live gate. Eric
-Lawrence's own public statements remain cited elsewhere in this project's
-docs on their own merits (design feedback, stated business need) — that's
-attribution, independent of this now-closed question.
+not this project's current position; it's left in place as a record of
+how the decision was reached, not as a live gate.
 
 ## The legacy host's session bridge — built
 
@@ -1610,13 +1587,14 @@ end against a real compiled extension is one of the manual checks below.
 ## What's not built yet
 
 1. ~~The binary-compatibility shim described above~~ — stale: this was
-   written before that work started, on the assumption it would wait on
-   Eric Lawrence's input. It didn't wait, and it's long since built — see
+   written before that work started, on the assumption it would wait for
+   outside input. It didn't, and it's long since built — see
    "Phase 1 — built," "Strategy 5 — adopted," and "Update — naming
    question closed: the second rename," all above.
-2. **A real per-format Import/Export picker UI.** Today's "use the first
-   loaded importer/exporter and its first proffered format" is a
-   deliberate simplification — see the Phase 2 section above.
+2. ~~A real per-format Import/Export picker UI~~ — built: File >
+   Import/Export via Extension now lists every (extension, format) pair
+   (`ProfferedFormats.ChoicesFrom`) in `FormatPickerWindow` when there's
+   more than one, and remembers the last choice in preferences.
 3. **`OnBeforeReturningError`.** Still nothing in the proxy to hang it
    off — see the Phase 2 section above for why this is unchanged from
    before.
@@ -1629,3 +1607,112 @@ end against a real compiled extension is one of the manual checks below.
    README — `IAutoTamper` actually mutating live traffic, the `Inspector2`
    tabs rendering in the desktop app, and the Import/Export File-menu
    commands round-tripping sessions.
+
+## Update — a Fiddler-shaped layer in the main app (Sept 2026)
+
+Trying real, public Fiddler Classic extensions (see the Extension Test
+Targets doc) showed that "source-level compatible" wasn't close enough in
+practice. The main app's interfaces take `Exchange` and return
+CLeARINET-native types, so porting Eric Lawrence's NetLog importer would have meant
+rewriting most of its 1,700-line parser. The legacy host's shim is shaped
+like Fiddler's API, but it's `net48`, Windows-only, and only bridges
+`IAutoTamper`.
+
+So the main app now has a Fiddler-shaped layer of its own:
+`src/Clearinet.Compatibility/CompatShim/`, namespace
+`Clearinet.CompatShim`, targeting net10.0 on both platforms. It provides
+`Session` (with `BuildFromData`), `HTTPRequestHeaders`/
+`HTTPResponseHeaders`, `Parser`, `SessionFlags`, `SessionTimers`,
+`FiddlerApplication.Log`/`Prefs`/`DoNotifyUser`/`ReportException`, a
+`Utilities` subset, and Fiddler's own `ISessionImporter` signature.
+
+- **The same namespace as the legacy host's shim, on purpose**, so porting
+  an extension is the same change whichever host it's for. The two are
+  separate assemblies that never share a process. Neither name contains
+  "Fiddler" ("Don't get sued" stands). A ported extension can alias
+  `Fiddler` to it inside its own project to keep qualified names
+  compiling.
+- **Clean-room as before:** signatures and documented behavior come from
+  Telerik's published FiddlerCore API reference and the fiddlerbook.com
+  object-model pages. Where a member is Fiddler Classic-only and
+  undocumented, it comes from the ported extensions' own public call
+  sites. No Fiddler source or binary was read.
+- **This doesn't replace the `Exchange`-based decision above.** Live-traffic
+  hooks still use `Exchange`. The Fiddler-shaped `Session` is only used by
+  importers for now, and is converted to CLeARINET's native session on
+  the way in (`ShimSessionConverter`). Whether live `IAutoTamper` hooks
+  should also get the Fiddler-shaped `Session` is the next decision,
+  prompted by the CSP extension (milestone 4 in the targets doc).
+- **`ExtensionHost` recognizes both kinds.** An assembly with the
+  Fiddler-shaped `[RequiredVersion]` is checked against the Fiddler API
+  level the layer stands in for (any 5.0.x), not CLeARINET's version. Its
+  importers are wrapped in `CompatShimImporterAdapter`, so File > Import
+  treats them like native ones. Extension load contexts now always share
+  assemblies the host already has loaded, so a stray copy of
+  `Clearinet.Compatibility.dll` next to an extension can't create a
+  second, non-matching copy of its interfaces.
+- **Proven against real code, in CI, on both platforms:**
+  `tests/ExtensionPorts/` fetches the upstream extension at a pinned
+  commit, deletes its `using Fiddler;` lines, builds it and runs it
+  through `ExtensionHost` on Windows and macOS.
+
+## Update — live traffic hooks for ported extensions (Sept 2026)
+
+The existing hook contract (`IExtensionAutoTamperHost`) builds a fresh
+object for every hook, and has no way for an extension to answer a
+request itself. Real Fiddler Classic extensions expect both: the CSP Rule
+Collector marks a session in `AutoTamperRequestBefore` and answers its
+report requests with `utilCreateResponseAndBypassServer()`.
+
+- **`IExtensionSessionHost` (ProxyCore)** sits beside the old contract
+  and doesn't replace it. The listener starts one `IExtensionSession`
+  per request and calls `PeekAtRequestHeaders`, `RequestBefore`,
+  `RequestAfter`, `PeekAtResponseHeaders`, `ResponseBefore` and
+  `ResponseAfter` on it, in that order, then records the session with the
+  session's `Flags`. `RequestBefore` can return a local response; the
+  request then never reaches the server (or a request breakpoint), and
+  only the response hooks run.
+- **The upstream connection now opens only when needed**, after the
+  request hooks, so a request an extension answers works even when its
+  host doesn't resolve.
+- **`ShimAutoTamperSet` (Compatibility)** implements it over the
+  Fiddler-shaped `Clearinet.CompatShim.IAutoTamper`/`2`/`3`, with one
+  `CompatShim.Session` per request. If FiddlerScript or a breakpoint
+  replaces the request or response between hooks, the session picks up
+  the change and keeps its flags.
+- **`ExtensionHost`** now loads `CompatShim.IFiddlerExtension`
+  implementations, calls their `OnLoad`/`OnBeforeUnload`, and exposes
+  `CreateSessionHost()`.
+- **`ExtensionUi.AddTab(title, view)`** is CLeARINET's own API for an
+  extension's tab (an Avalonia control), shown beside Inspectors. It's
+  what a fork calls in place of `FiddlerApplication.UI.tabsViews`.
+
+Assumed, not confirmed against Fiddler Classic: the response hooks run for
+a response an extension created; the request-after hooks don't. CONNECT
+tunnels are still never passed to extensions, and `x-replywithtunnel` is
+ignored: CLeARINET always answers CONNECT itself and opens the upstream
+connection lazily, which is what that flag asked for.
+
+## Update — menus, session-list columns and row colours (Sept 2026)
+
+Ported to test these: Eric Lawrence's Privacy Scanner sample (see the
+Extension Test Targets doc).
+
+- **`Clearinet.CompatShim.FiddlerApplication.UI`** (type `frmViewer`, as
+  in Fiddler) has `mnuMain`, `mnuTools` and `lvSessions`. Its `MenuItem`,
+  `MenuItemCollection` and `MainMenu` are plain, observable objects shaped
+  like the WinForms types extensions use; they never load WinForms.
+  `MainWindow.axaml.cs` / `ExtensionMenus.cs` draw them as Avalonia menu
+  items and keep them in step. Checked items get a check-mark icon rather
+  than Avalonia's toggle, because WinForms-style handlers toggle `Checked`
+  themselves.
+- **`lvSessions.AddBoundColumn(title, order, width, flag)`** adds a grid
+  column bound to `SessionRow.Flags[flag]`.
+- **Row styling** reads `ui-backcolor`, `ui-color`, `ui-bold`,
+  `ui-italic`, `ui-strikeout` and `ui-hide` (`SessionRowStyle`). The grid
+  tags each row with classes as it's shown, and styles in
+  `MainWindow.axaml` apply the colours; a selected row drops its custom
+  background so the selection stays visible.
+- **Peek-hook header edits** are kept: `ShimAutoTamperSet` applies header
+  changes made in `OnPeekAtRequestHeaders`/`OnPeekAtResponseHeaders` to
+  the full message, when nothing else changed those headers in between.

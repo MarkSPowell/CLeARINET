@@ -14,8 +14,8 @@ namespace Clearinet.Compatibility.Extensions;
 /// independently-authored type, not Fiddler's own real one.
 ///
 /// What this interface family IS for: an engineer who has an existing Fiddler Classic
-/// extension's *source* (Eric Lawrence's own stated business need -- see the Project
-/// Plan's compatibility review) can port it here by swapping the base
+/// extension's *source* (the main porting goal -- see the Project Plan's
+/// compatibility review) can port it here by swapping the base
 /// interface/using directive and recompiling against Clearinet.Compatibility, with
 /// every method name, parameter shape, and (see
 /// <see cref="Clearinet.Compatibility.FiddlerScript.Exchange"/>) session-object member

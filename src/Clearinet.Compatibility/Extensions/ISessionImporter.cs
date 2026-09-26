@@ -27,12 +27,44 @@ namespace Clearinet.Compatibility.Extensions;
 /// Import call site) feeds each one through <c>SessionStore.Add</c>
 /// itself, exactly as <c>SazReader</c> already does for its own import
 /// path.
+///
+/// <paramref name="Flags"/> carries Fiddler-style per-session string
+/// flags through to <c>SessionStore.Add</c> -- optional, so an importer
+/// that has none (every native one so far) doesn't need to know it exists.
+/// The Fiddler-shaped importer adapter (<see cref="CompatShimImporterAdapter"/>)
+/// fills it from <c>Clearinet.CompatShim.Session.oFlags</c>.
 /// </summary>
 public sealed record ImportedSession(
     string Host,
     DateTimeOffset StartedAt,
     CapturedRequest Request,
-    CapturedResponse Response);
+    CapturedResponse Response,
+    IReadOnlyDictionary<string, string>? Flags = null)
+{
+    /// <summary>
+    /// The original four-argument constructor, kept for binary
+    /// compatibility. Adding the optional <see cref="Flags"/> parameter
+    /// changed the primary constructor's compiled signature, so an
+    /// extension built before that (e.g. an older build of
+    /// Clearinet.SampleExtension) calls this exact overload and would
+    /// otherwise fail at run time with MissingMethodException. Source that
+    /// passes four arguments still binds to this one, which is fine.
+    /// Guarded by BinaryCompatibilityTests.
+    /// </summary>
+    public ImportedSession(string Host, DateTimeOffset StartedAt, CapturedRequest Request, CapturedResponse Response)
+        : this(Host, StartedAt, Request, Response, null)
+    {
+    }
+
+    /// <summary>The original four-value deconstruction, kept for the same reason as the four-argument constructor.</summary>
+    public void Deconstruct(out string Host, out DateTimeOffset StartedAt, out CapturedRequest Request, out CapturedResponse Response)
+    {
+        Host = this.Host;
+        StartedAt = this.StartedAt;
+        Request = this.Request;
+        Response = this.Response;
+    }
+}
 
 /// <summary>
 /// CLeARINET's equivalent of Fiddler Classic's own <c>ISessionImporter</c>

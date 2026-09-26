@@ -30,3 +30,10 @@ jobs:
 
       - name: Test
         run: dotnet test CLeARINET.sln --no-build --configuration Release --verbosity normal
+
+      - name: Fetch and port upstream extensions
+        shell: pwsh
+        run: ./tests/ExtensionPorts/port.ps1
+
+      - name: Test ported extensions
+        run: dotnet test tests/ExtensionPorts/Clearinet.ExtensionPorts.Tests/Clearinet.ExtensionPorts.Tests.csproj --configuration Release --verbosity normal

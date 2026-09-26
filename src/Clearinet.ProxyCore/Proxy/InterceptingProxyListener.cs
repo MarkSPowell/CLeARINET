@@ -60,6 +60,7 @@ public sealed class InterceptingProxyListener
     private readonly AutoResponderRules _autoResponderRules;
     private readonly IFiddlerScriptRunner? _scriptRunner;
     private readonly IExtensionAutoTamperHost? _extensionHost;
+    private readonly IExtensionSessionHost? _sessionHost;
     private readonly TcpListener _listener;
     private CancellationTokenSource? _cts;
 
@@ -70,7 +71,8 @@ public sealed class InterceptingProxyListener
         BreakpointManager? breakpointManager = null,
         AutoResponderRules? autoResponderRules = null,
         IFiddlerScriptRunner? scriptRunner = null,
-        IExtensionAutoTamperHost? extensionHost = null)
+        IExtensionAutoTamperHost? extensionHost = null,
+        IExtensionSessionHost? sessionHost = null)
     {
         _leafProvider = leafProvider;
         _sessionStore = sessionStore;
@@ -94,6 +96,9 @@ public sealed class InterceptingProxyListener
         // call site reads HasAnyRequestBeforeHandlers/HasAnyResponseBeforeHandlers
         // through a null-conditional.
         _extensionHost = extensionHost;
+        // Ported Fiddler-shaped extensions (see IExtensionSessionHost). Null,
+        // or IsActive false, means none are loaded.
+        _sessionHost = sessionHost;
         _listener = new TcpListener(IPAddress.Loopback, port);
     }
 
@@ -121,9 +126,10 @@ public sealed class InterceptingProxyListener
         BreakpointManager? breakpointManager = null,
         AutoResponderRules? autoResponderRules = null,
         IFiddlerScriptRunner? scriptRunner = null,
-        IExtensionAutoTamperHost? extensionHost = null)
+        IExtensionAutoTamperHost? extensionHost = null,
+        IExtensionSessionHost? sessionHost = null)
     {
-        var preferred = new InterceptingProxyListener(preferredPort, leafProvider, sessionStore, breakpointManager, autoResponderRules, scriptRunner, extensionHost);
+        var preferred = new InterceptingProxyListener(preferredPort, leafProvider, sessionStore, breakpointManager, autoResponderRules, scriptRunner, extensionHost, sessionHost);
         try
         {
             preferred.Start();
@@ -134,7 +140,7 @@ public sealed class InterceptingProxyListener
             // Port 0 tells the OS to hand back any free port -- the same
             // trick ASP.NET Core's test host and countless other tools use
             // to avoid ever hard-failing on a port collision.
-            var fallback = new InterceptingProxyListener(0, leafProvider, sessionStore, breakpointManager, autoResponderRules, scriptRunner, extensionHost);
+            var fallback = new InterceptingProxyListener(0, leafProvider, sessionStore, breakpointManager, autoResponderRules, scriptRunner, extensionHost, sessionHost);
             fallback.Start();
             return fallback;
         }
@@ -208,7 +214,7 @@ public sealed class InterceptingProxyListener
             // PumpSessionsAsync's own remarks on why it has to be lazy.
             await PumpSessionsAsync(
                 targetHost, targetPort, client, clientTls, _sessionStore, _breakpointManager, _autoResponderRules,
-                _scriptRunner, _extensionHost, cancellationToken);
+                _scriptRunner, _extensionHost, _sessionHost, cancellationToken);
         }
         catch (BreakpointAbortedException ex)
         {
@@ -291,10 +297,33 @@ public sealed class InterceptingProxyListener
         AutoResponderRules autoResponderRules,
         IFiddlerScriptRunner? scriptRunner,
         IExtensionAutoTamperHost? extensionHost,
+        IExtensionSessionHost? sessionHost,
         CancellationToken cancellationToken)
     {
         TcpClient? upstreamClient = null;
         SslStream? upstreamTls = null;
+
+        // Opens the upstream connection the first time a request on this
+        // tunnel actually has to reach the real server, then reuses it. A
+        // request that AutoResponder or an extension answers never gets
+        // here, so a host that doesn't even resolve (the CSP extension's
+        // report host, say) still works.
+        async Task<SslStream> EnsureUpstreamAsync()
+        {
+            if (upstreamTls is null)
+            {
+                upstreamClient = new TcpClient();
+                await upstreamClient.ConnectAsync(targetHost, targetPort, cancellationToken);
+                upstreamTls = new SslStream(upstreamClient.GetStream(), leaveInnerStreamOpen: false);
+                // Deliberately using default certificate validation
+                // here: this proxy should surface a real upstream cert
+                // problem, not hide it, even though it's standing in
+                // the middle of the connection for the client's side.
+                await upstreamTls.AuthenticateAsClientAsync(targetHost);
+            }
+
+            return upstreamTls;
+        }
 
         try
         {
@@ -373,24 +402,22 @@ public sealed class InterceptingProxyListener
                     continue;
                 }
 
-                // Not answered locally -- this request needs the real
-                // server, so this is the first point in the whole
-                // connection's life that upstream actually has to exist.
-                if (upstreamTls is null)
-                {
-                    upstreamClient = new TcpClient();
-                    await upstreamClient.ConnectAsync(targetHost, targetPort, cancellationToken);
-                    upstreamTls = new SslStream(upstreamClient.GetStream(), leaveInnerStreamOpen: false);
-                    // Deliberately using default certificate validation
-                    // here: this proxy should surface a real upstream cert
-                    // problem, not hide it, even though it's standing in
-                    // the middle of the connection for the client's side.
-                    await upstreamTls.AuthenticateAsClientAsync(targetHost);
-                }
-
+                // Not answered by AutoResponder. The upstream connection is
+                // opened later, by EnsureUpstreamAsync, once it's clear a
+                // ported extension isn't answering this request itself.
                 var outgoingPreamble = outcome.HeadersToSet.Count > 0
                     ? requestPreamble with { Headers = MergeHeaders(requestPreamble.Headers, outcome.HeadersToSet) }
                     : requestPreamble;
+
+                // Ported Fiddler-shaped extensions get one session object for
+                // this whole request (see IExtensionSessionHost). Their
+                // hooks run right after the CLeARINET-native extensions'
+                // matching ones, an assumed ordering like the one described
+                // in this method's remarks.
+                var extensionSession = sessionHost is { IsActive: true }
+                    ? sessionHost.BeginSession(sessionStore.PeekNextId(), targetHost, "https")
+                    : null;
+                extensionSession?.PeekAtRequestHeaders(outgoingPreamble);
 
                 // BreakpointRules.ShouldBreakBeforeRequest only ever looks
                 // at Method/Target, never the body, so this can be decided
@@ -407,8 +434,9 @@ public sealed class InterceptingProxyListener
                 var mustBufferRequestForScript = scriptRunner?.HasOnBeforeRequest ?? false;
                 var mustBufferRequestForExtensions = extensionHost?.HasAnyRequestBeforeHandlers ?? false;
                 CapturedRequest request;
+                CapturedResponse? extensionLocalResponse = null;
                 if (breakpointManager.WouldBreakBeforeRequest(outgoingPreamble) || outcome.ForceBreakpointBeforeRequest ||
-                    mustBufferRequestForScript || mustBufferRequestForExtensions)
+                    mustBufferRequestForScript || mustBufferRequestForExtensions || extensionSession is not null)
                 {
                     var requestBody = await Http1MessageReader.ReadBodyAsync(clientTls, outgoingPreamble.Headers, cancellationToken);
                     request = outgoingPreamble with { Body = requestBody };
@@ -433,18 +461,49 @@ public sealed class InterceptingProxyListener
                         request = extensionHost!.RunRequestBefore(peekedSessionId, targetHost, request);
                     }
 
-                    // A breakpoint here (Fiddler's "bpu"/bpm/break-on-all-requests,
-                    // or AutoResponder's own *bpu) can hold this connection
-                    // open and edit the request before it's forwarded.
-                    request = await breakpointManager.ApplyRequestBreakpointAsync(targetHost, request, cancellationToken);
-                    await HttpMessageWriter.WriteRequestAsync(upstreamTls, request, cancellationToken);
+                    // Ported extensions' AutoTamperRequestBefore. One of
+                    // them may answer the request itself, in which case it
+                    // never reaches the server (or a request breakpoint).
+                    if (extensionSession is not null)
+                    {
+                        var result = extensionSession.RequestBefore(request);
+                        request = result.Request;
+                        extensionLocalResponse = result.LocalResponse;
+                    }
+
+                    if (extensionLocalResponse is null)
+                    {
+                        // A breakpoint here (Fiddler's "bpu"/bpm/break-on-all-requests,
+                        // or AutoResponder's own *bpu) can hold this connection
+                        // open and edit the request before it's forwarded.
+                        request = await breakpointManager.ApplyRequestBreakpointAsync(targetHost, request, cancellationToken);
+                        await HttpMessageWriter.WriteRequestAsync(await EnsureUpstreamAsync(), request, cancellationToken);
+                    }
                 }
                 else
                 {
-                    await HttpMessageWriter.WriteRequestPreambleAsync(upstreamTls, outgoingPreamble, cancellationToken);
+                    var upstream = await EnsureUpstreamAsync();
+                    await HttpMessageWriter.WriteRequestPreambleAsync(upstream, outgoingPreamble, cancellationToken);
                     var requestBody = await Http1MessageReader.RelayBodyAsync(
-                        clientTls, upstreamTls, outgoingPreamble.Headers, cancellationToken);
+                        clientTls, upstream, outgoingPreamble.Headers, cancellationToken);
                     request = outgoingPreamble with { Body = requestBody };
+                }
+
+                if (extensionLocalResponse is not null)
+                {
+                    // An extension answered (Fiddler's
+                    // utilCreateResponseAndBypassServer). Nothing was sent,
+                    // so the request-after hooks don't run. The response
+                    // hooks do, as they would for any response (an assumed
+                    // match with Fiddler Classic, not a confirmed one).
+                    var localResponse = extensionSession!.ResponseBefore(request, extensionLocalResponse);
+                    await HttpMessageWriter.WriteResponseAsync(clientTls, localResponse, cancellationToken);
+                    extensionSession.ResponseAfter(request, localResponse);
+
+                    var answeredSession = sessionStore.Add(targetHost, startedAt, request, localResponse, extensionSession.Flags);
+                    Console.WriteLine(
+                        $"[{startedAt:HH:mm:ss}] #{answeredSession.Id} {localResponse.StatusCode} {request.Method} {url} (answered by an extension)");
+                    continue;
                 }
 
                 // Fire-and-observe -- see this method's own remarks on why
@@ -452,9 +511,14 @@ public sealed class InterceptingProxyListener
                 // branches above, rather than gated and duplicated inside
                 // each one.
                 extensionHost?.RunRequestAfter(sessionStore.PeekNextId(), targetHost, request);
+                extensionSession?.RequestAfter(request);
+
+                // Every path above that didn't return has sent the request
+                // upstream, so the connection exists.
+                var upstreamStream = upstreamTls!;
 
                 var isHeadRequest = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
-                var responsePreamble = await Http1MessageReader.ReadResponsePreambleAsync(upstreamTls, cancellationToken);
+                var responsePreamble = await Http1MessageReader.ReadResponsePreambleAsync(upstreamStream, cancellationToken);
                 if (responsePreamble is null)
                 {
                     Console.WriteLine(
@@ -463,17 +527,18 @@ public sealed class InterceptingProxyListener
                 }
 
                 var responseHasNoBody = Http1MessageReader.ResponseHasNoBody(responsePreamble.StatusCode, isHeadRequest);
+                extensionSession?.PeekAtResponseHeaders(request, responsePreamble);
 
                 // Same fork as the request side above, for OnBeforeResponse.
                 var mustBufferResponseForScript = scriptRunner?.HasOnBeforeResponse ?? false;
                 var mustBufferResponseForExtensions = extensionHost?.HasAnyResponseBeforeHandlers ?? false;
                 CapturedResponse response;
                 if (breakpointManager.WouldBreakBeforeResponse(request, responsePreamble) || outcome.ForceBreakpointAfterResponse ||
-                    mustBufferResponseForScript || mustBufferResponseForExtensions)
+                    mustBufferResponseForScript || mustBufferResponseForExtensions || extensionSession is not null)
                 {
                     var responseBody = responseHasNoBody
                         ? Array.Empty<byte>()
-                        : await Http1MessageReader.ReadBodyAsync(upstreamTls, responsePreamble.Headers, cancellationToken);
+                        : await Http1MessageReader.ReadBodyAsync(upstreamStream, responsePreamble.Headers, cancellationToken);
                     response = responsePreamble with { Body = responseBody };
 
                     // Same ordering rationale as the request side: the
@@ -494,6 +559,13 @@ public sealed class InterceptingProxyListener
                         response = extensionHost!.RunResponseBefore(peekedSessionId, targetHost, request, response);
                     }
 
+                    // Ported extensions' AutoTamperResponseBefore, on the
+                    // same session object as their request hooks.
+                    if (extensionSession is not null)
+                    {
+                        response = extensionSession.ResponseBefore(request, response);
+                    }
+
                     response = await breakpointManager.ApplyResponseBreakpointAsync(
                         targetHost, request, response, cancellationToken);
                     await HttpMessageWriter.WriteResponseAsync(clientTls, response, cancellationToken);
@@ -509,7 +581,7 @@ public sealed class InterceptingProxyListener
                     var responseBody = responseHasNoBody
                         ? Array.Empty<byte>()
                         : await Http1MessageReader.RelayBodyAsync(
-                            upstreamTls, clientTls, responsePreamble.Headers, cancellationToken);
+                            upstreamStream, clientTls, responsePreamble.Headers, cancellationToken);
                     response = responsePreamble with { Body = responseBody };
                 }
 
@@ -517,8 +589,9 @@ public sealed class InterceptingProxyListener
                 // this runs unconditionally, from one spot after both
                 // branches above.
                 extensionHost?.RunResponseAfter(sessionStore.PeekNextId(), targetHost, request, response);
+                extensionSession?.ResponseAfter(request, response);
 
-                var session = sessionStore.Add(targetHost, startedAt, request, response);
+                var session = sessionStore.Add(targetHost, startedAt, request, response, extensionSession?.Flags);
                 Console.WriteLine(
                     $"[{startedAt:HH:mm:ss}] #{session.Id} {response.StatusCode} {request.Method} https://{targetHost}{request.Target} " +
                     $"({request.Body.Length} B req, {response.Body.Length} B resp)");
@@ -536,7 +609,7 @@ public sealed class InterceptingProxyListener
                     // back to exactly that for the rest of this connection's
                     // life -- the same raw pump this spike used everywhere
                     // before it understood HTTP/1.1 at all.
-                    await RelayRawBytesUntilClosedAsync(clientTls, upstreamTls, cancellationToken);
+                    await RelayRawBytesUntilClosedAsync(clientTls, upstreamStream, cancellationToken);
                     return;
                 }
             }

@@ -1,7 +1,7 @@
 ; CLeARINET Windows installer (Inno Setup).
 ;
 ; Built by .github/workflows/release-windows.yml, which passes MyAppVersion,
-; MyFileVersion, PublishDir, and LegacyHostDir on the command line via /D;
+; MyFileVersion, PublishDir, LegacyHostDir and ExtensionsDir on the command line via /D;
 ; the #ifndef fallbacks below exist purely so this script still compiles
 ; (with placeholder values) if someone runs ISCC.exe against it directly
 ; while testing, without having to remember all four /D switches every
@@ -51,11 +51,14 @@
 #ifndef LegacyHostDir
   #define LegacyHostDir "..\publish\legacyhost"
 #endif
+; ExtensionsDir (optional): installer/build-extensions.ps1's output. When
+; it's passed, the installer offers the optional extensions below; when it
+; isn't (a quick local ISCC run), they're left out.
 
 #define MyAppName "CLeARINET"
 #define MyAppPublisher "CLeARINET"
 #define MyAppExeName "Clearinet.DesktopUi.exe"
-#define MyAppURL "https://github.com/ericlaw1979/Clearinet"
+#define MyAppURL "https://github.com/MarkSPowell/CLeARINET"
 
 [Setup]
 ; A fixed, random GUID -- Inno Setup uses this (not the app name) to
@@ -120,6 +123,17 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 ; that already exists in this file (see "desktopicon" above) for "only
 ; copy these files if the person checked this box."
 Name: "legacyhost"; Description: "Legacy Fiddler Classic extension host (runs real, unmodified compiled Fiddler Classic extensions against CLeARINET's own traffic -- optional, and unrelated to normal use)"; GroupDescription: "Optional components:"; Flags: unchecked
+#ifdef ExtensionsDir
+; Optional extensions, installed into {app}\Extensions, which the app scans
+; after the user's own Documents\CLeARINET\Extensions (a copy there wins).
+; Each is a separate work under its own licence, installed alongside it in
+; {app}\Extensions\licenses (see installer/build-extensions.ps1). The
+; Privacy Scanner is off by default: P3P is obsolete, so it's mostly of
+; interest as an example extension.
+Name: "ext_netlog"; Description: "NetLog importer (File > Import via Extension: Chromium NetLog JSON captures)"; GroupDescription: "Optional extensions:"
+Name: "ext_csp"; Description: "CSP Rule Collector (builds a Content-Security-Policy for the sites you browse)"; GroupDescription: "Optional extensions:"
+Name: "ext_privacy"; Description: "Privacy Scanner (colours responses that set cookies; checks P3P headers)"; GroupDescription: "Optional extensions:"; Flags: unchecked
+#endif
 
 [Files]
 ; Everything dotnet publish produced -- the single-file app exe, its
@@ -142,6 +156,26 @@ Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 ; ProjectReferences (Clearinet.CompatShim.dll,
 ; Clearinet.LegacyExtensionHost.Bridge.dll) alongside the host .exe itself.
 Source: "{#LegacyHostDir}\*"; DestDir: "{app}\LegacyHost"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: legacyhost
+
+#ifdef ExtensionsDir
+Source: "{#ExtensionsDir}\CLeARINETNetLog.dll"; DestDir: "{app}\Extensions"; Flags: ignoreversion; Tasks: ext_netlog
+Source: "{#ExtensionsDir}\licenses\CLeARINETNetLog-LICENSE.txt"; DestDir: "{app}\Extensions\licenses"; Flags: ignoreversion; Tasks: ext_netlog
+Source: "{#ExtensionsDir}\CLeARINETCSP.dll"; DestDir: "{app}\Extensions"; Flags: ignoreversion; Tasks: ext_csp
+Source: "{#ExtensionsDir}\licenses\CLeARINETCSP-LICENSE.txt"; DestDir: "{app}\Extensions\licenses"; Flags: ignoreversion; Tasks: ext_csp
+Source: "{#ExtensionsDir}\PrivacyScanner.dll"; DestDir: "{app}\Extensions"; Flags: ignoreversion; Tasks: ext_privacy
+Source: "{#ExtensionsDir}\licenses\PrivacyScanner-LICENSE.txt"; DestDir: "{app}\Extensions\licenses"; Flags: ignoreversion; Tasks: ext_privacy
+Source: "{#ExtensionsDir}\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}\Extensions"; Flags: ignoreversion; Tasks: ext_netlog or ext_csp or ext_privacy
+
+[InstallDelete]
+; Re-running setup with an extension unticked removes it.
+Type: files; Name: "{app}\Extensions\CLeARINETNetLog.dll"; Tasks: not ext_netlog
+Type: files; Name: "{app}\Extensions\licenses\CLeARINETNetLog-LICENSE.txt"; Tasks: not ext_netlog
+Type: files; Name: "{app}\Extensions\CLeARINETCSP.dll"; Tasks: not ext_csp
+Type: files; Name: "{app}\Extensions\licenses\CLeARINETCSP-LICENSE.txt"; Tasks: not ext_csp
+Type: files; Name: "{app}\Extensions\PrivacyScanner.dll"; Tasks: not ext_privacy
+Type: files; Name: "{app}\Extensions\licenses\PrivacyScanner-LICENSE.txt"; Tasks: not ext_privacy
+Type: files; Name: "{app}\Extensions\THIRD-PARTY-NOTICES.txt"; Tasks: not (ext_netlog or ext_csp or ext_privacy)
+#endif
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

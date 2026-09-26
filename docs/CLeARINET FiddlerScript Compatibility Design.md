@@ -3,8 +3,8 @@
 Detailed design for the `Clearinet.Compatibility` FiddlerScript engine,
 split out from the Project Plan's "Fiddler Classic compatibility review"
 section once there was enough here to warrant its own doc. Read that
-section first for the business context (Eric Lawrence's direct feedback,
-the decision to target FiddlerScript before compiled `.NET` extensions)
+section first for the context (the need to port existing Fiddler Classic
+workflows, the decision to target FiddlerScript before compiled `.NET` extensions)
 and the "everything, including Context Actions/Tools/custom columns"
 scope decision this doc plans against.
 
@@ -67,8 +67,8 @@ and method keeps Fiddler Classic's own exact casing (`hostname`, not
 `Hostname`; `responseCode`, not `ResponseCode`) rather than
 ericlaw1979/Clearinet's own partially-renamed set (`host`/`urlContains()`
 in place of `hostname`/`uriContains()`, per that repo's sample). The
-actual porting target — per Eric's own stated business need — is an
-*existing* `CustomRules.js` a Microsoft engineer already has, written
+actual porting target is an *existing* `CustomRules.js` a Fiddler Classic
+user already has, written
 against Fiddler Classic's real names, not against a brand-new sample file.
 Aliasing ericlaw1979/Clearinet's newer member names too, once/if that
 repo's convention solidifies, is future work, not done here.
