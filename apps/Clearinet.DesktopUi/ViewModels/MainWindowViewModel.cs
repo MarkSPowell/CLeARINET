@@ -1883,6 +1883,18 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             var path = Path.Combine(AppContext.BaseDirectory, "Documentation", "User Guide.md");
+            if (!File.Exists(path))
+            {
+                // In the macOS app bundle, documentation lives in
+                // Contents/Resources, next to Contents/MacOS: only code may go
+                // in Contents/MacOS, or the bundle's signature won't verify.
+                var bundled = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Resources", "Documentation", "User Guide.md"));
+                if (File.Exists(bundled))
+                {
+                    path = bundled;
+                }
+            }
+
             Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
         }
         catch (Exception ex)

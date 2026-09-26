@@ -101,24 +101,20 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$EXECUTABLE_PATH" "$MACOS_DIR/$EXECUTABLE_NAME"
 chmod +x "$MACOS_DIR/$EXECUTABLE_NAME"
 
-# Everything else PublishSingleFile left loose beside the executable --
-# today that's just the Documentation/User Guide.md folder
-# (Clearinet.DesktopUi.csproj's own None/Link entry for it) -- goes into
-# Resources rather than MacOS, which is the conventional home for an app
-# bundle's own non-executable content. OpenDocumentationCommand resolves
-# this relative to AppContext.BaseDirectory, which for a bundled macOS app
-# is Contents/MacOS (where the executable itself lives, not Resources) --
-# so this also drops a copy next to the executable, matching what that
-# command actually expects to find. Keeping both isn't wasted space worth
-# avoiding: this is a handful of KB, nowhere near worth the fragility of
-# only supporting one of the two layouts.
+# Everything else PublishSingleFile left loose beside the executable (the
+# Documentation/User Guide.md folder -- see Clearinet.DesktopUi.csproj's
+# None/Link entry for it) goes into Resources only. Contents/MacOS must
+# hold nothing but code: codesign treats every file there as a code
+# subcomponent, and a non-code file (a .pdb, a .md) fails verification with
+# "code object is not signed at all". OpenDocumentation looks in
+# ../Resources when the guide isn't beside the executable. Debug symbols
+# (.pdb) aren't shipped at all.
 for entry in "$PUBLISH_DIR"/*; do
   name="$(basename "$entry")"
-  if [[ "$name" == "$EXECUTABLE_NAME" ]]; then
+  if [[ "$name" == "$EXECUTABLE_NAME" || "$name" == *.pdb ]]; then
     continue
   fi
   cp -R "$entry" "$RESOURCES_DIR/$name"
-  cp -R "$entry" "$MACOS_DIR/$name"
 done
 
 # A minimal Info.plist -- just what an Avalonia app actually needs. No
@@ -168,10 +164,10 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 PLIST
 
 # Ad-hoc sign the whole bundle ("-" means no identity: free, no account),
-# so its signature covers Info.plist and every file in it. Not --deep: the
-# extra files in Contents/MacOS (symbols, the bundled User Guide) aren't
-# code, and are sealed as the bundle's resources instead. Verify straight
-# away, so a bad bundle fails the build rather than reaching users.
+# so its signature covers Info.plist and every file in it (Contents/MacOS
+# holds only the executable; everything else is in Resources, sealed as
+# the bundle's resources). Verify straight away, so a bad bundle fails the
+# build rather than reaching users.
 codesign --force --sign - "$APP_BUNDLE"
 codesign --verify --verbose=2 "$APP_BUNDLE"
 
