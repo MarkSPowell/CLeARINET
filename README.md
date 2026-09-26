@@ -25,7 +25,13 @@ here yet. Feedback and issues are welcome.
   on why), plus `method:`, `host:`, and `status:` query tokens (exact,
   class like `4xx`, comparison, and range forms).
 - Request/response inspector tabs: Headers, Raw (decoded text, with
-  automatic decompression), and Hex.
+  automatic decompression), Hex, Cookies (each cookie sent or set, with
+  its attributes, and a warning for ones browsers will refuse) and Notes
+  (flags an importer or extension attached to a session).
+- Rows in the session list can be coloured, bold, italic, struck through
+  or hidden by an extension or importer (Fiddler's `ui-backcolor` and
+  related session flags), and sessions can be removed from the list
+  (**Edit > Remove Selected Session / Remove All Sessions**).
 - Automatic response decompression covering gzip, deflate (both the
   common zlib-wrapped form and the older raw form some servers still
   send), zstd, and chains of those applied together. bzip2 and the
@@ -54,6 +60,27 @@ here yet. Feedback and issues are welcome.
   startup — AutoTamper hooks, request/response inspectors, and session
   import/export are all supported; see the .NET Extension Compatibility
   Design doc.
+- A Fiddler-shaped compatibility layer (`Clearinet.CompatShim`) for
+  porting real Fiddler Classic extensions from their source, on both
+  Windows and macOS. Ported extensions can import sessions, work on live
+  traffic (one session object per request, and answering requests
+  themselves), and add their own menus, tabs, session-list columns and
+  row colours. Working so far:
+  - **NetLog importer** (Eric Lawrence's): builds with only its
+    `using Fiddler;` lines removed.
+  - **CSP Rule Collector**: a CLeARINET-only fork,
+    [CSP-CLeARINET-Extension](https://github.com/MarkSPowell/CSP-CLeARINET-Extension),
+    with its tab rewritten in Avalonia.
+  - **Privacy Scanner** (cookies/P3P): ported as a test of the UI hooks;
+    cookie viewing itself is built in (the Cookies tab).
+
+  All three come with the installers as optional extensions, each with
+  its own licence: the Windows installer offers them as ticked boxes
+  (Privacy Scanner off by default), and the macOS `.dmg` has an
+  **Optional Extensions** folder to copy them from. See the User Guide.
+
+  CI builds and tests all three on both platforms. See
+  `tests/ExtensionPorts/README.md` and the Extension Test Targets doc.
 - Optional legacy extension host: a separate, opt-in tool
   (`tools/Clearinet.LegacyExtensionHost`) that runs real, unmodified-source
   Fiddler Classic extensions against real proxied traffic, bridged to the
@@ -69,6 +96,13 @@ here yet. Feedback and issues are welcome.
 - Export captured sessions to a `.saz` (Session Archive Zip) file, or
   import a previously saved one back in.
 - An automatic or manually-specified listening port (defaults to Auto).
+- Settings that persist between runs (port choice, Tools-menu panels,
+  filter text and more), stored the same way on Windows and macOS in
+  `preferences.json` under `%LOCALAPPDATA%\CLeARINET\` or
+  `~/Library/Application Support/CLeARINET/`. Unknown keys are kept, a
+  corrupt file is set aside rather than overwritten, and two running
+  copies don't clobber each other's changes. See the Preferences Design
+  doc.
 - **Help > Documentation** in the running app opens the
   [User Guide](docs/User%20Guide.md) — see [Documentation](#documentation)
   below.
@@ -110,20 +144,23 @@ ever leaves the device on its own.
 - `docs/` — the [User Guide](docs/User%20Guide.md) for using the app, plus
   design docs referenced throughout the code's own comments ("see the
   project plan," "the Interception Certificate Design doc"): the project
-  plan and tenets, the interception certificate design, the FiddlerScript
+  plan and tenets, the interception certificate design, the preferences
+  design, the FiddlerScript
   compatibility design, the .NET extension compatibility design, the
   Fiddler feature/tier inventory, and breakpoints research notes.
 - `src/Clearinet.ProxyCore` — the proxy engine: the listener, HTTP
   message parsing, sessions, breakpoints, AutoResponder, certificates,
-  SAZ export, and system-proxy registration on both Windows and macOS.
+  SAZ export, system-proxy registration on both Windows and macOS, and
+  the preferences store.
 - `src/Clearinet.Extensibility` — the inspector contract and the built-in
-  inspectors (Headers, Raw, Hex).
+  inspectors (Headers, Raw, Hex, Cookies, Notes).
 - `src/Clearinet.Compatibility` — FiddlerScript compatibility
   (`FiddlerScriptRunner`, the `Exchange`/`AppObject` shim, the directive
   scanner behind the Rules menu/Script Actions/custom columns) and
   compiled .NET extension compatibility (`ExtensionHost` and the
-  `IFiddlerExtension`-family interfaces) — see both design docs above for
-  what's built and what's still scoped out.
+  `IFiddlerExtension`-family interfaces), and the Fiddler-shaped
+  `Clearinet.CompatShim` layer for extensions ported from source — see both
+  design docs above for what's built and what's still scoped out.
 - `apps/Clearinet.DesktopUi` — the Avalonia desktop UI.
 - `tools/Clearinet.DevHost` — a console host used during early
   development of the proxy core.
@@ -137,14 +174,19 @@ ever leaves the device on its own.
   traffic. Deliberately kept out of `CLeARINET.sln`/the main app's build
   entirely, so nothing about it can affect either — see its own README and
   the .NET Extension Compatibility Design doc.
-- `tests/` — unit tests for the projects above.
+- `tests/` — unit tests for the projects above, plus `tests/ExtensionPorts`:
+  real Fiddler Classic extensions fetched at pinned commits, ported, and
+  tested (not part of `CLeARINET.sln`; see its README).
 
 ## Known limitations
 
 Listed here on purpose, rather than left for someone to discover the hard
 way:
 
-- **macOS support is built, but unverified on a real Mac.** Certificate
+- **macOS support is built, but has had little testing on a real Mac.**
+  The first real install found the `.dmg`'s app reported as "damaged",
+  because the hand-built app bundle wasn't signed as a whole; it's now
+  ad-hoc signed (see below), which still needs confirming on a Mac. Certificate
   trust (via the `security` CLI, into the login keychain, behind
   CLeARINET's own confirmation dialog since `security` has no OS-level
   install prompt the way Windows does) and system proxy registration (via
@@ -158,19 +200,20 @@ way:
   `networksetup` invocation) rather than live integration tests.
   `.github/workflows/release-macos.yml` builds an installable `.dmg` from
   every tagged release the same way `release-windows.yml` builds the
-  Windows one, but it's **unsigned** (no Apple Developer account
-  available to this project) — Gatekeeper will warn on first launch;
-  see `installer/macos/build-installer.sh`'s own remarks for exactly
-  what that means and the one open question it leaves.
-- **No app-level settings persistence.** Port choice, which Tools-menu
-  panels are checked, breakpoint conditions, and filter text all reset to
-  their defaults on every run — nothing about the app's own UI state is
-  saved between sessions yet. (A loaded FiddlerScript's own `[BindPref]`
-  values are a separate, narrower thing and *do* persist, under
-  `%LocalAppData%\CLeARINET\` — see the FiddlerScript Compatibility Design
-  doc.)
-- **No HAR or Chromium Netlog import**, and no explicit HTTP/2 or TLS 1.3
-  handling yet.
+  Windows one. It's only **ad-hoc signed**, not Developer ID signed or
+  notarized (no Apple Developer account available to this project), so
+  macOS asks you to allow it once, in System Settings > Privacy & Security;
+  see `installer/macos/build-installer.sh`'s own remarks.
+- **Only some settings persist yet.** The port choice, Tools-menu panel
+  toggles, filter text, FiddlerScript path and legacy-host auto-launch are
+  remembered between runs. Window size and position, AutoResponder rules
+  and a Preferences/`about:config` editor aren't there yet. Breakpoints
+  and the AutoResponder's on/off switch deliberately always start off. See
+  the Preferences Design doc.
+- **No built-in HAR or Chromium NetLog import.** NetLog import works
+  through Eric Lawrence's ported NetLog importer extension (see above),
+  an optional extension in the installers. No explicit HTTP/2 or TLS
+  1.3 handling yet.
 - **The main app's own compiled-extension support is source-level, not
   binary.** An already-compiled Fiddler Classic extension `.dll` can't be
   dropped straight into CLeARINET's own Extensions folder as-is; a new
@@ -182,9 +225,6 @@ way:
   proxied traffic; it's not part of the main app's own build, but the
   Windows installer can include it as an unchecked-by-default optional
   component.
-- **No import/export format picker.** With more than one loaded extension
-  proffering session import or export, File > Import/Export via Extension
-  always uses the first one found rather than letting you choose.
 - **No headless/CLI mode.** Left out of this milestone by design, not by
   oversight.
 

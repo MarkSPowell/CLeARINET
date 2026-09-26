@@ -25,12 +25,28 @@ public sealed class SessionStore
     /// </summary>
     public event Action<Session>? SessionAdded;
 
-    public Session Add(string host, DateTimeOffset startedAt, CapturedRequest request, CapturedResponse response)
+    public Session Add(string host, DateTimeOffset startedAt, CapturedRequest request, CapturedResponse response) =>
+        Add(host, startedAt, request, response, flags: null);
+
+    /// <summary>
+    /// As <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/>,
+    /// for a session that arrives already carrying Fiddler-style string
+    /// flags -- see <see cref="Session.Flags"/>. An empty dictionary is
+    /// stored as null.
+    /// </summary>
+    public Session Add(
+        string host,
+        DateTimeOffset startedAt,
+        CapturedRequest request,
+        CapturedResponse response,
+        IReadOnlyDictionary<string, string>? flags)
     {
         Session session;
         lock (_gate)
         {
-            session = new Session(_nextId++, host, startedAt, request, response);
+            session = new Session(
+                _nextId++, host, startedAt, request, response,
+                Flags: flags is { Count: > 0 } ? flags : null);
             _sessions.Add(session);
         }
 
@@ -40,6 +56,54 @@ public sealed class SessionStore
         // Add() concurrently.
         SessionAdded?.Invoke(session);
         return session;
+    }
+
+    /// <summary>
+    /// Raised after sessions are removed (<see cref="Remove"/> or
+    /// <see cref="Clear"/>), with their ids. Like <see cref="SessionAdded"/>,
+    /// on whatever thread removed them.
+    /// </summary>
+    public event Action<IReadOnlyList<int>>? SessionsRemoved;
+
+    /// <summary>
+    /// Removes the sessions with these ids (unknown ids are ignored) and
+    /// returns how many were removed. Ids aren't reused: the next session
+    /// still gets the next number, as in Fiddler.
+    /// </summary>
+    public int Remove(IEnumerable<int> ids)
+    {
+        var wanted = new HashSet<int>(ids);
+        List<int> removed;
+        lock (_gate)
+        {
+            removed = _sessions.Where(s => wanted.Contains(s.Id)).Select(s => s.Id).ToList();
+            _sessions.RemoveAll(s => wanted.Contains(s.Id));
+        }
+
+        if (removed.Count > 0)
+        {
+            SessionsRemoved?.Invoke(removed);
+        }
+
+        return removed.Count;
+    }
+
+    /// <summary>Removes every session and returns how many there were.</summary>
+    public int Clear()
+    {
+        List<int> removed;
+        lock (_gate)
+        {
+            removed = _sessions.Select(s => s.Id).ToList();
+            _sessions.Clear();
+        }
+
+        if (removed.Count > 0)
+        {
+            SessionsRemoved?.Invoke(removed);
+        }
+
+        return removed.Count;
     }
 
     public IReadOnlyList<Session> Snapshot()

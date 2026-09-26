@@ -10,6 +10,7 @@ using Clearinet.ProxyCore.AutoResponder;
 using Clearinet.ProxyCore.Breakpoints;
 using Clearinet.ProxyCore.Certificates;
 using Clearinet.ProxyCore.Extensions;
+using Clearinet.ProxyCore.Preferences;
 using Clearinet.ProxyCore.Proxy;
 using Clearinet.ProxyCore.Sessions;
 using Clearinet.ProxyCore.SystemProxy;
@@ -91,6 +92,28 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private readonly Func<bool>? _confirmMacOSCertificateTrust;
 
+    /// <summary>
+    /// Where every setting in <see cref="PreferenceKeys"/> is read from at
+    /// startup and written back to on change -- see the Preferences Design
+    /// doc. Owned by this view model (flushed and disposed in
+    /// <see cref="Dispose"/>, which runs from <c>ShutdownRequested</c> on
+    /// both Windows and macOS). Writes from the setters below are cheap: the
+    /// store updates memory immediately and batches the actual file write
+    /// on a short background timer, so a keystroke in the filter box never
+    /// waits on disk.
+    /// </summary>
+    private readonly PreferenceStore _preferences;
+
+    /// <summary>
+    /// Shows the Import/Export via Extension format picker: (heading,
+    /// choices, key of the choice to highlight) → the chosen one, or null if
+    /// cancelled. Supplied by App.axaml.cs as FormatPickerWindow, the same
+    /// "view model asks through a delegate, never references a window"
+    /// pattern as <see cref="_confirmMacOSCertificateTrust"/>. Null means
+    /// no picker: see <see cref="PickFormatAsync"/>.
+    /// </summary>
+    private readonly Func<string, IReadOnlyList<FormatChoice>, string?, Task<FormatChoice?>>? _chooseFormat;
+
     private CertificateAuthority? _authority;
     private InterceptingProxyListener? _proxy;
     private string _statusText;
@@ -132,6 +155,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public ObservableCollection<SessionRow> Sessions { get; } = [];
 
     /// <summary>
+    /// Tabs extensions added with <see cref="ExtensionUi.AddTab"/>, shown
+    /// beside the Inspectors (see MainWindow.axaml.cs). Filled while
+    /// extensions load, and never changes after that.
+    /// </summary>
+    public ObservableCollection<ExtensionTabViewModel> ExtensionTabs { get; } = [];
+
+    /// <summary>
     /// The subset of <see cref="Sessions"/> that <see cref="FilterText"/>
     /// currently matches, in capture order -- what the session grid
     /// actually binds to. Kept as its own collection rather than an
@@ -161,6 +191,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 _query = SessionQuery.Parse(value);
                 ApplyFilter();
+                _preferences.SetStringPref(PreferenceKeys.FilterText, value ?? string.Empty);
             }
         }
     }
@@ -326,7 +357,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ShowAlsoBreakOnRow
     {
         get => _showAlsoBreakOnRow;
-        set => SetField(ref _showAlsoBreakOnRow, value);
+        set
+        {
+            if (SetField(ref _showAlsoBreakOnRow, value))
+            {
+                _preferences.SetBoolPref(PreferenceKeys.ShowAlsoBreakOnRow, value);
+            }
+        }
     }
 
     /// <summary>
@@ -399,6 +436,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (SetField(ref _fiddlerScriptPath, value))
             {
                 LoadFiddlerScriptCommand.RaiseCanExecuteChanged();
+                _preferences.SetStringPref(PreferenceKeys.FiddlerScriptPath, value ?? string.Empty);
             }
         }
     }
@@ -448,7 +486,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool AutoLaunchLegacyHost
     {
         get => _autoLaunchLegacyHost;
-        set => SetField(ref _autoLaunchLegacyHost, value);
+        set
+        {
+            if (SetField(ref _autoLaunchLegacyHost, value))
+            {
+                _preferences.SetBoolPref(PreferenceKeys.AutoLaunchLegacyHost, value);
+            }
+        }
     }
 
     /// <summary>
@@ -485,7 +529,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ShowFiddlerScriptPanel
     {
         get => _showFiddlerScriptPanel;
-        set => SetField(ref _showFiddlerScriptPanel, value);
+        set
+        {
+            if (SetField(ref _showFiddlerScriptPanel, value))
+            {
+                _preferences.SetBoolPref(PreferenceKeys.ShowFiddlerScriptPanel, value);
+            }
+        }
     }
 
     /// <summary>
@@ -499,7 +549,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ShowExtensionsPanel
     {
         get => _showExtensionsPanel;
-        set => SetField(ref _showExtensionsPanel, value);
+        set
+        {
+            if (SetField(ref _showExtensionsPanel, value))
+            {
+                _preferences.SetBoolPref(PreferenceKeys.ShowExtensionsPanel, value);
+            }
+        }
     }
 
     /// <summary>
@@ -514,7 +570,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public bool ShowLegacyExtensionHostPanel
     {
         get => _showLegacyExtensionHostPanel;
-        set => SetField(ref _showLegacyExtensionHostPanel, value);
+        set
+        {
+            if (SetField(ref _showLegacyExtensionHostPanel, value))
+            {
+                _preferences.SetBoolPref(PreferenceKeys.ShowLegacyExtensionHostPanel, value);
+            }
+        }
     }
 
     /// <summary>
@@ -604,6 +666,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (SetField(ref _selectedSessionRow, value))
             {
                 RefreshInspectors();
+                RemoveSelectedSessionCommand?.RaiseCanExecuteChanged();
             }
         }
     }
@@ -640,6 +703,13 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             if (SetField(ref _preferredPort, value))
             {
                 StartCommand.RaiseCanExecuteChanged();
+
+                // Only a real port is worth remembering -- a cleared field
+                // mid-edit (null) leaves the last good value in place.
+                if (value is >= 1 and <= 65535)
+                {
+                    _preferences.SetInt32Pref(PreferenceKeys.Port, (int)value.Value);
+                }
             }
         }
     }
@@ -664,6 +734,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 RaisePropertyChanged(nameof(UseSpecificPort));
                 StartCommand.RaiseCanExecuteChanged();
+                _preferences.SetBoolPref(PreferenceKeys.PortAutomatic, value);
             }
         }
     }
@@ -740,15 +811,48 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand ExportViaExtensionCommand { get; }
     public RelayCommand OpenDocumentationCommand { get; }
 
+    /// <summary>Edit > Remove Selected Session (also the Delete key in the session list).</summary>
+    public RelayCommand RemoveSelectedSessionCommand { get; }
+
+    /// <summary>Edit > Remove All Sessions.</summary>
+    public RelayCommand RemoveAllSessionsCommand { get; }
+
     /// <param name="confirmMacOSCertificateTrust">
     /// See <see cref="_confirmMacOSCertificateTrust"/>'s own remarks.
     /// Optional (defaults to null, meaning "always decline on macOS") so
     /// every other caller -- tests, and the Windows path, which never
     /// consults this at all -- doesn't need to pass one.
     /// </param>
-    public MainWindowViewModel(Func<bool>? confirmMacOSCertificateTrust = null)
+    /// <param name="preferences">
+    /// Where settings are loaded from and saved to. Optional: null means
+    /// the real per-user file (see <see cref="CreateDefaultPreferences"/>).
+    /// This view model takes ownership either way and disposes it in
+    /// <see cref="Dispose"/>.
+    /// </param>
+    /// <param name="chooseFormat">See <see cref="_chooseFormat"/>. Optional.</param>
+    public MainWindowViewModel(
+        Func<bool>? confirmMacOSCertificateTrust = null,
+        PreferenceStore? preferences = null,
+        Func<string, IReadOnlyList<FormatChoice>, string?, Task<FormatChoice?>>? chooseFormat = null)
     {
         _confirmMacOSCertificateTrust = confirmMacOSCertificateTrust;
+        _chooseFormat = chooseFormat;
+
+        // Before anything else below reads the fields these populate.
+        // Written straight to the backing fields rather than through the
+        // property setters, so loading a value never immediately writes it
+        // back out again.
+        _preferences = preferences ?? CreateDefaultPreferences();
+        LoadPreferences();
+
+        // Ported Fiddler-shaped extensions reach preferences and logging
+        // through the compatibility layer's host hooks; they share the
+        // app's own preferences file (same behavior on Windows and macOS).
+        // Set before extensions load below, since OnLoad may read them.
+        // The file-picker and notify hooks need the real window, so
+        // App.axaml.cs sets those.
+        Clearinet.CompatShim.CompatShimHost.Preferences = _preferences;
+        Clearinet.CompatShim.CompatShimHost.Log = message => Console.WriteLine($"[Extension] {message}");
 
         // Must run before anything below touches the system proxy itself:
         // a backup file still sitting on disk means the *previous* run of
@@ -765,8 +869,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // treats that as nothing to load, not an error (see its own
         // remarks), so this is safe to call unconditionally on every launch.
         _extensionHost = new ExtensionHost(
-            [ExtensionHost.DefaultExtensionsFolder],
+            // The user's own folder first, so their copy of an extension
+            // wins over an optional one the installer put next to the app.
+            [ExtensionHost.DefaultExtensionsFolder, ExtensionHost.BundledExtensionsFolder],
             log: message => Console.WriteLine($"[Extension] {message}"));
+        // Extensions add their tabs from OnLoad, inside Load() below.
+        ExtensionUi.SetTabHost((title, view) => ExtensionTabs.Add(new ExtensionTabViewModel(title, view)));
         _extensionHost.Load();
         foreach (var loadError in _extensionHost.LoadErrors)
         {
@@ -798,6 +906,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         ImportViaExtensionCommand = new RelayCommand(ImportViaExtension, () => _extensionHost.Importers.Count > 0);
         ExportViaExtensionCommand = new RelayCommand(ExportViaExtension, () => _extensionHost.Exporters.Count > 0 && Sessions.Count > 0);
         OpenDocumentationCommand = new RelayCommand(OpenDocumentation);
+        RemoveSelectedSessionCommand = new RelayCommand(
+            () => { if (SelectedSessionRow is { } row) { _sessionStore.Remove([row.Id]); } },
+            () => SelectedSessionRow is not null);
+        RemoveAllSessionsCommand = new RelayCommand(() => _sessionStore.Clear(), () => Sessions.Count > 0);
 
         AddAutoResponderRuleCommand = new RelayCommand(AddAutoResponderRule);
         RemoveAutoResponderRuleCommand = new RelayCommand(RemoveSelectedAutoResponderRule, () => SelectedAutoResponderRule is not null);
@@ -839,14 +951,47 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             // filter -- everything already in FilteredSessions was already
             // matched when it arrived (or by the last ApplyFilter() run),
             // so there's no reason to re-scan the whole list per capture.
-            if (_query.Matches(session))
+            // ui-hide: an importer, extension or script asked for this
+            // session to be left out of the list (it's still captured and saved).
+            if (!row.Style.Hidden && _query.Matches(session))
             {
                 FilteredSessions.Add(row);
             }
 
             SaveSazCommand.RaiseCanExecuteChanged();
             ExportViaExtensionCommand.RaiseCanExecuteChanged();
+            RemoveAllSessionsCommand.RaiseCanExecuteChanged();
             FlashCaptureIndicator();
+        });
+
+        // Removed sessions leave both lists; the selection goes with them.
+        _sessionStore.SessionsRemoved += ids => Dispatcher.UIThread.Post(() =>
+        {
+            var removed = new HashSet<int>(ids);
+            for (var i = Sessions.Count - 1; i >= 0; i--)
+            {
+                if (removed.Contains(Sessions[i].Id))
+                {
+                    Sessions.RemoveAt(i);
+                }
+            }
+
+            for (var i = FilteredSessions.Count - 1; i >= 0; i--)
+            {
+                if (removed.Contains(FilteredSessions[i].Id))
+                {
+                    FilteredSessions.RemoveAt(i);
+                }
+            }
+
+            if (SelectedSessionRow is { } selected && removed.Contains(selected.Id))
+            {
+                SelectedSessionRow = null;
+            }
+
+            SaveSazCommand.RaiseCanExecuteChanged();
+            ExportViaExtensionCommand.RaiseCanExecuteChanged();
+            RemoveAllSessionsCommand.RaiseCanExecuteChanged();
         });
 
         _breakpointManager.BreakpointHit += pending => Dispatcher.UIThread.Post(() =>
@@ -878,6 +1023,79 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             ? "Not started. Pick a port and click Start."
             : "This build only implements the certificate trust-store path for Windows and macOS so far " +
               "-- see the Interception Certificate Design doc's open risks.";
+    }
+
+    /// <summary>
+    /// Shows a message from an extension (FiddlerApplication.DoNotifyUser) in
+    /// the status line and the console. Deliberately not a modal dialog: an
+    /// import can report several warnings in a row, and a stack of dialogs
+    /// would be worse than the status line. Must be called on the UI thread
+    /// (App.axaml.cs posts it there).
+    /// </summary>
+    internal void ShowExtensionNotice(string title, string message)
+    {
+        Console.WriteLine($"[Extension] {title}: {message}");
+        StatusText = $"{title}: {message.ReplaceLineEndings(" ")}";
+    }
+
+    private static PreferenceStore CreateDefaultPreferences()
+    {
+        try
+        {
+            return PreferenceStore.CreateDefault(log: message => Console.WriteLine($"[Preferences] {message}"));
+        }
+        catch (InvalidOperationException ex)
+        {
+            // ClearinetPaths found no app-data folder at all. Settings are a
+            // convenience: run with in-memory-only preferences rather than
+            // not at all.
+            Console.WriteLine($"[Preferences] {ex.Message} Settings won't be saved this run.");
+            return PreferenceStore.CreateInMemory();
+        }
+    }
+
+    /// <summary>
+    /// Reads every <see cref="PreferenceKeys"/> value into its backing
+    /// field. Defaults match what these fields were initialized to before
+    /// preferences existed, so a first run (no file yet) looks exactly the
+    /// way the app always has.
+    /// </summary>
+    private void LoadPreferences()
+    {
+        _useAutomaticPort = _preferences.GetBoolPref(PreferenceKeys.PortAutomatic, true);
+
+        var port = _preferences.GetInt32Pref(PreferenceKeys.Port, DefaultPreferredPort);
+        _preferredPort = port is >= 1 and <= 65535 ? port : DefaultPreferredPort;
+
+        _showFiddlerScriptPanel = _preferences.GetBoolPref(PreferenceKeys.ShowFiddlerScriptPanel, false);
+        _showExtensionsPanel = _preferences.GetBoolPref(PreferenceKeys.ShowExtensionsPanel, false);
+        _showLegacyExtensionHostPanel = _preferences.GetBoolPref(PreferenceKeys.ShowLegacyExtensionHostPanel, false);
+        _showAlsoBreakOnRow = _preferences.GetBoolPref(PreferenceKeys.ShowAlsoBreakOnRow, false);
+
+        _filterText = _preferences.GetStringPref(PreferenceKeys.FilterText, string.Empty);
+        _query = SessionQuery.Parse(_filterText);
+
+        _fiddlerScriptPath = _preferences.GetStringPref(PreferenceKeys.FiddlerScriptPath, string.Empty);
+
+        _autoLaunchLegacyHost = _preferences.GetBoolPref(PreferenceKeys.AutoLaunchLegacyHost, false);
+        if (_autoLaunchLegacyHost)
+        {
+            _legacyExtensionHostStatus = "Auto-launch is on -- it will launch the next time you click Start.";
+        }
+    }
+
+    /// <summary>
+    /// Shows the port the listener actually bound to (in Auto mode, or when
+    /// a specified port was taken) without saving it as the person's
+    /// chosen port -- only an edit they make themselves should change
+    /// <see cref="PreferenceKeys.Port"/>.
+    /// </summary>
+    private void ShowBoundPort(int port)
+    {
+        if (SetField(ref _preferredPort, (decimal?)port, nameof(PreferredPort)))
+        {
+            StartCommand.RaiseCanExecuteChanged();
+        }
     }
 
     private void Start()
@@ -949,9 +1167,10 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
 
             _proxy = InterceptingProxyListener.StartOnAvailablePort(
                 requestedPort, leafProvider, _sessionStore, _breakpointManager, _autoResponderRules, _fiddlerScriptRunner,
-                new CompositeExtensionAutoTamperHost([_extensionHost.CreateAutoTamperHost(), legacyBridge]));
+                new CompositeExtensionAutoTamperHost([_extensionHost.CreateAutoTamperHost(), legacyBridge]),
+                _extensionHost.CreateSessionHost());
             IsRunning = true;
-            PreferredPort = _proxy.Port;
+            ShowBoundPort(_proxy.Port);
 
             // In Auto mode requestedPort is always 0, which _proxy.Port
             // (the real bound port) will never equal -- there's no
@@ -1294,14 +1513,16 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             + _extensionHost.ResponseInspectors.Count
             + _extensionHost.Importers.Count
             + _extensionHost.Exporters.Count
-            + _extensionHost.ExecActionHandlers.Count;
+            + _extensionHost.ExecActionHandlers.Count
+            + _extensionHost.ShimExtensions.Count;
         lines.Add(
             $"Loaded: {_extensionHost.AutoTampers.Count} AutoTamper, " +
             $"{_extensionHost.RequestInspectors.Count} request inspector, " +
             $"{_extensionHost.ResponseInspectors.Count} response inspector, " +
             $"{_extensionHost.Importers.Count} importer, " +
             $"{_extensionHost.Exporters.Count} exporter, " +
-            $"{_extensionHost.ExecActionHandlers.Count} exec-action handler " +
+            $"{_extensionHost.ExecActionHandlers.Count} exec-action handler, " +
+            $"{_extensionHost.ShimExtensions.Count} ported Fiddler extension " +
             $"(total {loadedCount}).");
 
         foreach (var loadError in _extensionHost.LoadErrors)
@@ -1434,7 +1655,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         FilteredSessions.Clear();
         foreach (var row in Sessions)
         {
-            if (_query.Matches(row.Session))
+            if (!row.Style.Hidden && _query.Matches(row.Session))
             {
                 FilteredSessions.Add(row);
             }
@@ -1492,6 +1713,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         // above and deserves its OnBeforeUnload() call, matching
         // IFiddlerExtension's own paired-lifecycle contract.
         _extensionHost.Unload();
+        ExtensionUi.SetTabHost(null);
 
         // Also regardless of whether the proxy is currently running --
         // unlike the _proxy.Stop() block just below, this can't simply be
@@ -1505,6 +1727,12 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _legacyExtensionHostLauncher.StopIfLaunchedByUs(
             log: message => Console.WriteLine($"[Extension] {message}"));
 
+        // Saved after extensions unload (an extension may store its own
+        // settings in OnBeforeUnload, through FiddlerApplication.Prefs), but
+        // before the early return below, so settings are saved whether or
+        // not the proxy was ever started.
+        _preferences.Dispose();
+
         if (_proxy is null)
         {
             return;
@@ -1516,99 +1744,117 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Runs the first loaded <see cref="ISessionImporter"/>'s
+    /// File -&gt; Import via Extension: asks which format to use (see
+    /// <see cref="PickFormatAsync"/>), then runs that importer's
     /// <see cref="ISessionImporter.ImportSessions"/> on a background thread
     /// and adds whatever it returns through <see cref="SessionStore.Add"/> --
     /// the same call live capture and <see cref="ImportSazAsync"/> both
     /// already make, so an extension-imported session arrives through the
     /// exact same SessionAdded handler.
     ///
-    /// Deliberately simpler than real Fiddler's own multi-format Import
-    /// dialog: with more than one importer loaded, or an importer proffering
-    /// more than one <see cref="ProfferFormatAttribute"/> format, this always
-    /// picks the first importer and its first proffered format rather than
-    /// showing a picker -- a real format-choice UI is future work, not this
-    /// pass's scope. The options dictionary passed to
-    /// <see cref="ISessionImporter.ImportSessions"/> is always empty: this
-    /// host has no host-side notion of what any given extension's format
-    /// needs, so (per that interface's own remarks) an importer that needs a
-    /// file path or other input is expected to gather it itself, the same
-    /// way a real Fiddler extension would show its own dialog.
+    /// The options dictionary is always empty: the host has no notion of
+    /// what any given format needs, so an importer that needs a file path
+    /// asks for it itself, as a real Fiddler extension would (a ported one
+    /// through Utilities.ObtainOpenFilename, which App.axaml.cs routes to
+    /// Avalonia's file picker).
+    ///
+    /// <c>async void</c> because it's a command handler; everything inside
+    /// is caught, so nothing can escape onto the UI thread.
     /// </summary>
-    private void ImportViaExtension()
+    private async void ImportViaExtension()
     {
-        var importer = _extensionHost.Importers.FirstOrDefault();
-        if (importer is null)
+        try
         {
-            return;
+            var choice = await PickFormatAsync(
+                ProfferedFormats.ChoicesFrom(_extensionHost.Importers),
+                PreferenceKeys.LastImportFormat,
+                "Import sessions using which format?");
+            if (choice?.Handler is not ISessionImporter importer)
+            {
+                return;
+            }
+
+            var formatName = choice.Format.Name;
+            StatusText = $"Importing via {choice.DisplayName}...";
+            var imported = await Task.Run(() => importer.ImportSessions(formatName, new Dictionary<string, object>(), progress: null));
+
+            foreach (var session in imported)
+            {
+                _sessionStore.Add(session.Host, session.StartedAt, session.Request, session.Response, session.Flags);
+            }
+
+            StatusText = $"Imported {imported.Count} session(s) via {choice.DisplayName}.";
         }
-
-        // GetCustomAttributes (plural), not GetCustomAttribute: ProfferFormatAttribute
-        // declares AllowMultiple = true (an importer can proffer more than
-        // one named format), and the singular GetCustomAttribute<T>() throws
-        // AmbiguousMatchException the moment more than one is actually
-        // present -- exactly the case this is meant to support, so using it
-        // here would crash on the very extensions it's documented to allow.
-        var formatName = importer.GetType().GetCustomAttributes<ProfferFormatAttribute>().FirstOrDefault()?.FormatName ?? string.Empty;
-        StatusText = "Importing via extension...";
-        Task.Run(() =>
+        catch (Exception ex)
         {
-            try
-            {
-                var imported = importer.ImportSessions(formatName, new Dictionary<string, object>(), progress: null);
-                Dispatcher.UIThread.Post(() =>
-                {
-                    foreach (var session in imported)
-                    {
-                        _sessionStore.Add(session.Host, session.StartedAt, session.Request, session.Response);
-                    }
-
-                    StatusText = $"Imported {imported.Count} session(s) via extension.";
-                });
-            }
-            catch (Exception ex)
-            {
-                Dispatcher.UIThread.Post(() => StatusText = $"Extension import failed: {ex.Message}");
-            }
-        });
+            StatusText = $"Extension import failed: {ex.Message}";
+        }
     }
 
     /// <summary>
-    /// Runs the first loaded <see cref="ISessionExporter"/>'s
-    /// <see cref="ISessionExporter.ExportSessions"/> against every currently
-    /// captured session, on a background thread -- see
-    /// <see cref="ImportViaExtension"/>'s own remarks on why this picks the
-    /// first importer/format rather than showing a picker, and why
-    /// <c>options</c> is passed empty (an exporter that needs a destination
-    /// path is expected to prompt for it itself).
+    /// File -&gt; Export via Extension: the export counterpart of
+    /// <see cref="ImportViaExtension"/> -- pick a format, then run that
+    /// exporter against every captured session on a background thread.
+    /// <c>options</c> is empty for the same reason (an exporter that needs a
+    /// destination path asks for it itself).
     /// </summary>
-    private void ExportViaExtension()
+    private async void ExportViaExtension()
     {
-        var exporter = _extensionHost.Exporters.FirstOrDefault();
-        if (exporter is null)
+        try
         {
-            return;
+            var choice = await PickFormatAsync(
+                ProfferedFormats.ChoicesFrom(_extensionHost.Exporters),
+                PreferenceKeys.LastExportFormat,
+                "Export sessions using which format?");
+            if (choice?.Handler is not ISessionExporter exporter)
+            {
+                return;
+            }
+
+            var sessions = _sessionStore.Snapshot();
+            var formatName = choice.Format.Name;
+            StatusText = $"Exporting via {choice.DisplayName}...";
+            var succeeded = await Task.Run(() => exporter.ExportSessions(formatName, sessions, new Dictionary<string, object>(), progress: null));
+
+            StatusText = succeeded
+                ? $"Exported {sessions.Count} session(s) via {choice.DisplayName}."
+                : "Extension export reported failure -- see the console for anything it logged.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Extension export failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Which format to import or export with. No dialog when there's only
+    /// one choice. With several, the picker supplied by App.axaml.cs
+    /// (FormatPickerWindow) is shown with the last choice highlighted, and
+    /// the new choice is remembered in preferences (same file and behavior
+    /// on Windows and macOS). Null when there are no choices or the user
+    /// cancels. A host that supplied no picker (tests, tooling) gets the
+    /// remembered or first choice.
+    /// </summary>
+    private async Task<FormatChoice?> PickFormatAsync(IReadOnlyList<FormatChoice> choices, string preferenceKey, string heading)
+    {
+        if (choices.Count <= 1)
+        {
+            return choices.Count == 1 ? choices[0] : null;
         }
 
-        var sessions = _sessionStore.Snapshot();
-        // See ImportViaExtension's own remarks on why this is GetCustomAttributes
-        // (plural) rather than the singular, AmbiguousMatchException-prone form.
-        var formatName = exporter.GetType().GetCustomAttributes<ProfferFormatAttribute>().FirstOrDefault()?.FormatName ?? string.Empty;
-        StatusText = "Exporting via extension...";
-        Task.Run(() =>
+        var remembered = _preferences.GetStringPref(preferenceKey, string.Empty);
+        if (_chooseFormat is null)
         {
-            try
-            {
-                var succeeded = exporter.ExportSessions(formatName, sessions, new Dictionary<string, object>(), progress: null);
-                Dispatcher.UIThread.Post(() => StatusText = succeeded
-                    ? $"Exported {sessions.Count} session(s) via extension."
-                    : "Extension export reported failure -- see the console for anything it logged.");
-            }
-            catch (Exception ex)
-            {
-                Dispatcher.UIThread.Post(() => StatusText = $"Extension export failed: {ex.Message}");
-            }
-        });
+            return ProfferedFormats.Preselect(choices, remembered);
+        }
+
+        var chosen = await _chooseFormat(heading, choices, remembered);
+        if (chosen is not null)
+        {
+            _preferences.SetStringPref(preferenceKey, chosen.Key);
+        }
+
+        return chosen;
     }
 
     /// <summary>

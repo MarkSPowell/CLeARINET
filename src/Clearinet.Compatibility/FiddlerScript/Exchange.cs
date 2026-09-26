@@ -26,9 +26,9 @@ namespace Clearinet.Compatibility.FiddlerScript;
 /// <c>ResponseCode</c>) even where that violates normal C# naming
 /// conventions, because Jint's default CLR interop resolves JS property
 /// access against the real member name, and an *existing* <c>CustomRules.js</c>
-/// file (the actual porting target per Eric Lawrence's feedback -- see the
-/// Project Plan's "Fiddler Classic compatibility review") was written
-/// against those exact names, not Eric's own newer, partially-renamed
+/// file (the actual porting target -- see the Project Plan's "Fiddler
+/// Classic compatibility review") was written against those exact names,
+/// not ericlaw1979/Clearinet's newer, partially-renamed
 /// <c>Exchange</c> sample (which uses <c>host</c>/<c>urlContains()</c>
 /// instead of <c>hostname</c>/<c>uriContains()</c> in a few places).
 /// Aliasing those newer member names too is future work, not done here --

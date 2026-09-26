@@ -44,6 +44,8 @@ public sealed class ExtensionHost
     private readonly List<ISessionImporter> _importers = new();
     private readonly List<ISessionExporter> _exporters = new();
     private readonly List<IHandleExecAction> _execActionHandlers = new();
+    private readonly List<Clearinet.CompatShim.IFiddlerExtension> _shimExtensions = new();
+    private readonly List<Clearinet.CompatShim.IAutoTamper> _shimAutoTampers = new();
 
     /// <param name="extensionFolders">
     /// One or more folders to scan for <c>.dll</c> files, non-recursively --
@@ -90,6 +92,16 @@ public sealed class ExtensionHost
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "CLeARINET", "Extensions");
 
     /// <summary>
+    /// The <c>Extensions</c> folder next to the app itself, where the Windows
+    /// installer puts the optional extensions picked during setup. Scanned
+    /// after <see cref="DefaultExtensionsFolder"/>, so a copy the user put in
+    /// their own folder wins over the installed one of the same file name
+    /// (see <see cref="Load"/>).
+    /// </summary>
+    public static string BundledExtensionsFolder =>
+        Path.Combine(AppContext.BaseDirectory, "Extensions");
+
+    /// <summary>
     /// One entry per folder <see cref="Load"/> was given, in order: whether
     /// that folder existed, and how many <c>.dll</c> files were found in it
     /// (0 for a folder that didn't exist at all). Populated by
@@ -134,8 +146,29 @@ public sealed class ExtensionHost
     public IExtensionAutoTamperHost CreateAutoTamperHost() => new LoadedExtensionSet(_autoTampers, _log);
 
     /// <summary>
+    /// Ported Fiddler-shaped extensions that implement
+    /// <see cref="Clearinet.CompatShim.IAutoTamper"/>, in load order.
+    /// </summary>
+    public IReadOnlyList<Clearinet.CompatShim.IAutoTamper> ShimAutoTampers => _shimAutoTampers;
+
+    /// <summary>
+    /// Every loaded ported Fiddler-shaped extension
+    /// (<see cref="Clearinet.CompatShim.IFiddlerExtension"/>), in load order.
+    /// </summary>
+    public IReadOnlyList<Clearinet.CompatShim.IFiddlerExtension> ShimExtensions => _shimExtensions;
+
+    /// <summary>
+    /// Runs <see cref="ShimAutoTampers"/> against live traffic with one
+    /// session object per request -- see <see cref="ShimAutoTamperSet"/>.
+    /// Handed to the proxy listener alongside <see cref="CreateAutoTamperHost"/>.
+    /// </summary>
+    public IExtensionSessionHost CreateSessionHost() => new ShimAutoTamperSet(_shimAutoTampers, _log);
+
+    /// <summary>
     /// Scans every configured folder, loads and gates every <c>.dll</c> found
-    /// (non-recursively, silently skipping any subfolder), constructs one
+    /// (non-recursively, silently skipping any subfolder), skips a <c>.dll</c>
+    /// whose file name was already loaded from an earlier folder (so one
+    /// extension installed in two places loads once, from the first), constructs one
     /// instance of every applicable type, and calls <see cref="IFiddlerExtension.OnLoad"/>
     /// on each one. Safe to call when a folder doesn't exist -- that's not
     /// itself a load error, since an extensions folder with nothing in it
@@ -143,6 +176,7 @@ public sealed class ExtensionHost
     /// </summary>
     public void Load()
     {
+        var loadedFileNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var folder in _extensionFolders)
         {
             if (!Directory.Exists(folder))
@@ -162,6 +196,12 @@ public sealed class ExtensionHost
             _scanResults.Add((folder, Existed: true, DllFilesFound: dllPaths.Count));
             foreach (var dllPath in dllPaths)
             {
+                if (!loadedFileNames.Add(Path.GetFileName(dllPath)))
+                {
+                    _log($"Skipped {dllPath}: a {Path.GetFileName(dllPath)} from an earlier folder is already loaded.");
+                    continue;
+                }
+
                 LoadOne(dllPath);
             }
         }
@@ -169,6 +209,11 @@ public sealed class ExtensionHost
         foreach (var extension in _fiddlerExtensions)
         {
             RunSafely(extension, nameof(IFiddlerExtension.OnLoad), extension.OnLoad);
+        }
+
+        foreach (var extension in _shimExtensions)
+        {
+            RunSafely(extension, nameof(Clearinet.CompatShim.IFiddlerExtension.OnLoad), extension.OnLoad);
         }
     }
 
@@ -190,6 +235,11 @@ public sealed class ExtensionHost
             RunSafely(extension, nameof(IFiddlerExtension.OnBeforeUnload), extension.OnBeforeUnload);
         }
 
+        foreach (var extension in _shimExtensions)
+        {
+            RunSafely(extension, nameof(Clearinet.CompatShim.IFiddlerExtension.OnBeforeUnload), extension.OnBeforeUnload);
+        }
+
         foreach (var context in _loadContexts)
         {
             context.Unload();
@@ -209,6 +259,33 @@ public sealed class ExtensionHost
             var requiredVersion = assembly.GetCustomAttribute<RequiredVersionAttribute>();
             if (requiredVersion is null)
             {
+                // Not a CLeARINET-native extension -- but it may be a ported
+                // Fiddler Classic one, built against the Fiddler-shaped
+                // compatibility layer (Clearinet.CompatShim). Its
+                // RequiredVersion names a Fiddler version, so it's checked
+                // against the Fiddler API level that layer stands in for,
+                // not against CLeARINET's own version.
+                var fiddlerRequiredVersion = assembly.GetCustomAttribute<Clearinet.CompatShim.RequiredVersionAttribute>();
+                if (fiddlerRequiredVersion is not null)
+                {
+                    if (!Version.TryParse(fiddlerRequiredVersion.RequiredVersion, out var fiddlerMinimum))
+                    {
+                        _loadErrors.Add($"{fileName}: RequiredVersion \"{fiddlerRequiredVersion.RequiredVersion}\" isn't a parseable version -- skipped.");
+                        context.Unload();
+                        return;
+                    }
+
+                    if (Clearinet.CompatShim.CompatShimHost.FiddlerApiLevel < fiddlerMinimum)
+                    {
+                        _loadErrors.Add($"{fileName}: needs Fiddler API {fiddlerMinimum}, newer than the {Clearinet.CompatShim.CompatShimHost.FiddlerApiLevel.ToString(2)}.x this build's compatibility layer covers -- skipped.");
+                        context.Unload();
+                        return;
+                    }
+
+                    LoadTypes(assembly, fileName, context);
+                    return;
+                }
+
                 // Silently ignored -- reproducing real Fiddler's own
                 // documented behavior exactly (see this class's own
                 // remarks). Not an error: a stray, unrelated .dll sitting in
@@ -231,51 +308,62 @@ public sealed class ExtensionHost
                 return;
             }
 
-            var typesLoaded = false;
-            foreach (var type in GetLoadableTypes(assembly))
-            {
-                if (type.IsAbstract || type.IsInterface || type.GetConstructor(Type.EmptyTypes) is null)
-                {
-                    continue;
-                }
-
-                if (!ImplementsAnyExtensionInterface(type))
-                {
-                    continue;
-                }
-
-                object instance;
-                try
-                {
-                    instance = Activator.CreateInstance(type)!;
-                }
-                catch (Exception ex)
-                {
-                    _loadErrors.Add($"{fileName}: couldn't construct {type.FullName} -- {ex.Message}");
-                    continue;
-                }
-
-                Register(instance);
-                typesLoaded = true;
-            }
-
-            if (typesLoaded)
-            {
-                _loadContexts.Add(context);
-            }
-            else
-            {
-                // Had a valid RequiredVersion but nothing usable inside it --
-                // still worth surfacing, unlike the no-attribute-at-all case
-                // above, since this one DID declare itself an extension.
-                _loadErrors.Add($"{fileName}: declared RequiredVersion but no recognized extension type was found inside it.");
-                context.Unload();
-            }
+            LoadTypes(assembly, fileName, context);
         }
         catch (Exception ex)
         {
             _loadErrors.Add($"{fileName}: failed to load -- {ex.Message}");
             context?.Unload();
+        }
+    }
+
+    /// <summary>
+    /// Instantiates and registers every extension type in an assembly that
+    /// already passed its RequiredVersion check (either kind -- see
+    /// <see cref="LoadOne"/>), keeping its load context if anything was
+    /// found and unloading it otherwise.
+    /// </summary>
+    private void LoadTypes(Assembly assembly, string fileName, AssemblyLoadContext context)
+    {
+        var typesLoaded = false;
+        foreach (var type in GetLoadableTypes(assembly))
+        {
+            if (type.IsAbstract || type.IsInterface || type.GetConstructor(Type.EmptyTypes) is null)
+            {
+                continue;
+            }
+
+            if (!ImplementsAnyExtensionInterface(type))
+            {
+                continue;
+            }
+
+            object instance;
+            try
+            {
+                instance = Activator.CreateInstance(type)!;
+            }
+            catch (Exception ex)
+            {
+                _loadErrors.Add($"{fileName}: couldn't construct {type.FullName} -- {ex.Message}");
+                continue;
+            }
+
+            Register(instance);
+            typesLoaded = true;
+        }
+
+        if (typesLoaded)
+        {
+            _loadContexts.Add(context);
+        }
+        else
+        {
+            // Had a valid RequiredVersion but nothing usable inside it --
+            // still worth surfacing, unlike the no-attribute-at-all case
+            // above, since this one DID declare itself an extension.
+            _loadErrors.Add($"{fileName}: declared RequiredVersion but no recognized extension type was found inside it.");
+            context.Unload();
         }
     }
 
@@ -310,6 +398,13 @@ public sealed class ExtensionHost
             _importers.Add(importer);
         }
 
+        // A ported Fiddler-shaped importer joins the same list, wrapped so
+        // File > Import can't tell it apart from a native one.
+        if (instance is Clearinet.CompatShim.ISessionImporter fiddlerShapedImporter)
+        {
+            _importers.Add(new CompatShimImporterAdapter(fiddlerShapedImporter));
+        }
+
         if (instance is ISessionExporter exporter)
         {
             _exporters.Add(exporter);
@@ -319,6 +414,18 @@ public sealed class ExtensionHost
         {
             _execActionHandlers.Add(execActionHandler);
         }
+
+        // Ported Fiddler-shaped extensions: OnLoad/OnBeforeUnload, and live
+        // traffic hooks through CreateSessionHost.
+        if (instance is Clearinet.CompatShim.IFiddlerExtension shimExtension)
+        {
+            _shimExtensions.Add(shimExtension);
+        }
+
+        if (instance is Clearinet.CompatShim.IAutoTamper shimAutoTamper)
+        {
+            _shimAutoTampers.Add(shimAutoTamper);
+        }
     }
 
     private static bool ImplementsAnyExtensionInterface(Type type) =>
@@ -327,6 +434,8 @@ public sealed class ExtensionHost
         typeof(IRequestInspector2).IsAssignableFrom(type) ||
         typeof(IResponseInspector2).IsAssignableFrom(type) ||
         typeof(ISessionImporter).IsAssignableFrom(type) ||
+        typeof(Clearinet.CompatShim.ISessionImporter).IsAssignableFrom(type) ||
+        typeof(Clearinet.CompatShim.IFiddlerExtension).IsAssignableFrom(type) ||
         typeof(ISessionExporter).IsAssignableFrom(type) ||
         typeof(IHandleExecAction).IsAssignableFrom(type);
 
@@ -338,19 +447,39 @@ public sealed class ExtensionHost
     /// matching the same "one bad thing doesn't take down everything else"
     /// posture the rest of this class follows.
     /// </summary>
-    private static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+    /// <summary>
+    /// The assembly's public types, skipping any that can't be loaded. A
+    /// type whose base class lives in an assembly that isn't available (an
+    /// extension's Avalonia view, when run somewhere without Avalonia, such
+    /// as a headless test) makes <see cref="Assembly.GetExportedTypes"/>
+    /// fail outright; <see cref="Assembly.GetTypes"/> instead reports the
+    /// types it could load, so the extension's other types still register.
+    /// </summary>
+    private IEnumerable<Type> GetLoadableTypes(Assembly assembly)
     {
         try
         {
             return assembly.GetExportedTypes();
         }
-        catch (ReflectionTypeLoadException ex)
+        catch (Exception ex) when (ex is ReflectionTypeLoadException or FileNotFoundException or FileLoadException or TypeLoadException)
         {
-            return ex.Types.Where(t => t is not null).Cast<Type>();
+            try
+            {
+                return assembly.GetTypes().Where(t => t.IsPublic || t.IsNestedPublic);
+            }
+            catch (ReflectionTypeLoadException partialLoad)
+            {
+                foreach (var reason in partialLoad.LoaderExceptions.Where(e => e is not null).Select(e => e!.Message).Distinct())
+                {
+                    _log($"{assembly.GetName().Name}: some types couldn't be loaded and were skipped -- {reason}");
+                }
+
+                return partialLoad.Types.Where(t => t is not null && (t.IsPublic || t.IsNestedPublic)).Cast<Type>();
+            }
         }
     }
 
-    private void RunSafely(IFiddlerExtension extension, string hookName, Action run)
+    private void RunSafely(object extension, string hookName, Action run)
     {
         try
         {
@@ -383,6 +512,22 @@ public sealed class ExtensionHost
 
         protected override Assembly? Load(AssemblyName assemblyName)
         {
+            // An assembly the host itself already has loaded -- above all
+            // Clearinet.Compatibility, which defines the interfaces an
+            // extension implements -- must be shared, never loaded a second
+            // time from next to the extension. A second copy would define a
+            // second, different ISessionImporter/IAutoTamper type, and
+            // Register()'s `is` checks would silently fail to match. Falling
+            // through to the default context (return null) shares it. This
+            // only matters when an extension's build output (and its
+            // .deps.json) sits in the extensions folder with its own copy of
+            // Clearinet.Compatibility.dll -- an easy mistake to make when
+            // installing a ported extension.
+            if (Default.Assemblies.Any(a => AssemblyName.ReferenceMatchesDefinition(assemblyName, a.GetName())))
+            {
+                return null;
+            }
+
             var path = _resolver.ResolveAssemblyToPath(assemblyName);
             return path is not null ? LoadFromAssemblyPath(path) : null;
         }

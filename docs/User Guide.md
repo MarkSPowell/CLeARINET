@@ -29,12 +29,17 @@ guide from inside the app itself via **Help > Documentation**.
    at the port manually.
 
 Click **Stop** to release the port and stop capturing. Sessions already
-captured stay in the list until you close the app.
+captured stay in the list until you remove them (see below) or close the
+app.
 
 CLeARINET's HTTPS interception (certificate trust and system proxy
 registration) is implemented on both Windows and macOS. The macOS side is
-new and hasn't been verified against a real Mac yet — see
+new and has had little testing on a real Mac so far — see
 [README.md](../README.md)'s Known limitations section for the specifics.
+
+On macOS the app isn't notarized, so the first time you open it macOS says
+it can't verify the developer. Open it anyway from **System Settings >
+Privacy & Security > Open Anyway**; you only need to do this once.
 
 ## The session list and inspectors
 
@@ -47,6 +52,26 @@ tabs:
 - **Raw** — the decoded text body (automatic decompression for gzip,
   deflate, and zstd — see README.md for the full list of what's handled).
 - **Hex** — a hex dump of the raw bytes.
+- **Cookies** (only on a side that has cookies) — on the request side,
+  each cookie the browser sent; on the response side, each cookie the
+  server set, with its attributes (Path, Domain, Expires, Secure, HttpOnly,
+  SameSite...). A cookie browsers will refuse, such as `SameSite=None`
+  without `Secure`, or a `__Host-`/`__Secure-` cookie that breaks its
+  prefix's rules, gets a warning.
+- **Notes** (request side, only when there are any) — notes an importer
+  or extension attached to the session. For example, a NetLog capture
+  recorded without bodies notes the response size the browser reported,
+  which explains why the Resp column shows 0 B.
+
+To remove sessions, use **Edit > Remove Selected Session** (or press
+**Delete** in the session list) or **Edit > Remove All Sessions**. Removed
+sessions are gone for good: they're no longer in the list or in what
+**Save SAZ** writes.
+
+Importers, extensions and scripts can also mark sessions for the list: a
+row can have its own background or text colour, be bold, italic or struck
+through, or be hidden (it's still captured and saved). Extensions can add
+columns to the list, too.
 
 ### Filtering
 
@@ -167,12 +192,35 @@ response hooks:
 Compiled .NET extensions (the successor to Fiddler Classic's `.dll`-based
 extension model) are loaded automatically from CLeARINET's Extensions
 folder at startup — there's no in-app step to load one, only to drop the
-`.dll` there before launching CLeARINET.
+`.dll` there before launching CLeARINET. That folder is
+`Documents\CLeARINET\Extensions` on Windows and
+`~/Documents/CLeARINET/Extensions` on macOS; CLeARINET also loads the
+`Extensions` folder next to the app itself, where the Windows installer
+puts the optional extensions below. If the same `.dll` is in both, the copy
+in your Documents folder is used.
+
+### Optional extensions included with CLeARINET
+
+Three extensions come with the installers. Each is a separate work by its
+author, under its own licence (see `THIRD-PARTY-NOTICES.txt` and the
+`licenses` folder that come with them):
+
+| Extension | What it does | Windows installer |
+|---|---|---|
+| NetLog importer (`CLeARINETNetLog.dll`) | Imports Chromium/Edge NetLog captures | Ticked by default |
+| CSP Rule Collector (`CLeARINETCSP.dll`) | Builds a Content-Security-Policy for the sites you browse | Ticked by default |
+| Privacy Scanner (`PrivacyScanner.dll`) | Colours responses that set cookies and checks P3P headers | Unticked (P3P is obsolete; mostly an example extension) |
+
+- **Windows:** choose them on the installer's "Select Additional Tasks"
+  page. Run the installer again to add or remove one.
+- **macOS:** the `.dmg` has an **Optional Extensions** folder next to the
+  app. Copy the `.dll`s you want into `~/Documents/CLeARINET/Extensions`
+  and restart CLeARINET.
 
 Check **Tools > Extensions** to see a status readout: which folders were
 scanned, how many `.dll` files were found, how many of each extension role
 (AutoTamper, request/response inspector, importer, exporter, exec-action
-handler) actually loaded, and any load errors.
+handler, ported Fiddler extension) actually loaded, and any load errors.
 
 If a loaded extension proffers session import or export, two File-menu
 entries pick it up:
@@ -181,9 +229,47 @@ entries pick it up:
 - **File > Export via Extension…**
 
 Both are disabled (greyed out, with a tooltip explaining why) until a
-loaded extension actually supports that direction. There's no per-format
-picker if more than one extension or format is available — the first loaded
-extension and its first proffered format are always used.
+loaded extension actually supports that direction. If your extensions
+offer more than one format, you're asked which to use, with the one you
+picked last time already selected. With only one, it's used straight away.
+
+### Fiddler Classic extensions ported from source
+
+A Fiddler Classic extension whose source you have can usually be rebuilt
+for CLeARINET with very small changes, and then runs on both Windows and
+macOS. The first one proven this way is Eric Lawrence's
+[NetLog importer](https://github.com/ericlaw1979/FiddlerImportNetlog),
+which imports Chromium/Edge NetLog captures (`.json`, `.json.gz` or a
+`.zip` containing one). The only change to its source is deleting its
+`using Fiddler;` lines. It's one of the optional extensions above (or see
+`tests/ExtensionPorts/README.md` to build it yourself). Use
+**File > Import via Extension…**; you'll be asked to pick the capture file.
+
+Ported extensions can also work on live traffic (Fiddler's
+`IAutoTamper` hooks): each request gets one session object from its first
+hook to its last, flags they set show on the session's **Notes** tab, and
+an extension can answer a request itself without it reaching the server.
+An extension can add its own tab next to **Inspectors** above the request
+and response panels; the tab strip only appears once one has.
+
+The **CSP Rule Collector**, which works out the smallest
+Content-Security-Policy a page needs, has a CLeARINET-only version:
+[CSP-CLeARINET-Extension](https://github.com/MarkSPowell/CSP-CLeARINET-Extension),
+a fork of the Fiddler extension with an Avalonia tab. It's one of the
+optional extensions above (or build it yourself; see its README). Open
+the **CSP Rule Collector** tab,
+tick **Enable Rule Collection**, clear the browser's cache and browse the
+site. Untick it when you're done: while it's on, responses get extra
+report-only CSP headers and aren't cached. While it's collecting, the
+browser sends many report requests to `fiddlercsp.deletethis.net`; the
+extension answers them itself, and they're shown struck through. Tick
+**Tools > Hide CSP Report Requests** to leave new ones out of the list,
+and use **Edit > Remove All Sessions** to clear ones already there.
+
+Ported extensions can add their own menus (before **Help**, or in
+**Tools**), session-list columns and row colours; the optional Privacy
+Scanner adds a **Privacy** menu, a **Privacy Info** column and row colours. See
+`docs/Extension Test Targets.md` for what's supported so far.
 
 ## Legacy Fiddler Classic extensions
 
@@ -226,6 +312,35 @@ want to keep using.
 - **File > Open SAZ…** imports sessions from a previously saved `.saz` file
   back into the session list, exactly as if they'd just been captured live.
 
+## Settings that are remembered
+
+CLeARINET remembers these settings between runs, the same way on Windows
+and macOS:
+
+- The port choice (Auto or a specific port number)
+- Which Tools-menu panels are shown (FiddlerScript, Extensions, Legacy
+  Extension Host, Also Break On)
+- The session filter text
+- The FiddlerScript path you last entered
+- Whether the legacy extension host launches automatically
+
+Breakpoints and the AutoResponder's on/off switch are **not** remembered,
+on purpose. Once CLeARINET is the system proxy, a breakpoint or
+AutoResponder rule that switched itself back on at launch would affect
+every app on your machine as soon as you clicked Start.
+
+Settings are saved in a `preferences.json` file:
+
+- **Windows:** `%LOCALAPPDATA%\CLeARINET\preferences.json`
+- **macOS:** `~/Library/Application Support/CLeARINET/preferences.json`
+
+The file is the same format on both platforms, so you can copy it from one
+machine to another. You can edit it by hand while CLeARINET is closed.
+Changes made while it's running are picked up the next time it starts. If
+the file ever becomes unreadable, CLeARINET renames it to
+`preferences.json.corrupt-<date>` and starts with defaults, so nothing you
+had is lost. To reset every setting, quit CLeARINET and delete the file.
+
 ## The Help menu
 
 - **Help > Documentation** opens this file through whatever your system
@@ -241,7 +356,6 @@ want to keep using.
 
 CLeARINET is an early, working MVP, not a 1.0 release. See
 [README.md](../README.md)'s Known limitations section for what's
-deliberately not here yet (settings persistence across runs, HAR/Netlog
-import, replay beyond AutoResponder, macOS support unverified on a real
-Mac, and more) — that list is kept in one place, in README.md, rather than
+deliberately not here yet (HAR import, replay beyond AutoResponder,
+little testing on a real Mac so far, and more) — that list is kept in one place, in README.md, rather than
 duplicated here.

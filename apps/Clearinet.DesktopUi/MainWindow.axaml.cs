@@ -1,7 +1,10 @@
 using System.ComponentModel;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Data;
+using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Clearinet.DesktopUi.ViewModels;
 
@@ -45,6 +48,14 @@ public partial class MainWindow : Window
 
     private MainWindowViewModel? _viewModel;
 
+    private bool _extensionTabsAdded;
+
+    private bool _extensionMenusAttached;
+
+    private readonly List<Control> _extensionTopMenus = [];
+
+    private readonly List<Control> _extensionToolsItems = [];
+
     public MainWindow()
     {
         InitializeComponent();
@@ -80,7 +91,124 @@ public partial class MainWindow : Window
         {
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
             RefreshScriptColumns();
+            AddExtensionTabs(_viewModel);
+            AttachExtensionMenusAndColumns();
         }
+    }
+
+    /// <summary>
+    /// Shows what extensions add through <c>FiddlerApplication.UI</c>, and
+    /// keeps showing it as they add more: top-level menus (before Help),
+    /// Tools menu items (after a separator), and session-list columns that
+    /// show a session flag. Runs once.
+    /// </summary>
+    private void AttachExtensionMenusAndColumns()
+    {
+        if (_extensionMenusAttached)
+        {
+            return;
+        }
+
+        _extensionMenusAttached = true;
+        var ui = Clearinet.CompatShim.FiddlerApplication.UI;
+
+        RefreshExtensionMenus();
+        ui.mnuMain.MenuItems.CollectionChanged += (_, _) => ExtensionMenus.OnUiThread(RefreshExtensionMenus);
+        ui.mnuTools.MenuItems.CollectionChanged += (_, _) => ExtensionMenus.OnUiThread(RefreshExtensionMenus);
+
+        foreach (var column in ui.lvSessions.Columns)
+        {
+            AddExtensionColumn(column);
+        }
+
+        ui.lvSessions.ColumnAdded += (_, column) => ExtensionMenus.OnUiThread(() => AddExtensionColumn(column));
+    }
+
+    private void RefreshExtensionMenus()
+    {
+        var ui = Clearinet.CompatShim.FiddlerApplication.UI;
+
+        foreach (var control in _extensionTopMenus)
+        {
+            MainMenuBar.Items.Remove(control);
+        }
+
+        _extensionTopMenus.Clear();
+        var insertAt = MainMenuBar.Items.IndexOf(HelpMenu);
+        foreach (var item in ui.mnuMain.MenuItems)
+        {
+            var control = ExtensionMenus.Build(item);
+            MainMenuBar.Items.Insert(insertAt++, control);
+            _extensionTopMenus.Add(control);
+        }
+
+        foreach (var control in _extensionToolsItems)
+        {
+            ToolsMenu.Items.Remove(control);
+        }
+
+        _extensionToolsItems.Clear();
+        if (ui.mnuTools.MenuItems.Count > 0)
+        {
+            var separator = new Separator();
+            ToolsMenu.Items.Add(separator);
+            _extensionToolsItems.Add(separator);
+            foreach (var item in ui.mnuTools.MenuItems)
+            {
+                var control = ExtensionMenus.Build(item);
+                ToolsMenu.Items.Add(control);
+                _extensionToolsItems.Add(control);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A session-list column showing one session flag (<c>lvSessions.AddBoundColumn</c>),
+    /// bound to <c>SessionRow.Flags</c>. Placed at the extension's requested
+    /// position, or last if that's past the end.
+    /// </summary>
+    private void AddExtensionColumn(Clearinet.CompatShim.BoundColumn bound)
+    {
+        var column = new DataGridTextColumn
+        {
+            Header = bound.Title,
+            Binding = new Binding($"Flags[{bound.FlagName}]"),
+            Width = bound.Width > 0 ? new DataGridLength(bound.Width) : DataGridLength.Auto,
+        };
+
+        var columns = SessionsDataGrid.Columns;
+        var index = bound.DisplayOrder < 0 || bound.DisplayOrder > columns.Count ? columns.Count : bound.DisplayOrder;
+        columns.Insert(index, column);
+    }
+
+    /// <summary>
+    /// Adds a tab after Inspectors for each view an extension supplied
+    /// through <c>ExtensionUi.AddTab</c>. Extensions only add tabs while
+    /// loading, before this window exists, so this runs once. A view that
+    /// isn't an Avalonia <see cref="Control"/> gets a tab explaining that,
+    /// rather than being dropped silently. The tab strip stays hidden while
+    /// Inspectors is the only tab.
+    /// </summary>
+    private void AddExtensionTabs(MainWindowViewModel viewModel)
+    {
+        if (_extensionTabsAdded)
+        {
+            return;
+        }
+
+        _extensionTabsAdded = true;
+        foreach (var tab in viewModel.ExtensionTabs)
+        {
+            var content = tab.View as Control ?? new TextBlock
+            {
+                Text = $"This extension's view is a {tab.View.GetType().FullName}, not an Avalonia control, so CLeARINET can't show it.",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(8),
+            };
+            DetailTabs.Items.Add(new TabItem { Header = tab.Title, Content = content });
+        }
+
+        DetailTabs.Classes.Set("single", DetailTabs.Items.Count <= 1);
     }
 
     /// <summary>
@@ -96,6 +224,33 @@ public partial class MainWindow : Window
         {
             RefreshScriptColumns();
         }
+    }
+
+    /// <summary>The Delete key removes the selected session, as Edit > Remove Selected Session does.</summary>
+    private void SessionsDataGrid_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Delete && e.KeyModifiers == KeyModifiers.None &&
+            _viewModel?.RemoveSelectedSessionCommand is { } remove && remove.CanExecute(null))
+        {
+            remove.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>
+    /// Tags each session row, as it's shown (rows are reused while
+    /// scrolling, so this runs again for every reuse), with the classes the
+    /// grid's styles in MainWindow.axaml key on: <c>ui-back</c>,
+    /// <c>ui-fore</c>, <c>ui-bold</c>, <c>ui-italic</c>, <c>ui-strikeout</c>.
+    /// </summary>
+    private void SessionsDataGrid_LoadingRow(object? sender, DataGridRowEventArgs e)
+    {
+        var style = (e.Row.DataContext as Models.SessionRow)?.Style ?? Models.SessionRowStyle.Plain;
+        e.Row.Classes.Set("ui-back", style.Background is not null);
+        e.Row.Classes.Set("ui-fore", style.Foreground is not null);
+        e.Row.Classes.Set("ui-bold", style.Bold);
+        e.Row.Classes.Set("ui-italic", style.Italic);
+        e.Row.Classes.Set("ui-strikeout", style.Strikeout);
     }
 
     /// <summary>

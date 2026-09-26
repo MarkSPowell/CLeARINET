@@ -51,3 +51,8 @@ Thumbs.db
 tools/Clearinet.LegacyExtensionHost/Retarget-LegacyExtension.ps1
 tools/Clearinet.LegacyExtensionHost/Retarget-LegacyExtension.ps1
 tools/Clearinet.LegacyExtensionHost/Retarget-LegacyExtension.ps1
+
+# Upstream extension source fetched by tests/ExtensionPorts/port.ps1, and the
+# ports built from it. Third-party code is fetched at a pinned commit on
+# demand, never committed here.
+tests/ExtensionPorts/.work/

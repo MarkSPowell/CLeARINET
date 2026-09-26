@@ -146,6 +146,10 @@ jobs:
           --configuration Release
           --output publish/legacyhost
 
+      - name: Build optional extensions
+        shell: pwsh
+        run: ./installer/build-extensions.ps1 -OutputDir publish/extensions
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
@@ -157,6 +161,7 @@ jobs:
             "/DMyFileVersion=${{ steps.version.outputs.fileVersion }}" `
             "/DPublishDir=${{ github.workspace }}\publish\win-x64" `
             "/DLegacyHostDir=${{ github.workspace }}\publish\legacyhost" `
+            "/DExtensionsDir=${{ github.workspace }}\publish\extensions" `
             installer\CLeARINET.iss
 
       - name: Upload installer as a build artifact

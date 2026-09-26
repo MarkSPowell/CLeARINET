@@ -1,0 +1,69 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ext="using:Clearinet.Compatibility.Extensions"
+        x:Class="Clearinet.DesktopUi.FormatPickerWindow"
+        Title="Choose a format"
+        Width="480"
+        Height="380"
+        MinWidth="360"
+        MinHeight="260"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Icon="avares://Clearinet.DesktopUi/Assets/clearinet.webp"
+        Background="{DynamicResource AppBackgroundBrush}">
+
+  <!-- File > Import/Export via Extension's format picker, shown only when
+       the loaded extensions offer more than one format. One row per
+       (extension, format) pair, from ProfferedFormats.ChoicesFrom. The
+       items are plain FormatChoice records; nothing here changes while the
+       dialog is open, so it's filled in from code-behind, like the app's
+       other small dialogs. Double-click or Enter picks, Escape cancels. -->
+  <DockPanel Margin="20">
+    <TextBlock x:Name="HeadingText"
+               DockPanel.Dock="Top"
+               FontSize="16"
+               FontWeight="Bold"
+               Foreground="{DynamicResource AppAccentBrush}"
+               TextWrapping="Wrap"
+               Margin="0,0,0,12" />
+
+    <StackPanel DockPanel.Dock="Bottom"
+                Orientation="Horizontal"
+                HorizontalAlignment="Right"
+                Spacing="8"
+                Margin="0,12,0,0">
+      <Button Content="Cancel"
+              Click="CancelButton_Click"
+              IsCancel="True"
+              MinWidth="90" />
+      <Button x:Name="ContinueButton"
+              Content="Continue"
+              Click="ContinueButton_Click"
+              IsDefault="True"
+              Classes="accent"
+              MinWidth="90" />
+    </StackPanel>
+
+    <ListBox x:Name="ChoicesList"
+             SelectionMode="Single"
+             SelectionChanged="ChoicesList_SelectionChanged"
+             DoubleTapped="ChoicesList_DoubleTapped">
+      <ListBox.ItemTemplate>
+        <DataTemplate x:DataType="ext:FormatChoice">
+          <StackPanel Spacing="2" Margin="0,4">
+            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Format.Description}"
+                       IsVisible="{Binding HasDescription}"
+                       FontSize="12"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource AppMutedTextBrush}" />
+            <TextBlock Text="{Binding SourceLabel}"
+                       FontSize="11"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource AppMutedTextBrush}" />
+          </StackPanel>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+  </DockPanel>
+</Window>

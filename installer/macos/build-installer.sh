@@ -14,24 +14,22 @@
 # deliberately narrow" note for the same posture elsewhere):
 #   - arm64 only, no universal/x64 build -- see the Project Plan's own
 #     "macOS release pipeline" update paragraph for why.
-#   - Unsigned. Not ad-hoc signed, not Developer ID signed, not notarized --
-#     no Apple Developer account was available to this session. The
-#     individual published executable is already ad-hoc-signed by the .NET
-#     SDK itself (a macOS kernel requirement for any arm64 binary to
-#     execute at all, unrelated to Gatekeeper's separate "trusted
-#     developer" check) -- this script doesn't touch that signature or add
-#     a bundle-level one on top of it. What that means in practice for a
-#     real user, and the one genuinely open question this session couldn't
-#     resolve without a real Mac (whether Gatekeeper additionally refuses
-#     to *launch* a from-scratch-assembled bundle like this one outright,
-#     as "damaged", rather than just warning about an unidentified
-#     developer), is spelled out in the Project Plan doc -- flagged there,
-#     not assumed away.
+#   - Ad-hoc signed only: not Developer ID signed, not notarized -- no
+#     Apple Developer account is available to this project. The .NET SDK
+#     ad-hoc-signs the published executable itself (arm64 binaries must be
+#     signed to run at all), but copying it into a hand-built bundle and
+#     adding Info.plist leaves a signature that doesn't match the bundle.
+#     A downloaded (quarantined) app in that state is reported by macOS as
+#     "damaged" (the likely cause of the first real Mac test reporting
+#     "damaged"). So the finished bundle is ad-hoc signed as a whole below. Gatekeeper then shows its ordinary
+#     "can't be verified" prompt instead, which the user can get past once
+#     (System Settings > Privacy & Security > Open Anyway, or
+#     `xattr -dr com.apple.quarantine /Applications/CLeARINET.app`).
 #   - No custom app icon (no CFBundleIconFile below) -- matches
 #     installer/CLeARINET.iss's own precedent of shipping no standalone
 #     .ico today either; see that file's own remarks.
 #
-# Usage: build-installer.sh <version> <bundleVersion> <publishDir> <outputDmgPath>
+# Usage: build-installer.sh <version> <bundleVersion> <publishDir> <outputDmgPath> [extensionsDir]
 #   version        Full version string, e.g. "0.1.1-preview.1" -- goes into
 #                   CFBundleShortVersionString (Finder's "Get Info" version)
 #                   and the .app bundle's own display name is left as plain
@@ -51,11 +49,15 @@
 #                   flattening here the way the legacy-host build does on
 #                   the Windows side).
 #   outputDmgPath  Where to write the finished .dmg.
+#   extensionsDir  Optional: installer/build-extensions.ps1's output. Put in
+#                   the .dmg as an "Optional Extensions" folder beside the
+#                   app, with a README on copying them in. (A .dmg has no
+#                   install-time choices, unlike the Windows installer.)
 
 set -euo pipefail
 
-if [[ $# -ne 4 ]]; then
-  echo "Usage: $0 <version> <bundleVersion> <publishDir> <outputDmgPath>" >&2
+if [[ $# -ne 4 && $# -ne 5 ]]; then
+  echo "Usage: $0 <version> <bundleVersion> <publishDir> <outputDmgPath> [extensionsDir]" >&2
   exit 1
 fi
 
@@ -63,6 +65,7 @@ VERSION="$1"
 BUNDLE_VERSION="$2"
 PUBLISH_DIR="$3"
 OUTPUT_DMG_PATH="$4"
+EXTENSIONS_DIR="${5:-}"
 
 APP_NAME="CLeARINET"
 EXECUTABLE_NAME="Clearinet.DesktopUi"
@@ -164,6 +167,14 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Ad-hoc sign the whole bundle ("-" means no identity: free, no account),
+# so its signature covers Info.plist and every file in it. Not --deep: the
+# extra files in Contents/MacOS (symbols, the bundled User Guide) aren't
+# code, and are sealed as the bundle's resources instead. Verify straight
+# away, so a bad bundle fails the build rather than reaching users.
+codesign --force --sign - "$APP_BUNDLE"
+codesign --verify --verbose=2 "$APP_BUNDLE"
+
 mkdir -p "$(dirname "$OUTPUT_DMG_PATH")"
 rm -f "$OUTPUT_DMG_PATH"
 
@@ -177,6 +188,39 @@ DMG_STAGING_DIR="$WORK_DIR/dmg-staging"
 mkdir -p "$DMG_STAGING_DIR"
 cp -R "$APP_BUNDLE" "$DMG_STAGING_DIR/"
 ln -s /Applications "$DMG_STAGING_DIR/Applications"
+
+if [[ -n "$EXTENSIONS_DIR" ]]; then
+  if [[ ! -d "$EXTENSIONS_DIR" ]]; then
+    echo "error: extensions folder not found at '$EXTENSIONS_DIR'" >&2
+    exit 1
+  fi
+  OPTIONAL_DIR="$DMG_STAGING_DIR/Optional Extensions"
+  mkdir -p "$OPTIONAL_DIR"
+  cp -R "$EXTENSIONS_DIR"/. "$OPTIONAL_DIR/"
+  cat > "$OPTIONAL_DIR/README.txt" <<'README'
+Optional extensions for CLeARINET
+=================================
+
+CLeARINET works without these. To add one, copy its .dll into
+
+    ~/Documents/CLeARINET/Extensions
+
+(create the folder if it isn't there), then restart CLeARINET.
+
+  CLeARINETNetLog.dll      NetLog importer: File > Import via Extension,
+                           for Chromium NetLog JSON captures.
+  CLeARINETCSP.dll         CSP Rule Collector: builds a
+                           Content-Security-Policy for the sites you browse.
+  PrivacyScanner.dll       Privacy Scanner: colours responses that set
+                           cookies and checks P3P headers (P3P is obsolete;
+                           mostly useful as an example extension).
+
+To remove one, delete its .dll from that folder and restart CLeARINET.
+
+Each extension is a separate work under its own licence: see
+THIRD-PARTY-NOTICES.txt and the licenses folder.
+README
+fi
 
 hdiutil create \
   -volname "$APP_NAME" \

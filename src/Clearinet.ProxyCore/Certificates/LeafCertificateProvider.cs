@@ -100,6 +100,22 @@ public sealed class LeafCertificateProvider
         {
             var notBefore = DateTimeOffset.UtcNow.AddMinutes(-5);
             var notAfter = notBefore.Add(LeafValidity);
+
+            // A leaf can't be valid outside its issuer's validity (signing
+            // throws). Only matters for a root made in the last few minutes,
+            // or one near expiry, but then it matters for every leaf.
+            var issuerNotBefore = new DateTimeOffset(_issuer.NotBefore.ToUniversalTime(), TimeSpan.Zero);
+            var issuerNotAfter = new DateTimeOffset(_issuer.NotAfter.ToUniversalTime(), TimeSpan.Zero);
+            if (notBefore < issuerNotBefore)
+            {
+                notBefore = issuerNotBefore;
+            }
+
+            if (notAfter > issuerNotAfter)
+            {
+                notAfter = issuerNotAfter;
+            }
+
             return CreateLeaf(_issuer, host, notBefore, notAfter);
         },
         LazyThreadSafetyMode.ExecutionAndPublication);

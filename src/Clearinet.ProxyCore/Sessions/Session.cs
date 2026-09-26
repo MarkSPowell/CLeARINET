@@ -40,6 +40,15 @@ namespace Clearinet.ProxyCore.Sessions;
 /// one) does follow the newer name, precisely because nothing about that
 /// choice costs anything there. See the FiddlerScript Compatibility
 /// Design doc's "Naming" section for the full reasoning.
+///
+/// <see cref="Flags"/> is Fiddler's per-session string flag bag
+/// (<c>oSession["ui-backcolor"]</c>, <c>oSession["X-ProcessInfo"]</c>, ...)
+/// for sessions that arrive already carrying some -- today that's only
+/// sessions imported through a Fiddler-shaped extension importer (see
+/// <c>Clearinet.CompatShim.Session</c>). Null, not empty, when there are
+/// none, so the common case costs nothing. Kept here so an import loses
+/// nothing; showing them in the UI and writing them to SAZ are follow-ups
+/// (see the Extension Test Targets doc).
 /// </summary>
 public sealed record Session(
     int Id,
@@ -47,4 +56,29 @@ public sealed record Session(
     DateTimeOffset StartedAt,
     CapturedRequest Request,
     CapturedResponse Response,
-    SessionState State = SessionState.Done);
+    SessionState State = SessionState.Done,
+    IReadOnlyDictionary<string, string>? Flags = null)
+{
+    /// <summary>
+    /// The original six-argument constructor, kept for binary compatibility:
+    /// adding <see cref="Flags"/> changed the primary constructor's compiled
+    /// signature, and an extension compiled before that which builds a
+    /// Session would otherwise fail with MissingMethodException. Guarded by
+    /// SessionBinaryCompatibilityTests.
+    /// </summary>
+    public Session(int Id, string Host, DateTimeOffset StartedAt, CapturedRequest Request, CapturedResponse Response, SessionState State)
+        : this(Id, Host, StartedAt, Request, Response, State, null)
+    {
+    }
+
+    /// <summary>The original six-value deconstruction, kept for the same reason.</summary>
+    public void Deconstruct(out int Id, out string Host, out DateTimeOffset StartedAt, out CapturedRequest Request, out CapturedResponse Response, out SessionState State)
+    {
+        Id = this.Id;
+        Host = this.Host;
+        StartedAt = this.StartedAt;
+        Request = this.Request;
+        Response = this.Response;
+        State = this.State;
+    }
+}

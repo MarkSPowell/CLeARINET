@@ -72,6 +72,7 @@
 
   <DockPanel Margin="16">
     <Menu DockPanel.Dock="Top"
+          x:Name="MainMenuBar"
           Background="{DynamicResource AppPanelBrush}"
           Margin="0,0,0,14">
       <MenuItem Header="_File">
@@ -80,23 +81,30 @@
         <!-- Enabled only once a loaded .NET extension actually proffers an
              importer/exporter (see ExtensionHost); always present so the
              menu's shape doesn't shift around based on what's installed.
-             Deliberately no per-format submenu here: see
-             MainWindowViewModel.ImportViaExtension's own remarks on why
-             this always uses the first loaded importer/exporter. ToolTip.Tip
+             ToolTip.Tip
              spells out what these actually do and why they're greyed out by
              default, since nothing else in the running app explains that:
              see tools/Clearinet.SampleExtension/README.md for a concrete,
              buildable example that proffers both, and the .NET Extension
              Compatibility Design doc's "ISessionImporter/ISessionExporter"
-             section for the full design (including why there's no
-             per-format picker here). -->
+             section for the full design. When extensions offer more than
+             one format, FormatPickerWindow asks which (see
+             MainWindowViewModel.PickFormatAsync). -->
         <Separator />
         <MenuItem Header="Import via _Extension…"
                   Command="{Binding ImportViaExtensionCommand}"
-                  ToolTip.Tip="Adds sessions from whatever the first loaded .NET extension's ISessionImporter proffers (e.g. a saved log format only that extension understands). Disabled until an extension exposing ISessionImporter is dropped into the Extensions folder -- see Tools -&gt; Extensions for what's currently loaded." />
+                  ToolTip.Tip="Adds sessions using a format an installed extension can read, such as a Chromium NetLog capture. If extensions offer more than one format, you'll be asked which. Disabled until an extension that imports is in the Extensions folder; see Tools -&gt; Extensions for what's loaded." />
         <MenuItem Header="Export via Extensio_n…"
                   Command="{Binding ExportViaExtensionCommand}"
-                  ToolTip.Tip="Writes every captured session out through the first loaded .NET extension's ISessionExporter (e.g. a custom report format only that extension knows how to produce). Disabled until an extension exposing ISessionExporter is loaded and at least one session has been captured." />
+                  ToolTip.Tip="Writes every captured session out in a format an installed extension provides. If extensions offer more than one format, you'll be asked which. Disabled until an extension that exports is loaded and at least one session has been captured." />
+      </MenuItem>
+
+      <!-- Removing sessions from the list (and from what Save SAZ writes).
+           The Delete key does the same for the selected session while the
+           session list has focus (MainWindow.axaml.cs). -->
+      <MenuItem Header="_Edit">
+        <MenuItem Header="Remove _Selected Session" Command="{Binding RemoveSelectedSessionCommand}" InputGesture="Delete" />
+        <MenuItem Header="Remove _All Sessions" Command="{Binding RemoveAllSessionsCommand}" />
       </MenuItem>
 
       <!-- Phase B: one checkable entry per RulesOption/RulesStringChoice the
@@ -142,7 +150,7 @@
            otherwise just sitting there empty/greyed out, is easy to miss
            entirely inside a menu someone opens rarely; buttons alongside
            the rest of that script's own controls are hard to miss instead. -->
-      <MenuItem Header="_Tools">
+      <MenuItem Header="_Tools" x:Name="ToolsMenu">
         <MenuItem Header="FiddlerScript" ToggleType="CheckBox" IsChecked="{Binding ShowFiddlerScriptPanel, Mode=TwoWay}" />
         <MenuItem Header="Extensions" ToggleType="CheckBox" IsChecked="{Binding ShowExtensionsPanel, Mode=TwoWay}" />
         <MenuItem Header="Legacy Extension Host" ToggleType="CheckBox" IsChecked="{Binding ShowLegacyExtensionHostPanel, Mode=TwoWay}" />
@@ -166,7 +174,7 @@
            needs this window as its owner (ShowDialog(this)), the same
            "needs a live control" reasoning OpenSazMenuItem_Click and
            BrowseFiddlerScriptButton_Click already follow. -->
-      <MenuItem Header="_Help">
+      <MenuItem Header="_Help" x:Name="HelpMenu">
         <MenuItem Header="_Documentation" Command="{Binding OpenDocumentationCommand}" />
         <Separator />
         <MenuItem Header="_About CLeARINET" Click="AboutMenuItem_Click" />
@@ -648,7 +656,34 @@
                 BorderBrush="{DynamicResource AppBorderBrush}"
                 Background="{DynamicResource AppPanelBrush}"
                 RowBackground="Transparent"
-                HorizontalGridLinesBrush="{DynamicResource AppBorderBrush}">
+                HorizontalGridLinesBrush="{DynamicResource AppBorderBrush}"
+                LoadingRow="SessionsDataGrid_LoadingRow"
+                KeyDown="SessionsDataGrid_KeyDown">
+        <!-- Rows styled by their session's ui-* flags (SessionRowStyle).
+             MainWindow.axaml.cs puts a class on each row as it's shown; these
+             styles then take the colours from the row's own data. A selected
+             row drops its custom background so the selection stays visible. -->
+        <DataGrid.Styles>
+          <Style Selector="DataGridRow.ui-back DataGridCell">
+            <Setter Property="Background" Value="{ReflectionBinding Style.Background}" />
+          </Style>
+          <Style Selector="DataGridRow.ui-fore DataGridCell">
+            <Setter Property="Foreground" Value="{ReflectionBinding Style.Foreground}" />
+          </Style>
+          <Style Selector="DataGridRow.ui-back:selected DataGridCell">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+          </Style>
+          <Style Selector="DataGridRow.ui-bold DataGridCell">
+            <Setter Property="FontWeight" Value="Bold" />
+          </Style>
+          <Style Selector="DataGridRow.ui-italic DataGridCell">
+            <Setter Property="FontStyle" Value="Italic" />
+          </Style>
+          <Style Selector="DataGridRow.ui-strikeout DataGridCell TextBlock">
+            <Setter Property="TextDecorations" Value="Strikethrough" />
+          </Style>
+        </DataGrid.Styles>
         <!-- Phase C (Context-menu half): one entry per ContextAction the
              currently-loaded script declares, operating on
              SelectedSessionRow (see MainWindowViewModel.InvokeContextAction's
@@ -687,7 +722,19 @@
            (DisplayName); ContentTemplate hands the selected tab's
            InspectorContent to a plain ContentControl, which is where the
            Window.DataTemplates above take over. -->
-      <Grid Grid.Row="2" ColumnDefinitions="*,4,*">
+      <!-- Inspectors first, then any tabs extensions add (Fiddler Classic
+           extensions put theirs on its main tab strip; see ExtensionUi).
+           MainWindow.axaml.cs adds those, and hides the tab strip while
+           Inspectors is the only tab, so without extensions this looks
+           exactly as it did before. -->
+      <TabControl Grid.Row="2" x:Name="DetailTabs" Classes="single" Padding="0">
+        <TabControl.Styles>
+          <Style Selector="TabControl.single /template/ ItemsPresenter#PART_ItemsPresenter">
+            <Setter Property="IsVisible" Value="False" />
+          </Style>
+        </TabControl.Styles>
+        <TabItem Header="Inspectors">
+      <Grid ColumnDefinitions="*,4,*">
         <DockPanel Grid.Column="0">
           <TextBlock DockPanel.Dock="Top" Text="Request" FontWeight="Bold" Foreground="{DynamicResource AppAccentBrush}" Margin="0,0,0,4" />
           <TabControl ItemsSource="{Binding RequestInspectors}">
@@ -722,6 +769,8 @@
           </TabControl>
         </DockPanel>
       </Grid>
+        </TabItem>
+      </TabControl>
     </Grid>
   </DockPanel>
 </Window>

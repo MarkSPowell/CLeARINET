@@ -30,19 +30,13 @@ itself (see `CONTRIBUTING.md`'s no-relicensing commitment).
    `METHOD:`, `*redir:`/`*delay:`/`*bpu`/`*bpafter`/etc.) reproduced
    verbatim rather than redesigned.
 
-   **Confirmed and sharpened by Eric Lawrence directly (Sept 2026), on
-   reviewing an early build:** *"I do think the long-term direction is
-   indeed using a different UI framework and making a lot of improvements
-   for modernity. But we have a short term need here at microsoft where
-   there's 1000 engineers that have workflows built on the legacy fiddler
-   product and extensions and so forth that need to be easily ported with
-   minimal effort. Hence my plan to start with something that is very
-   compatible with legacy fiddler classic."* This isn't a nice-to-have
-   preference — it's a concrete, numbered constraint (1,000 engineers, at
-   Microsoft, today) that changes how this tenet should be read: not just
-   "familiar to someone who used Fiddler Classic" but "an existing
-   Fiddler Classic **workflow or extension** should port with minimal
-   effort." See "Fiddler Classic compatibility review" below for what that
+   **Sharpened (Sept 2026):** a modern UI and deeper improvements are the
+   long-term direction, but the near-term need is that the many existing
+   users with workflows built on Fiddler Classic and its extensions can
+   move them over with minimal effort. That changes how this tenet should
+   be read: not just "familiar to someone who used Fiddler Classic" but
+   "an existing Fiddler Classic **workflow or extension** should port with
+   minimal effort." See "Fiddler Classic compatibility review" below for what that
    means concretely against the code as it stands today.
 2. **Update for web-standards changes since Fiddler Classic's enhancements
    mostly ended in 2016.** The response-decompression work (zstd support,
@@ -143,7 +137,11 @@ of this reconstruction.
   adapter, and third-party inspector plugins loaded from an Inspectors
   folder into isolated `AssemblyLoadContext`s (see the Fiddler Feature
   Inventory doc's "Custom inspectors" and "Extension loading" rows, both
-  tiered Beta). Not started.
+  tiered Beta). Well under way, ahead of the phase: compiled extensions
+  load from an Extensions folder into their own `AssemblyLoadContext`s,
+  and the Fiddler-shaped `Clearinet.CompatShim` layer runs real Fiddler
+  Classic extensions ported from source (see the Extension Test Targets
+  doc).
 
 ## Extensibility and core API surface
 
@@ -286,12 +284,20 @@ actually starts:
   case-insensitively deduped — so adding a new overridable list becomes
   "declare a key and a default," not a bespoke parser written per list.
 
+**Update: the Preferences system now exists** (see the Preferences Design
+doc). It carries both commitments above: `GetListPref`/`SetListPref` are
+the first-class typed list accessor, following the
+`clearinet.config.<category>.<name>` naming with semicolon-separated
+values. The store takes no lock on reads and never holds a lock across
+I/O or a watcher callback. It behaves the same on Windows and macOS by
+design, and CI tests that on both.
+
 ## Fiddler Classic compatibility review (Sept 2026)
 
-Prompted directly by Eric Lawrence's feedback quoted under tenet 1 above:
-a pass over what "port an existing Fiddler Classic workflow with minimal
-effort" actually requires, checked against what's implemented today
-versus what would still block a real Microsoft engineer's existing setup.
+Prompted by the sharpened reading of tenet 1 above: a pass over what
+"port an existing Fiddler Classic workflow with minimal effort" actually
+requires, checked against what's implemented today versus what would
+still block a real user's existing setup.
 Researched from Telerik's own public Fiddler Classic docs
 (`telerik.com/fiddler/fiddler-classic/documentation`, sourced from the
 [telerik/fiddler-docs](https://github.com/telerik/fiddler-docs) GitHub
@@ -309,7 +315,7 @@ required today):**
 - SAZ files round-trip with the real Fiddler Classic, so existing capture
   archives are portable without any conversion step.
 
-**The real gap, and the one Eric's feedback puts squarely in scope: a
+**The real gap, and the one tenet 1 puts squarely in scope: a
 Fiddler Classic *workflow* commonly includes custom automation, not just
 UI habits.** Fiddler Classic has two distinct, well-documented
 extensibility mechanisms, and CLeARINET currently has a placeholder for
@@ -362,16 +368,16 @@ evidence (Eric's own posts, the shape of Telerik's public Add-ons
 gallery) points to FiddlerScript being the higher-volume, lower-friction
 mechanism day to day, with compiled extensions reserved for
 redistributable tools or capabilities script can't reach (new Inspector
-tabs, import/export formats). For "1,000 engineers with existing
-workflows," FiddlerScript compatibility is very likely the higher-value
+tabs, import/export formats). For many users with existing workflows,
+FiddlerScript compatibility is very likely the higher-value
 target of the two if only one can be built first.
 
 **What this means for `Clearinet.Compatibility` (currently an empty
 Phase 3 placeholder, per "Platform and technology" above):** the honest
 read is that Phase 3 is too late for this constraint as originally
-scoped — Eric's feedback reframes FiddlerScript/extension compatibility
-as closer to an MVP-level concern for the intended Microsoft rollout than
-a Beta nice-to-have.
+scoped — tenet 1 reframes FiddlerScript/extension compatibility as
+closer to an MVP-level concern for existing Fiddler Classic users than a
+Beta nice-to-have.
 
 **Decision: FiddlerScript first.** Of the two mechanisms above, you chose
 FiddlerScript compatibility as the higher-priority target — consistent
@@ -391,11 +397,10 @@ constraint, not a research gap), so this is source-level compatibility —
 ported extensions recompiled against CLeARINET's own interfaces — not
 binary compatibility with existing `.dll`s. A theoretical path to real
 binary compatibility (a runtime assembly-identity shim) was scoped here;
-at the time this was written it was deliberately not built, pending Eric
-Lawrence's own input on it. It has since been built regardless (see the
-next update and tenet 5 above) — the design doc's "Update — naming
-question closed: the second rename" has the full reasoning for why this
-stopped waiting on that input.
+at the time this was written it was deliberately not built. It has since
+been built (see the next update and tenet 5 above) — the design doc's
+"Update — naming question closed: the second rename" has the full
+reasoning.
 
 **Update: compiled extension support is now wired end-to-end, not just
 the interfaces.** Folder discovery, `RequiredVersion` gating, and
