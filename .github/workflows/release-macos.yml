@@ -139,6 +139,13 @@ jobs:
           "${{ github.workspace }}/installer/Output/CLeARINET-${{ steps.version.outputs.version }}-macos-arm64.dmg"
           "${{ github.workspace }}/publish/extensions"
 
+      # Checks the finished .dmg: signature, contents, and that the app
+      # launches -- see the script for what it can't check.
+      - name: Smoke-test the .dmg
+        run: >-
+          bash installer/macos/smoke-test.sh
+          "${{ github.workspace }}/installer/Output/CLeARINET-${{ steps.version.outputs.version }}-macos-arm64.dmg"          
+
       - name: Upload installer as a build artifact
         uses: actions/upload-artifact@v7
         with:
