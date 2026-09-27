@@ -788,96 +788,22 @@ keeping in mind as a possible future, complementary offering — not
 something to build in this phase.
 
 **Update — Fiddler's own licensing history, and what changed in August
-2026.** Prompted externally: was Fiddler always under the terms it's
-under today, and does that change any assumption above? Researched via
-web search (Eric Lawrence's own blog, Telerik/Progress's current EULA and
-commercial-use pages, Wikipedia, the Telerik support forums) rather than
-read from any of the five real extension DLLs — this is business/legal
-history, entirely outside the clean-room boundary that governs how this
-project treats those binaries.
+2026.** Fiddler was created by Eric Lawrence and was free to use from the
+start. Telerik acquired it in 2012, and Progress Software acquired Telerik
+in 2014. In August 2026 Progress changed the Fiddler Classic licence so
+that it may be used only for non-commercial purposes, directing
+commercial users to its Fiddler Everywhere product (see Progress's
+[Fiddler Classic commercial-use page](https://www.telerik.com/fiddler/fiddler-classic/commercial-use)).
 
-*The history.* Eric Lawrence built Fiddler as a personal project starting
-around 2001–2003 while at Microsoft; it was straightforwardly free from
-the start (this is the era `Fiddler2`, and later `Fiddler4`, come
-from — named for the .NET Framework version each targeted, 2.0 and 4.0
-respectively; the five real samples this project inspected declare
-`RequiredVersion` `2.4.2.5`, squarely inside that early, unrestricted-use
-era). Telerik acquired Fiddler in 2012 and published explicit public
-commitments to keep it free — one prior potential acquirer had reportedly
-estimated the brand damage of ever charging for a previously-free dev
-tool at around 25x the acquisition price, which is presumably part of why
-that promise got made. Progress Software acquired Telerik in 2014; Lawrence
-left Telerik for Google in 2016, after which Fiddler Classic (the Windows
-desktop tool this whole project is built against) mostly stagnated while
-Progress invested in a separate paid product, Fiddler Everywhere. Fiddler
-Classic itself stayed free throughout.
-
-That changed on **August 3, 2026** — about seven weeks before this entry
-was written. Progress rewrote the Fiddler Classic EULA to forbid
-commercial use entirely, "even if you pay" for a license, giving existing
-commercial users 45 days (to September 17, 2026, already past) to move to
-paid Fiddler Everywhere or stop using Fiddler Classic for anything
-work-related. Lawrence's own public reaction: "disappointed, somewhat
-betrayed, but ultimately not surprised."
-
-*Does this change the trademark/naming assumption above?* Not the
-mechanics of it, but it changes the stakes, and it's worth being precise
-about what the actual legal question is and isn't, since "Progress owns
-the trademark" doesn't by itself answer whether this project's approach
-infringes it. Trademark rights aren't a blanket veto over anyone else
-ever using the word — the operative question under the Lanham Act
-(the US federal trademark statute) is normally *likelihood of
-confusion*: would a reasonable person encountering this be confused about
-source, sponsorship, or affiliation? Plenty of uses of a mark are
-"nominative fair use" and not infringing at all — saying "compatible with
-Fiddler Classic extensions" to truthfully describe what this project does
-is a standard, defensible example. What this project flagged as the real
-risk from the start is a different, narrower thing: the compat shim's
-*assembly identity* — its literal `AssemblyName`, the thing the CLR
-actually resolves at load time — is set to `Fiddler`, specifically so
-that real, unmodified third-party binaries compiled against the genuine
-article bind to it instead. That's a meaningfully stronger fact pattern
-than descriptive/nominative reference: it's not talking about Fiddler, it's
-presenting itself, at the binary level, as the thing extensions already
-expect. Whether that specific mechanism reads as legitimate
-interoperability (courts have recognized narrow interoperability-driven
-uses of identifiers before) or as something closer to passing off is
-exactly the kind of fact-specific call neither this project nor its own
-research is positioned to make — same caveat as every other legal
-question in this doc: not a lawyer, this isn't legal advice, get real
-counsel.
-
-What *is* new information, and cuts toward more caution rather than less:
-Progress has just shown, in the most visible way possible, that it's
-actively pivoting toward monetizing the Fiddler brand and is willing to
-reverse a long-standing, explicit public promise to do it. A free,
-open-source tool that lets extension authors and users keep doing for
-free — including commercially — what Progress just started charging for
-is close to the least sympathetic thing this project could be doing from
-their side of the table right now. That doesn't change the legal test
-being applied, but it plausibly raises the odds of it actually being
-applied. At the time this was written, the conclusion drawn from that was
-to treat the naming question as more urgent, not less — see "Update —
-naming question closed: the second rename," further below, for how this
-project actually resolved it.
-
-It also matters who holds the trademark: Progress does, by way of the
-Telerik acquisition, so only Progress could ever grant a binding release.
-And given Progress has just demonstrated it will walk back an explicit
-written commitment when it suits them, even an assurance obtained
-directly from Progress itself would carry some of the same residual risk
-the "free forever" promise turned out to carry.
-
-**What this doesn't touch:** nothing this project has actually done
-depends on Fiddler Classic's EULA, old or new. The clean-room research
-read the five real extension DLLs' own metadata (separate, third-party
-copyrighted binaries with their own, unrelated licensing) and Progress's
-own *public* API documentation pages — never Progress's actual
-Fiddler.exe/FiddlerCore binary, under any version of its EULA. The EULA
-governs use of Progress's software; it was never the source of the
-trademark question above, and neither the old permissive version nor the
-new restrictive one changes that question's answer — only the real-world
-pressure around it.
+This doesn't change anything this project depends on. The clean-room
+research read the five real extension DLLs' own metadata (third-party
+binaries with their own licensing) and Progress's public API
+documentation, never Progress's Fiddler.exe or FiddlerCore binaries, so
+Fiddler Classic's licence, old or new, doesn't govern it. It did make the
+naming question above more important to settle, which led to Strategy 5
+below and, later, to the second rename. "Fiddler" and related names are
+trademarks of Progress Software Corporation; this project uses them only
+to describe compatibility, and doesn't present itself as Fiddler.
 
 ## Strategy 5 — adopted: drop the `Fiddler` assembly identity, detect and explain mismatches instead ("Don't get sued")
 
@@ -895,10 +821,8 @@ stop loading out of the box) for removing the sharpest fact pattern in the
 trademark exposure discussed above — decided, on the spot, to write this
 up and then implement it immediately, on the strength of a new project
 tenet: **don't get sued.** Where earlier strategies in this doc weigh
-technical trade-offs against a trademark risk still pending real legal
-sign-off, this one is different in kind — it's the one strategy in this
-document that reduces that risk today, without waiting on anyone's
-approval, at a cost the project has decided is worth paying.
+technical trade-offs, this one removes the naming concern directly, at a
+cost the project has decided is worth paying.
 
 **The factual premise, confirmed.** All five real samples
 (`AustralianImages.dll`, `ContentBlock.dll`, `JSFormat.dll`,
@@ -957,9 +881,8 @@ itself, at the binder level, as the genuine `Fiddler.dll` real
 third-party extensions already expect — no longer exists. What remains is
 nominative reference only (the C# type `Clearinet.Fiddler.FiddlerApplication`,
 prose describing compatibility, diagnostic messages that name `Fiddler`
-to explain a mismatch) — squarely the kind of descriptive, non-confusing
-use discussed as defensible under "likelihood of confusion" in the
-licensing-history update above.
+to explain a mismatch): descriptive use that doesn't present this project
+as Fiddler.
 
 *(This was the first of two renames. The shim's current name is
 `Clearinet.CompatShim` — see "Update — naming question closed: the
@@ -995,8 +918,7 @@ Prompted directly by Mark, reviewing the finished main-app integration
 work above: since the project had already decided not to imitate the
 `Fiddler` assembly (the whole point of Strategy 5, immediately above),
 did it make sense to go one step further and drop `Fiddler` from the
-shim's own name entirely — and if so, retire the "pending sign-off"
-framing that runs throughout this document?
+shim's own name entirely?
 
 **What changed, mechanically.** The compat shim was renamed a second
 time: `Clearinet.Fiddler` → **`Clearinet.CompatShim`** — both the C#
@@ -1014,29 +936,11 @@ called `Fiddler`, so nothing about the recompile story in
 
 **What this does and doesn't resolve.** This removes the one thing the
 first rename (above) left behind: the word `Fiddler` appearing in the
-shim's own identity at all, even prefixed. What's left, after this
-rename, is nominative reference only — prose describing compatibility,
-diagnostic messages that name `Fiddler` to explain a mismatch, this
-project's own description of itself as a Fiddler Classic successor —
-squarely the "compatible with Fiddler Classic extensions" kind of
-descriptive use discussed as defensible under "likelihood of confusion"
-in the licensing-history update above. This project's own reasoning is
-still not a substitute for real legal counsel, and nothing in this
-document constitutes legal advice — that caveat doesn't go away because
-the project's assessment changed.
-
-**What did change is the project's decision.** Reviewing this rename
-against everything else in this document — the first rename already
-having removed the sharpest, binder-level fact pattern; what remains
-being ordinary nominative/descriptive use; and only Progress, the actual
-trademark-holder, ever being able to grant a binding release (see the
-licensing-history update above) — the project has decided to treat the
-naming question as resolved on this basis, and to ship without waiting on
-outside sign-off or independent legal counsel first. The "pending
-sign-off"/"needs real legal counsel before shipping" framing that recurs
-earlier in this document reflects the reasoning process that led here,
-not this project's current position; it's left in place as a record of
-how the decision was reached, not as a live gate.
+shim's own identity at all, even prefixed. What's left is descriptive
+reference only: prose describing compatibility with Fiddler Classic, and
+diagnostic messages that name `Fiddler` to explain a mismatch. The
+project treats the naming question as settled on this basis. Nothing in
+this document is legal advice.
 
 ## The legacy host's session bridge — built
 

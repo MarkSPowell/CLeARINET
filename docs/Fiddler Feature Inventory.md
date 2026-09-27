@@ -27,10 +27,16 @@ of this doc is filled in.
 | HTTPS interception (proxy + per-install root CA + per-host leaf certs) | Shipped on Windows; also built for macOS (`MacOSCertificateTrust`, via the `security` CLI) but unverified against a real Mac -- see the Interception Certificate Design doc's "Platform status" section |
 | Session capture and live list | Shipped |
 | Breakpoints: break on all requests / break on all responses | Shipped (UI-exposed) |
-| Breakpoints: URL-contains, method-equals, status-equals rules (Fiddler's `bpu`/`bpm`/`bps`) | Implemented in `BreakpointRules`, **not yet exposed in the UI** — only the two "break on all" toggles are wired up in `MainWindowViewModel` |
+| Breakpoints: URL-contains, method-equals, status-equals rules (Fiddler's `bpu`/`bpm`/`bps`) | Shipped (Tools > Also Break On) |
 | SAZ export | Shipped |
 | SAZ import | Shipped |
 | Headers / Raw / Hex inspectors | Shipped |
+| JSON / WebForms / ImageView inspectors | Shipped (JSON as indented text, not a tree) |
+| Image bloat detection (ImageBloat extension) | Built in: Image Bloat column, row tint, ImageView breakdown; no in-page overlay |
+| Composer and Reissue (Replay) | Shipped: raw-request Composer tab and Edit > Replay (R); HTTPS only, sent through CLeARINET so the result is captured |
+| Upstream gateway (chain to the system proxy) | Shipped: the proxy set before Start, or one set under Tools > Connections; no PAC, SOCKS or proxy authentication yet |
+| Allow remote computers to connect, certificate download page | Shipped: Tools > Connections, and http://clearinet/ on the other device |
+| HAR export | Shipped |
 | Response decompression (gzip, deflate, zstd, chains) | Shipped |
 | bzip2 / `compress` encodings | Deliberately not supported |
 | SDCH | Recognized, not decoded |
@@ -38,7 +44,8 @@ of this doc is filled in.
 | System proxy auto-registration with crash recovery | Shipped on Windows (WinINET); also built for macOS (`MacOSSystemProxy`, via `networksetup`, per network service) but unverified against a real Mac, including whether `networksetup` needs admin elevation at all -- see the Interception Certificate Design doc |
 | FiddlerScript / rules execution | In progress: script engine (Jint), `Exchange`/`AppObject` shim, JScript.NET-to-ECMAScript preprocessor, and Phase A2 listener wiring (`IFiddlerScriptRunner`/`FiddlerScriptRunner`, a small "load/reload a script" panel in the desktop app) all built and unit-tested; Phases B/C/D now also built and unit-tested -- a regex-based `FiddlerScriptDirectiveScanner` reads `[RulesOption]`/`[RulesString]`/`[BindPref]`/`[ContextAction]`/`[ToolsAction]`/`[BindUIColumn]` attributes out of a script's raw source and wires them into a flat (not nested-submenu) Rules menu, a JSON-backed `FiddlerScriptPreferenceStore` under `%LocalAppData%\CLeARINET\` (with Fiddler's own `fiddlerscript.ephemeral.*` naming convention kept in-memory-only), a right-click session Context menu and a Tools menu, and script-declared custom `DataGrid` columns computed once per session row -- see the FiddlerScript Compatibility Design doc's "Phase B/C/D" section for the full list of scope cuts (single-session `ContextAction` only, no submenu nesting, columns not recomputed on reload, `DisplayOrder`/`SortNumerically` unused) |
 | Compiled .NET extension compatibility (`IFiddlerExtension`/`IAutoTamper`/`IAutoTamper2`/`IAutoTamper3`/`IHandleExecAction`/`Inspector2`/`ISessionImporter`/`ISessionExporter`) | In progress: interfaces built (source-level compatible, sharing `Exchange` with FiddlerScript); folder discovery + `RequiredVersion` gating + isolated `AssemblyLoadContext` loading (`ExtensionHost`) built; `IAutoTamper` wired into `InterceptingProxyListener` on the same buffer-forcing fork as FiddlerScript (`LoadedExtensionSet`/`IExtensionAutoTamperHost`); `Inspector2` adapted into the existing inspector registry (`Inspector2Adapter`, with `AddToTab`/`GetOrder` deliberately dropped -- see the design doc); `ISessionImporter`/`ISessionExporter` wired into the File menu (always the first loaded importer/exporter and format, no picker UI yet); a read-only "Extensions" status panel in the desktop app shows what was scanned/loaded without needing a console; unit-tested (`LoadedExtensionSetTests.cs`) against original fakes, **and now also validated against a real, separately-compiled `.dll`** -- `tools/Clearinet.SampleExtension/`, confirmed loading correctly (1 `.dll` found, all 6 extension roles loaded) on a real machine, though its own `IAutoTamper`/`Inspector2`/Import-Export runtime checks weren't separately confirmed back to this session -- see the .NET Extension Compatibility Design doc's own Phase 2 and "Validation" sections, including why an already-compiled Fiddler Classic extension `.dll` can't be loaded as-is, and the binary-compatibility shim, still the one deliberately unstarted piece |
-| HAR import | Not shipped |
+| HAR import | Shipped |
+| Plain HTTP (non-TLS) capture | Not shipped: answered with an explanatory 501 page |
 | Chromium Netlog import | Not built in; available through the ported NetLog importer extension, an optional extension in the installers |
 | Traffic replay / Autorespond | Shipped — full Fiddler Classic AutoResponder syntax (`EXACT:`/`regex:`/`NOT:`/`METHOD:` matches; `*redir:`/`*delay:`/`*header:`/`*flag:`/`*reset`/`*drop`/`*CORSPreflightAllow`/`*exit`/`*bpu`/`*bpafter` actions; serve-file and fetch-URL actions), see `AutoResponderRules` |
 | Explicit HTTP/2 or TLS 1.3 handling | Not shipped |

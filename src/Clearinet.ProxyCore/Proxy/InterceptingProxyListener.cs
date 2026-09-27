@@ -63,6 +63,7 @@ public sealed class InterceptingProxyListener
     private readonly IExtensionSessionHost? _sessionHost;
     private readonly TcpListener _listener;
     private CancellationTokenSource? _cts;
+    private UpstreamProxy? _gateway;
 
     public InterceptingProxyListener(
         int port,
@@ -72,7 +73,8 @@ public sealed class InterceptingProxyListener
         AutoResponderRules? autoResponderRules = null,
         IFiddlerScriptRunner? scriptRunner = null,
         IExtensionAutoTamperHost? extensionHost = null,
-        IExtensionSessionHost? sessionHost = null)
+        IExtensionSessionHost? sessionHost = null,
+        bool allowRemoteClients = false)
     {
         _leafProvider = leafProvider;
         _sessionStore = sessionStore;
@@ -99,7 +101,8 @@ public sealed class InterceptingProxyListener
         // Ported Fiddler-shaped extensions (see IExtensionSessionHost). Null,
         // or IsActive false, means none are loaded.
         _sessionHost = sessionHost;
-        _listener = new TcpListener(IPAddress.Loopback, port);
+        AllowsRemoteClients = allowRemoteClients;
+        _listener = new TcpListener(allowRemoteClients ? IPAddress.Any : IPAddress.Loopback, port);
     }
 
     /// <summary>
@@ -110,6 +113,25 @@ public sealed class InterceptingProxyListener
     /// port that was asked for.
     /// </summary>
     public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
+
+    /// <summary>
+    /// Whether this listener accepts connections from other computers
+    /// (phones, other machines on the network) as well as this one: Fiddler
+    /// Classic's "Allow remote computers to connect". Fixed when constructed.
+    /// </summary>
+    public bool AllowsRemoteClients { get; }
+
+    /// <summary>
+    /// The proxy CLeARINET forwards its own outgoing connections through, or
+    /// null to connect directly. Read when each new client connection opens
+    /// its connection to the server, so it can change while running. See
+    /// <see cref="UpstreamProxy"/>.
+    /// </summary>
+    public UpstreamProxy? Gateway
+    {
+        get => Volatile.Read(ref _gateway);
+        set => Volatile.Write(ref _gateway, value);
+    }
 
     /// <summary>
     /// Starts on <paramref name="preferredPort"/> when it's free. When
@@ -127,9 +149,10 @@ public sealed class InterceptingProxyListener
         AutoResponderRules? autoResponderRules = null,
         IFiddlerScriptRunner? scriptRunner = null,
         IExtensionAutoTamperHost? extensionHost = null,
-        IExtensionSessionHost? sessionHost = null)
+        IExtensionSessionHost? sessionHost = null,
+        bool allowRemoteClients = false)
     {
-        var preferred = new InterceptingProxyListener(preferredPort, leafProvider, sessionStore, breakpointManager, autoResponderRules, scriptRunner, extensionHost, sessionHost);
+        var preferred = new InterceptingProxyListener(preferredPort, leafProvider, sessionStore, breakpointManager, autoResponderRules, scriptRunner, extensionHost, sessionHost, allowRemoteClients);
         try
         {
             preferred.Start();
@@ -140,7 +163,7 @@ public sealed class InterceptingProxyListener
             // Port 0 tells the OS to hand back any free port -- the same
             // trick ASP.NET Core's test host and countless other tools use
             // to avoid ever hard-failing on a port collision.
-            var fallback = new InterceptingProxyListener(0, leafProvider, sessionStore, breakpointManager, autoResponderRules, scriptRunner, extensionHost, sessionHost);
+            var fallback = new InterceptingProxyListener(0, leafProvider, sessionStore, breakpointManager, autoResponderRules, scriptRunner, extensionHost, sessionHost, allowRemoteClients);
             fallback.Start();
             return fallback;
         }
@@ -187,10 +210,22 @@ public sealed class InterceptingProxyListener
             using var clientStream = client.GetStream();
             var (method, target) = await ReadRequestLineAndHeadersAsync(clientStream, cancellationToken);
 
-            if (method is null || !string.Equals(method, "CONNECT", StringComparison.OrdinalIgnoreCase))
+            if (method is null)
             {
-                Console.WriteLine(
-                    $"[proxy] Ignoring non-CONNECT request ({method ?? "?"} {target}); this spike only handles HTTPS tunnels.");
+                return;
+            }
+
+            if (!string.Equals(method, "CONNECT", StringComparison.OrdinalIgnoreCase))
+            {
+                // Plain HTTP. Requests addressed to CLeARINET itself get its
+                // home page and root certificate (how a phone installs it);
+                // anything else is answered rather than silently dropped, since
+                // only HTTPS is forwarded so far.
+                var answer = ProxyHomePage.IsRequestForProxy(target, Port)
+                    ? ProxyHomePage.Build(target!, _leafProvider.IssuerCertificateDer)
+                    : ProxyHomePage.NotForwarded(method, target ?? string.Empty);
+                await HttpMessageWriter.WriteResponseAsync(clientStream, answer, cancellationToken);
+                Console.WriteLine($"[proxy] {method} {target} -> {answer.StatusCode} (answered by CLeARINET)");
                 return;
             }
 
@@ -214,7 +249,7 @@ public sealed class InterceptingProxyListener
             // PumpSessionsAsync's own remarks on why it has to be lazy.
             await PumpSessionsAsync(
                 targetHost, targetPort, client, clientTls, _sessionStore, _breakpointManager, _autoResponderRules,
-                _scriptRunner, _extensionHost, _sessionHost, cancellationToken);
+                _scriptRunner, _extensionHost, _sessionHost, Gateway, cancellationToken);
         }
         catch (BreakpointAbortedException ex)
         {
@@ -298,6 +333,7 @@ public sealed class InterceptingProxyListener
         IFiddlerScriptRunner? scriptRunner,
         IExtensionAutoTamperHost? extensionHost,
         IExtensionSessionHost? sessionHost,
+        UpstreamProxy? gateway,
         CancellationToken cancellationToken)
     {
         TcpClient? upstreamClient = null;
@@ -312,8 +348,18 @@ public sealed class InterceptingProxyListener
         {
             if (upstreamTls is null)
             {
-                upstreamClient = new TcpClient();
-                await upstreamClient.ConnectAsync(targetHost, targetPort, cancellationToken);
+                if (gateway is not null && !gateway.ShouldBypass(targetHost))
+                {
+                    // Through the network's own proxy (see UpstreamProxy):
+                    // a CONNECT tunnel, then TLS to the server inside it.
+                    upstreamClient = await gateway.ConnectTunnelAsync(targetHost, targetPort, cancellationToken);
+                }
+                else
+                {
+                    upstreamClient = new TcpClient();
+                    await upstreamClient.ConnectAsync(targetHost, targetPort, cancellationToken);
+                }
+
                 upstreamTls = new SslStream(upstreamClient.GetStream(), leaveInnerStreamOpen: false);
                 // Deliberately using default certificate validation
                 // here: this proxy should surface a real upstream cert

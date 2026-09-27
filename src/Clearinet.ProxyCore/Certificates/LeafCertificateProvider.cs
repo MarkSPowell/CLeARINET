@@ -52,6 +52,15 @@ public sealed class LeafCertificateProvider
     }
 
     /// <summary>
+    /// The root certificate that signs every leaf, without its private key
+    /// (DER-encoded). What a phone or another computer installs to trust
+    /// CLeARINET (served at http://clearinet/ when remote computers are
+    /// allowed), and what the Composer trusts when it sends through the
+    /// listener.
+    /// </summary>
+    public byte[] IssuerCertificateDer => _issuer.Export(X509ContentType.Cert);
+
+    /// <summary>
     /// Returns a leaf certificate for <paramref name="host"/>, signing and
     /// caching a new one if there's no cached certificate with at least
     /// five minutes of validity left. Concurrent calls for the same host

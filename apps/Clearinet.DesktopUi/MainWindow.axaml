@@ -62,6 +62,26 @@
                BorderThickness="0" />
     </DataTemplate>
 
+    <!-- ImageView: the summary line (format, dimensions, size), then the
+         picture at its own size, scrollable. The converter returns null for
+         a format Avalonia can't draw, leaving just the summary. -->
+    <DataTemplate DataType="inspect:ImageContent">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top"
+                   Text="{Binding Summary}"
+                   Foreground="{DynamicResource AppMutedTextBrush}"
+                   TextWrapping="Wrap"
+                   Margin="8,4" />
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <Image Source="{Binding Bytes, Converter={x:Static conv:ImageBytesConverter.Instance}}"
+                 Stretch="None"
+                 HorizontalAlignment="Left"
+                 VerticalAlignment="Top"
+                 Margin="8" />
+        </ScrollViewer>
+      </DockPanel>
+    </DataTemplate>
+
     <DataTemplate DataType="inspect:ErrorContent">
       <TextBlock Text="{Binding Message}"
                  Foreground="IndianRed"
@@ -78,6 +98,11 @@
       <MenuItem Header="_File">
         <MenuItem Header="_Open SAZ…" Click="OpenSazMenuItem_Click" HotKey="Ctrl+O" />
         <MenuItem Header="_Save SAZ…" Command="{Binding SaveSazCommand}" HotKey="Ctrl+S" />
+        <Separator />
+        <!-- HTTP Archive, the format browsers' developer tools and support
+             teams use. Bodies are written decoded (see HarWriter). -->
+        <MenuItem Header="Import _HAR…" Click="ImportHarMenuItem_Click" />
+        <MenuItem Header="Export HA_R…" Click="ExportHarMenuItem_Click" IsEnabled="{Binding HasSessions}" />
         <!-- Enabled only once a loaded .NET extension actually proffers an
              importer/exporter (see ExtensionHost); always present so the
              menu's shape doesn't shift around based on what's installed.
@@ -105,6 +130,13 @@
       <MenuItem Header="_Edit">
         <MenuItem Header="Remove _Selected Session" Command="{Binding RemoveSelectedSessionCommand}" InputGesture="Delete" />
         <MenuItem Header="Remove _All Sessions" Command="{Binding RemoveAllSessionsCommand}" />
+        <Separator />
+        <!-- Replay sends the selected request again, unchanged (Fiddler
+             Classic's Reissue; the R key does the same in the session
+             list). Edit in Composer copies it to the Composer tab to change
+             first. Both send through CLeARINET, so capture must be running. -->
+        <MenuItem Header="_Replay Selected Session" Command="{Binding ReplaySelectedSessionCommand}" InputGesture="R" />
+        <MenuItem Header="Edit in _Composer" Command="{Binding EditInComposerCommand}" />
       </MenuItem>
 
       <!-- Phase B: one checkable entry per RulesOption/RulesStringChoice the
@@ -158,6 +190,7 @@
         <MenuItem Header="Break on Responses" ToggleType="CheckBox" IsChecked="{Binding BreakOnAllResponses, Mode=TwoWay}" />
         <MenuItem Header="Also Break On" ToggleType="CheckBox" IsChecked="{Binding ShowAlsoBreakOnRow, Mode=TwoWay}" />
         <MenuItem Header="AutoResponder" ToggleType="CheckBox" IsChecked="{Binding AutoResponderEnabled, Mode=TwoWay}" />
+        <MenuItem Header="Connections" ToggleType="CheckBox" IsChecked="{Binding ShowConnectionsRow, Mode=TwoWay}" />
       </MenuItem>
 
       <!-- _Documentation opens the bundled end-user-facing User Guide
@@ -208,7 +241,7 @@
            vertical space) needs to be able to grow with the window rather
            than sit at a fixed width, and a StackPanel has no notion of
            "the rest of the space" the way a Grid's star column does. -->
-      <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+      <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto">
         <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="12">
           <TextBlock Text="Port:" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" />
           <RadioButton Content="Auto"
@@ -293,6 +326,36 @@
                           FormatString="0"
                           VerticalAlignment="Center"
                           Width="120" />
+        </StackPanel>
+
+        <!-- Tools > Connections: the upstream proxy CLeARINET forwards
+             through (empty = whatever the system proxy was before Start),
+             and whether phones and other computers may use CLeARINET as
+             their proxy (Fiddler Classic's "Allow remote computers to
+             connect"; takes effect on the next Start). -->
+        <StackPanel Grid.Row="2"
+                    Grid.Column="0"
+                    Grid.ColumnSpan="2"
+                    Spacing="6"
+                    Margin="0,10,0,0"
+                    IsVisible="{Binding ShowConnectionsRow}">
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <TextBlock Text="Upstream proxy:" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" />
+            <TextBox Text="{Binding UpstreamProxySetting, Mode=TwoWay}"
+                     PlaceholderText="Automatic (the system proxy)"
+                     ToolTip.Tip="Where CLeARINET sends its own connections. Leave empty to use the proxy this computer was set to before capture started; type host:port for a specific proxy, or none to connect directly."
+                     VerticalAlignment="Center"
+                     Width="240" />
+            <TextBlock Text="{Binding GatewayStatus}" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <CheckBox Content="Allow remote computers to connect"
+                      IsChecked="{Binding AllowRemoteClients, Mode=TwoWay}"
+                      IsEnabled="{Binding !IsRunning}"
+                      ToolTip.Tip="Lets phones and other computers on your network use CLeARINET as their proxy, so their HTTPS traffic shows here. Anyone on the network can then use it, so turn it off when you've finished. Takes effect the next time you click Start."
+                      VerticalAlignment="Center" />
+            <TextBlock Text="{Binding RemoteClientsHint}" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap" />
+          </StackPanel>
         </StackPanel>
       </Grid>
     </Border>
@@ -712,6 +775,10 @@
           <DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="*" />
           <DataGridTextColumn Header="Req" Binding="{Binding RequestSize}" Width="80" />
           <DataGridTextColumn Header="Resp" Binding="{Binding ResponseSize}" Width="80" />
+          <!-- PNG/JPEG/GIF/WebP responses only: bytes that don't affect how
+               the image looks (see ImageBloatAnalyzer). Rows where it's a
+               large share of the file are tinted. -->
+          <DataGridTextColumn Header="Image Bloat" Binding="{Binding ImageBloat}" Width="170" />
         </DataGrid.Columns>
       </DataGrid>
 
@@ -722,12 +789,11 @@
            (DisplayName); ContentTemplate hands the selected tab's
            InspectorContent to a plain ContentControl, which is where the
            Window.DataTemplates above take over. -->
-      <!-- Inspectors first, then any tabs extensions add (Fiddler Classic
-           extensions put theirs on its main tab strip; see ExtensionUi).
-           MainWindow.axaml.cs adds those, and hides the tab strip while
-           Inspectors is the only tab, so without extensions this looks
-           exactly as it did before. -->
-      <TabControl Grid.Row="2" x:Name="DetailTabs" Classes="single" Padding="0">
+      <!-- Inspectors, Composer, then any tabs extensions add (Fiddler
+           Classic extensions put theirs on its main tab strip; see
+           ExtensionUi). MainWindow.axaml.cs adds those. The "single" style
+           hides the tab strip if Inspectors is ever the only tab. -->
+      <TabControl Grid.Row="2" x:Name="DetailTabs" Padding="0">
         <TabControl.Styles>
           <Style Selector="TabControl.single /template/ ItemsPresenter#PART_ItemsPresenter">
             <Setter Property="IsVisible" Value="False" />
@@ -769,6 +835,27 @@
           </TabControl>
         </DockPanel>
       </Grid>
+        </TabItem>
+
+        <!-- Fiddler Classic's Composer: a request as raw HTTP (request line
+             with an https:// URL, headers, blank line, body), sent through
+             CLeARINET so the exchange is captured as a new session. -->
+        <TabItem Header="Composer" x:Name="ComposerTab">
+          <DockPanel Margin="0,6,0,0">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="10" Margin="0,0,0,6">
+              <Button Content="Execute" Command="{Binding ExecuteComposerCommand}" Classes="accent" />
+              <TextBlock Text="{Binding ComposerStatus}"
+                         VerticalAlignment="Center"
+                         TextWrapping="Wrap"
+                         Foreground="{DynamicResource AppMutedTextBrush}" />
+            </StackPanel>
+            <TextBox Text="{Binding ComposerText, Mode=TwoWay}"
+                     AcceptsReturn="True"
+                     AcceptsTab="True"
+                     TextWrapping="NoWrap"
+                     FontFamily="Cascadia Mono,Consolas,monospace"
+                     VerticalAlignment="Stretch" />
+          </DockPanel>
         </TabItem>
       </TabControl>
     </Grid>

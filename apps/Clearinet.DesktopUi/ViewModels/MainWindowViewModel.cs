@@ -27,7 +27,7 @@ namespace Clearinet.DesktopUi.ViewModels;
 /// port is editable up until Start is pressed, so a taken port (or just a
 /// preference) doesn't require editing code and rebuilding.
 /// </summary>
-public sealed class MainWindowViewModel : ViewModelBase, IDisposable
+public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private const int DefaultPreferredPort = 8888;
 
@@ -667,6 +667,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 RefreshInspectors();
                 RemoveSelectedSessionCommand?.RaiseCanExecuteChanged();
+                RaiseComposerCanExecuteChanged();
             }
         }
     }
@@ -766,6 +767,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
                 StartCommand.RaiseCanExecuteChanged();
                 StopCommand.RaiseCanExecuteChanged();
                 RaisePropertyChanged(nameof(ShowSteadyRunningIndicator));
+                RaiseComposerCanExecuteChanged();
             }
         }
     }
@@ -910,6 +912,9 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             () => { if (SelectedSessionRow is { } row) { _sessionStore.Remove([row.Id]); } },
             () => SelectedSessionRow is not null);
         RemoveAllSessionsCommand = new RelayCommand(() => _sessionStore.Clear(), () => Sessions.Count > 0);
+        ExecuteComposerCommand = new RelayCommand(ExecuteComposer, () => CanSend);
+        ReplaySelectedSessionCommand = new RelayCommand(ReplaySelectedSession, () => CanSend && SelectedSessionRow is not null);
+        EditInComposerCommand = new RelayCommand(EditInComposer, () => SelectedSessionRow is not null);
 
         AddAutoResponderRuleCommand = new RelayCommand(AddAutoResponderRule);
         RemoveAutoResponderRuleCommand = new RelayCommand(RemoveSelectedAutoResponderRule, () => SelectedAutoResponderRule is not null);
@@ -961,6 +966,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SaveSazCommand.RaiseCanExecuteChanged();
             ExportViaExtensionCommand.RaiseCanExecuteChanged();
             RemoveAllSessionsCommand.RaiseCanExecuteChanged();
+            RaisePropertyChanged(nameof(HasSessions));
             FlashCaptureIndicator();
         });
 
@@ -992,6 +998,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             SaveSazCommand.RaiseCanExecuteChanged();
             ExportViaExtensionCommand.RaiseCanExecuteChanged();
             RemoveAllSessionsCommand.RaiseCanExecuteChanged();
+            RaisePropertyChanged(nameof(HasSessions));
         });
 
         _breakpointManager.BreakpointHit += pending => Dispatcher.UIThread.Post(() =>
@@ -1078,6 +1085,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _fiddlerScriptPath = _preferences.GetStringPref(PreferenceKeys.FiddlerScriptPath, string.Empty);
 
         _autoLaunchLegacyHost = _preferences.GetBoolPref(PreferenceKeys.AutoLaunchLegacyHost, false);
+        LoadNetworkPreferences();
         if (_autoLaunchLegacyHost)
         {
             _legacyExtensionHostStatus = "Auto-launch is on -- it will launch the next time you click Start.";
@@ -1168,9 +1176,17 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             _proxy = InterceptingProxyListener.StartOnAvailablePort(
                 requestedPort, leafProvider, _sessionStore, _breakpointManager, _autoResponderRules, _fiddlerScriptRunner,
                 new CompositeExtensionAutoTamperHost([_extensionHost.CreateAutoTamperHost(), legacyBridge]),
-                _extensionHost.CreateSessionHost());
+                _extensionHost.CreateSessionHost(),
+                allowRemoteClients: AllowRemoteClients);
             IsRunning = true;
             ShowBoundPort(_proxy.Port);
+
+            // Before registering as the system proxy, while the system setting
+            // still names the network's own proxy (if any).
+            var gatewayNote = StartGateway(_proxy);
+            var listeningOn = _proxy.AllowsRemoteClients
+                ? $"all network interfaces, port {_proxy.Port}"
+                : $"127.0.0.1:{_proxy.Port}";
 
             // In Auto mode requestedPort is always 0, which _proxy.Port
             // (the real bound port) will never equal -- there's no
@@ -1189,15 +1205,15 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 SystemProxyController.Enable(_proxy.Port);
                 StatusText =
-                    $"Listening on 127.0.0.1:{_proxy.Port}{portNote} and registered as the system proxy -- " +
+                    $"Listening on {listeningOn}{portNote} and registered as the system proxy -- " +
                     "browsers and most other apps on this machine will route through here automatically " +
-                    "until you click Stop.";
+                    $"until you click Stop. Outgoing: {gatewayNote}.";
             }
             catch (Exception ex)
             {
                 StatusText =
-                    $"Listening on 127.0.0.1:{_proxy.Port}{portNote}, but couldn't register as the system " +
-                    $"proxy ({ex.Message}) -- point a browser's HTTPS proxy here manually instead.";
+                    $"Listening on {listeningOn}{portNote}, but couldn't register as the system " +
+                    $"proxy ({ex.Message}) -- point a browser's HTTPS proxy here manually instead. Outgoing: {gatewayNote}.";
             }
         }
         catch (Exception ex)
@@ -1217,6 +1233,7 @@ public sealed class MainWindowViewModel : ViewModelBase, IDisposable
         _proxy = null;
         SystemProxyController.Disable();
         IsRunning = false;
+        StopGateway();
 
         // A no-op unless this app's own Start() is what launched the legacy
         // host in the first place (see LegacyExtensionHostLauncher's own

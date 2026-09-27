@@ -11,13 +11,15 @@ just undocumented — they need your call, not a guess from the code.
 ## Motivation
 
 CLeARINET exists as a successor to Fiddler Web Debugger (Fiddler
-Classic), which Progress Software withdrew in September 2026. Fiddler
-Classic was acquired by Telerik in 2012 with the promise it would remain
-free forever; after Progress's 2014 acquisition of Telerik and the
-original maintainer's 2016 departure, the tool stagnated and Progress
-ultimately restricted commercial usage without offering a licensing path
-— the "rug pull" CLeARINET is explicitly designed to make impossible for
-itself (see `CONTRIBUTING.md`'s no-relicensing commitment).
+Classic). Fiddler Classic was acquired by Telerik in 2012, and Telerik by
+Progress Software in 2014; its development largely slowed after its
+original author left in 2016. In August 2026 Progress changed Fiddler
+Classic's licence to allow non-commercial use only, directing commercial
+users to its Fiddler Everywhere product (see Progress's
+[commercial-use page](https://www.telerik.com/fiddler/fiddler-classic/commercial-use)).
+CLeARINET gives developers a free, open source tool for the same
+workflows, under a licence that can't later be withdrawn (see
+`CONTRIBUTING.md`'s no-relicensing commitment).
 
 ## Tenets
 
@@ -53,25 +55,18 @@ itself (see `CONTRIBUTING.md`'s no-relicensing commitment).
    dependency on Avalonia or any other UI toolkit — `SessionQuery`,
    `BreakpointRules`, and the `IInspector` contract are all plain,
    UI-framework-neutral types for exactly this reason.
-5. **Don't get sued.** Discovered as an explicit, named tenet during the
-   legacy-extension-compatibility work (see
-   `docs/CLeARINET .NET Extension Compatibility Design.md`, "Strategy 5 —
-   adopted"), where it overrode a real usability regression: the
-   compat shim's assembly identity was deliberately changed from
-   `Fiddler` to `Clearinet.Fiddler`, which means none of the five real,
-   unmodified sample extensions this project validated load out of the
-   box anymore — trading that away specifically to remove the sharpest
-   trademark-exposure fact pattern (a binary presenting itself, at the
-   CLR-binder level, as genuine third-party software) rather than wait on
-   a pending legal question to resolve itself. Carried a step further
-   since (see the design doc's "Update — naming question closed: the
-   second rename"): the shim's current name is `Clearinet.CompatShim`,
-   dropping `Fiddler` from its own identity entirely, and the project has
-   decided to treat the naming question as resolved on that basis rather
-   than wait on outside sign-off before shipping. This tenet ranks above
-   tenet 1's compatibility goal whenever the two conflict: fidelity to
-   Fiddler Classic's own behavior is this project's means, not an end
-   worth legal risk on its own.
+5. **Don't get sued.** CLeARINET never presents itself as Fiddler, and
+   respects other people's rights in what it builds on. In practice:
+   no "Fiddler" in any assembly, namespace or file CLeARINET ships (the
+   compatibility layer is `Clearinet.CompatShim`; the bundled NetLog
+   importer ships as `CLeARINETNetLog.dll`); "Fiddler" appears only to
+   describe compatibility; no code from Fiddler, and third-party code
+   only under its licence, with the licence text alongside. Adopted
+   during the legacy-extension work (see the .NET Extension Compatibility
+   Design doc, "Strategy 5 — adopted" and "the second rename"), where it
+   cost a real usability regression: compiled Fiddler Classic extensions
+   no longer load unmodified. This tenet ranks above tenet 1 whenever the
+   two conflict.
 
 ## Clean-room policy
 
@@ -132,7 +127,10 @@ of this reconstruction.
   list, plus the features that make it usable day to day: breakpoints,
   filtering/search, response decompression, SAZ export from the UI. This
   is the phase the project is currently in, and the bulk of what's shipped
-  so far belongs to it.
+  so far belongs to it. Added since, from the Fiddler Feature Inventory's
+  priorities: JSON, WebForms and ImageView inspectors, image bloat
+  detection, the Composer and Replay, HAR import and export, forwarding
+  through an upstream proxy, and capturing other devices.
 - **Phase 3 — Beta.** `Clearinet.Compatibility`'s FiddlerCore-shaped
   adapter, and third-party inspector plugins loaded from an Inspectors
   folder into isolated `AssemblyLoadContext`s (see the Fiddler Feature
@@ -231,11 +229,9 @@ docs' intentions:
 - *A deliberately deadlock-safe preferences system.* Lawrence calls
   Fiddler's `about:config`-inspired preferences system — built
   specifically to avoid deadlocks in a heavily multithreaded, extensible
-  app — one of the few things he's genuinely proud of. CLeARINET has no
-  settings persistence yet (see README's Known limitations), so there's
-  nothing to get wrong yet — but worth designing with that same
-  deadlock-avoidance care in mind when it's eventually built, rather than
-  reaching for the obvious approach and finding out later. See
+  app — one of the few things he's genuinely proud of. CLeARINET now has
+  a preferences store (see the Preferences Design doc), built with that
+  in mind. See
   "Extensible config lists (upstream Issue #2)," below, for a second
   design commitment that same future system should carry.
 - *HTTP/2 blocked by `SslStream` never exposing ALPN.* His version of
@@ -447,7 +443,7 @@ longer presents itself as the real `Fiddler` assembly at the binder
 level, so a real extension still needs to be recompiled (if its source is
 available) or have its own `AssemblyRef` metadata retargeted (a
 metadata-only edit, not a source or behavior change — see
-`AssemblyMismatch`'s own remarks and `Retarget-LegacyExtension.ps1`)
+`AssemblyMismatch`'s own remarks)
 before it binds here at all.
 Built in stages, each with its own design doc section: discovery/loading
 against real extension `.dll`s (Phase 1); a named-pipe session bridge so
@@ -570,22 +566,16 @@ could force a design change if it turns out to.
 `release-windows.yml`. Three scope decisions, made with you directly
 rather than assumed:
 
-- **Unsigned.** No Apple Developer account was available to this session
-  to wire up Developer ID signing or notarization with. Gatekeeper will
-  show its "unidentified developer" warning on first launch (right-click
-  > Open, or `xattr -cr`, gets past it) — the same tradeoff
-  `installer/macos/build-installer.sh`'s own header comment spells out.
-  One thing this genuinely can't confirm without a real Mac: whether
-  Gatekeeper's assessment of a from-scratch-assembled bundle like this
-  one (no bundle-level signature at all, only the individual executable's
-  own ad-hoc signature that the .NET SDK already applies as an arm64
-  kernel requirement, unrelated to Gatekeeper trust) stops at that
-  warning, or refuses to launch it outright as "damaged" instead — those
-  are two different Gatekeeper code paths, and this session had no way to
-  exercise the second one. If it turns out to be the latter, ad-hoc
-  signing the whole assembled bundle (`codesign --force --deep --sign -`)
-  is a small, still-free, still-no-account-needed follow-up, not a
-  redesign.
+- **Ad-hoc signed, not notarized.** No Apple Developer account is
+  available for Developer ID signing or notarization. The first real
+  install reported the app as "damaged", because the hand-built bundle
+  wasn't signed as a whole; `build-installer.sh` now ad-hoc signs the
+  whole bundle, keeping only the executable in `Contents/MacOS`. Gatekeeper
+  then shows its ordinary "can't be verified" prompt on first launch,
+  which System Settings > Privacy & Security > Open Anyway gets past.
+  `installer/macos/smoke-test.sh` runs after every macOS build: it checks
+  the signature the way macOS does, the `.dmg`'s contents (including the
+  optional extensions), and that the app launches.
 - **A `.dmg`, not a bare `.zip` of the `.app`.** The standard
   drag-to-Applications Mac install experience, matching what
   `release-windows.yml`'s Inno Setup installer aims for on the Windows

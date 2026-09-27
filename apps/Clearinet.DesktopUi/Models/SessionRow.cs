@@ -2,6 +2,7 @@ using System.Globalization;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
 using Clearinet.Compatibility.FiddlerScript;
+using Clearinet.Extensibility.Inspection;
 using Clearinet.ProxyCore.Sessions;
 
 namespace Clearinet.DesktopUi.Models;
@@ -46,6 +47,12 @@ public sealed class SessionRow
     public required IReadOnlyDictionary<string, string> ScriptColumns { get; init; }
 
     /// <summary>
+    /// The Image Bloat column: "bloat / total bytes (percent)" for a PNG,
+    /// JPEG, GIF or WebP response, empty otherwise. See <see cref="ImageBloatAnalyzer"/>.
+    /// </summary>
+    public string ImageBloat { get; private init; } = string.Empty;
+
+    /// <summary>
     /// The session's flags by name (case-insensitive), for session-list
     /// columns an extension binds to a flag (<c>{Binding Flags[X-Privacy]}</c>);
     /// a missing flag reads as an empty string.
@@ -54,6 +61,11 @@ public sealed class SessionRow
 
     /// <summary>How the session list draws this row, from its <c>ui-*</c> flags. See <see cref="SessionRowStyle"/>.</summary>
     public SessionRowStyle Style { get; private init; } = SessionRowStyle.Plain;
+
+    /// <summary>Background for a row whose image is mostly bloat (see <see cref="ImageBloatReport.IsHeavy"/>), unless flags set one.</summary>
+    private static readonly IBrush HeavyBloatBackground = new ImmutableSolidColorBrush(Color.FromRgb(0xFF, 0xD8, 0xB0));
+
+    private static readonly IBrush HeavyBloatForeground = new ImmutableSolidColorBrush(Colors.Black);
 
     /// <param name="scriptRunner">
     /// The currently-loaded FiddlerScript's own runner, if any -- when it
@@ -67,22 +79,33 @@ public sealed class SessionRow
     /// changing <c>OnBeforeResponse</c> logic doesn't retroactively re-edit
     /// already-captured responses either.
     /// </param>
-    public static SessionRow From(Session session, FiddlerScriptRunner? scriptRunner = null) => new()
+    public static SessionRow From(Session session, FiddlerScriptRunner? scriptRunner = null)
     {
-        Id = session.Id,
-        // Local time: this is a desktop app showing what just happened on
-        // this machine, not a log file where UTC would matter more.
-        Time = session.StartedAt.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture),
-        StatusCode = session.Response.StatusCode,
-        Method = session.Request.Method,
-        Url = $"https://{session.Host}{session.Request.Target}",
-        RequestSize = FormatBytes(session.Request.Body.Length),
-        ResponseSize = FormatBytes(session.Response.Body.Length),
-        Session = session,
-        ScriptColumns = BuildScriptColumns(session, scriptRunner),
-        Flags = new FlagLookup(session.Flags),
-        Style = SessionRowStyle.From(session.Flags),
-    };
+        var bloat = ImageBloatAnalyzer.AnalyzeResponse(session.Response);
+        var style = SessionRowStyle.From(session.Flags);
+        if (bloat is { IsHeavy: true } && style.Background is null)
+        {
+            style = style with { Background = HeavyBloatBackground, Foreground = style.Foreground ?? HeavyBloatForeground };
+        }
+
+        return new SessionRow
+        {
+            Id = session.Id,
+            // Local time: this is a desktop app showing what just happened on
+            // this machine, not a log file where UTC would matter more.
+            Time = session.StartedAt.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture),
+            StatusCode = session.Response.StatusCode,
+            Method = session.Request.Method,
+            Url = $"https://{session.Host}{session.Request.Target}",
+            RequestSize = FormatBytes(session.Request.Body.Length),
+            ResponseSize = FormatBytes(session.Response.Body.Length),
+            Session = session,
+            ScriptColumns = BuildScriptColumns(session, scriptRunner),
+            Flags = new FlagLookup(session.Flags),
+            Style = style,
+            ImageBloat = bloat?.ColumnText ?? string.Empty,
+        };
+    }
 
     private static string FormatBytes(int bytes) => bytes < 1024
         ? bytes.ToString(CultureInfo.InvariantCulture) + " B"

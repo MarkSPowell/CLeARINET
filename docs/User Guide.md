@@ -50,7 +50,24 @@ tabs:
 
 - **Headers** — a table of header names and values.
 - **Raw** — the decoded text body (automatic decompression for gzip,
-  deflate, and zstd — see README.md for the full list of what's handled).
+  deflate, Brotli and zstd, and the character set from Content-Type — see
+  README.md for the full list of what's handled).
+- **JSON** (only for a JSON body) — the body pretty-printed, so an API
+  response is readable at a glance. Offered for JSON content types, and for
+  a body with no useful content type that turns out to be JSON.
+- **WebForms** (request side, only when there's something to show) — the
+  query string and any form fields, one row per name and value, decoded.
+  Form uploads (`multipart/form-data`) show each field, and each file's
+  name, type and size.
+- **ImageView** (only for an image) — the picture itself, with its format,
+  pixel size and size in bytes. PNG, JPEG, GIF, WebP, BMP and ICO are
+  recognised even when the Content-Type is wrong. For PNG, JPEG, GIF and
+  WebP it also lists any **image bloat**: bytes that don't change how the
+  image looks, such as EXIF camera data, XMP, editing-program data,
+  comments, text, or data after the end of the image. Removing them makes
+  the file smaller with no visible change. (EXIF can hold the photo's
+  orientation, which browsers honour, so keep that tag if the image relies
+  on it.)
 - **Hex** — a hex dump of the raw bytes.
 - **Cookies** (only on a side that has cookies) — on the request side,
   each cookie the browser sent; on the response side, each cookie the
@@ -67,6 +84,11 @@ To remove sessions, use **Edit > Remove Selected Session** (or press
 **Delete** in the session list) or **Edit > Remove All Sessions**. Removed
 sessions are gone for good: they're no longer in the list or in what
 **Save SAZ** writes.
+
+The **Image Bloat** column shows, for image responses, the bloat bytes out
+of the file's size and the percentage. Rows where bloat is at least a
+quarter of the file (and at least 1 KB) are tinted orange, unless something
+else has already coloured the row.
 
 Importers, extensions and scripts can also mark sessions for the list: a
 row can have its own background or text colour, be bold, italic or struck
@@ -103,6 +125,7 @@ in it):
 | Break on Responses | Pauses every incoming response at a breakpoint |
 | Also Break On | A row of narrower breakpoint conditions (URL contains, method, status code) |
 | AutoResponder | The AutoResponder rules editor |
+| Connections | The upstream proxy setting and "Allow remote computers to connect" (see below) |
 
 Unchecking "Break on Requests"/"Break on Responses"/"Also Break On" only
 hides that control — it doesn't clear whatever rule you'd already set. If a
@@ -154,6 +177,55 @@ server.
 6. Use **Move Up**/**Move Down** to reorder rules — the first matching rule
    wins, so order matters when two rules could both match the same request.
    **Remove** deletes the selected rule.
+
+## Composer and Replay
+
+The **Composer** tab (next to **Inspectors**) sends a request you've
+written or edited, like Fiddler Classic's Composer. Type the request as raw
+HTTP: a first line with the method, a full `https://` URL and the version,
+then headers, a blank line, and any body. Click **Execute**.
+
+```
+POST https://api.example.com/items HTTP/1.1
+Content-Type: application/json
+
+{"name": "test"}
+```
+
+To start from something you've captured, select it and use **Edit > Edit in
+Composer**. **Edit > Replay Selected Session** (or **R** in the session
+list) sends the selected request again, unchanged, like Fiddler Classic's
+Reissue.
+
+Both send through CLeARINET itself, so capture has to be running. What they
+send shows up as a new session, and goes through the AutoResponder,
+breakpoints, FiddlerScript and extensions just like traffic from a browser.
+The Host header is set from the URL, and Content-Length from the body. Only
+HTTPS requests can be sent so far, and the body is sent as text.
+
+## Connections: upstream proxy and other devices
+
+**Tools > Connections** shows two settings.
+
+**Upstream proxy.** On a network where the internet is only reachable
+through a proxy (common at work), CLeARINET has to send its own connections
+through that proxy too. Leave the box empty and CLeARINET uses whatever
+proxy the computer was set to before you clicked Start; the status line
+says what it chose. Type `host:port` to use a specific proxy, or `none` to
+connect directly. Changes apply straight away. CLeARINET can't yet use an
+automatic proxy configuration script (PAC), a SOCKS proxy, or a proxy that
+asks you to sign in; if yours is one of those, type the proxy's own
+`host:port` if you know it.
+
+**Allow remote computers to connect.** Lets phones, tablets and other
+computers use CLeARINET as their proxy, so their HTTPS traffic shows up
+here. Check it, then click Start (it takes effect on the next Start; your
+firewall may ask whether to allow it). The row then shows the address and
+port to set as the proxy on the other device. On that device, with the
+proxy set, open `http://clearinet/` to download CLeARINET's root
+certificate, and follow the instructions on that page to install and trust
+it. Anyone on your network can use the proxy while this is on, so turn it
+off when you've finished, and remove the certificate from the other device.
 
 ## FiddlerScript
 
@@ -289,9 +361,8 @@ want to keep using.
 1. Drop the extension's `.dll` into `Documents\CLeARINET\LegacyExtensions\`.
    An extension still compiled against the real Fiddler assembly won't load
    as-is — see the pop-up/log message it produces for what to do, which
-   comes down to recompiling it (if you have its source) or re-targeting
-   its compiled metadata with the `Retarget-LegacyExtension.ps1` script
-   included alongside `Clearinet.LegacyExtensionHost.exe`.
+   comes down to recompiling it against `Clearinet.CompatShim` (if you
+   have its source).
 2. Check **Tools > Legacy Extension Host** to show the panel, then check
    "Launch Clearinet.LegacyExtensionHost.exe automatically on Start". With
    that on, clicking **Start** also launches the legacy host (if it isn't
@@ -311,6 +382,13 @@ want to keep using.
   `.saz` (Session Archive Zip) file on your Desktop.
 - **File > Open SAZ…** imports sessions from a previously saved `.saz` file
   back into the session list, exactly as if they'd just been captured live.
+- **File > Export HAR…** saves every session as an HTTP Archive (`.har`),
+  the format browsers' developer tools and many support teams use. Bodies
+  are saved decompressed, as text where they're text; CLeARINET doesn't
+  record timings, so those are zero.
+- **File > Import HAR…** adds sessions from a `.har` file, such as one
+  exported from a browser's developer tools. HAR files keep bodies
+  decompressed, so imported sessions don't have Content-Encoding headers.
 
 ## Settings that are remembered
 
@@ -319,7 +397,8 @@ and macOS:
 
 - The port choice (Auto or a specific port number)
 - Which Tools-menu panels are shown (FiddlerScript, Extensions, Legacy
-  Extension Host, Also Break On)
+  Extension Host, Also Break On, Connections)
+- The upstream proxy setting and whether remote computers may connect
 - The session filter text
 - The FiddlerScript path you last entered
 - Whether the legacy extension host launches automatically
@@ -356,6 +435,6 @@ had is lost. To reset every setting, quit CLeARINET and delete the file.
 
 CLeARINET is an early, working MVP, not a 1.0 release. See
 [README.md](../README.md)'s Known limitations section for what's
-deliberately not here yet (HAR import, replay beyond AutoResponder,
-little testing on a real Mac so far, and more) — that list is kept in one place, in README.md, rather than
+deliberately not here yet (plain `http://` capture, HTTP/2, proxies
+that need a sign-in, little testing on a real Mac so far, and more) — that list is kept in one place, in README.md, rather than
 duplicated here.

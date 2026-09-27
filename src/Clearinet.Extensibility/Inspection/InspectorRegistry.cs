@@ -43,6 +43,9 @@ public sealed class InspectorRegistry
         [
             new HeadersInspector(),
             new RawTextInspector(),
+            new JsonInspector(),
+            new WebFormsInspector(),
+            new ImageInspector(),
             new HexInspector(),
             new CookiesInspector(),
             new NotesInspector(),

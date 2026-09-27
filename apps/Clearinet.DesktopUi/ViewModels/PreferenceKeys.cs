@@ -28,6 +28,10 @@ internal static class PreferenceKeys
     public const string AutoLaunchLegacyHost = "clearinet.extensions.legacyhost.autolaunch";
 
     /// <summary>The Import/Export via Extension picker's last choice (see FormatChoice.Key), highlighted next time.</summary>
+    public const string ShowConnectionsRow = "clearinet.ui.panels.connections";
+    public const string UpstreamProxy = "clearinet.proxy.upstream";
+    public const string AllowRemoteClients = "clearinet.proxy.allowremote";
+
     public const string LastImportFormat = "clearinet.extensions.import.lastformat";
     public const string LastExportFormat = "clearinet.extensions.export.lastformat";
 }

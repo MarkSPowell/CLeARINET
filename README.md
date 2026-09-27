@@ -1,8 +1,11 @@
 # CLeARINET
 
 An open source HTTP(S) inspection tool for developers — a spiritual
-successor to Fiddler Web Debugger (Fiddler Classic), which Progress
-Software withdrew in September 2026.
+successor to Fiddler Web Debugger (Fiddler Classic), whose licence
+Progress Software changed in 2026 to allow non-commercial use only.
+CLeARINET is free for any use, under the MIT licence. It's an independent
+project, not affiliated with Progress or Telerik (see
+[Relationship to Fiddler](#relationship-to-fiddler)).
 
 ## Status
 
@@ -25,9 +28,23 @@ here yet. Feedback and issues are welcome.
   on why), plus `method:`, `host:`, and `status:` query tokens (exact,
   class like `4xx`, comparison, and range forms).
 - Request/response inspector tabs: Headers, Raw (decoded text, with
-  automatic decompression), Hex, Cookies (each cookie sent or set, with
+  automatic decompression), JSON (pretty-printed), WebForms (query string
+  and form fields, including multipart uploads), ImageView (the picture,
+  its format and pixel size, and any image bloat), Hex, Cookies (each cookie sent or set, with
   its attributes, and a warning for ones browsers will refuse) and Notes
   (flags an importer or extension attached to a session).
+- Image bloat detection: an Image Bloat column showing how much of each
+  PNG, JPEG, GIF or WebP is metadata, comments or other bytes that don't
+  change how it looks, with heavily bloated images highlighted.
+- A Composer tab for writing or editing a request and sending it, and
+  Replay (**R**) to send a captured request again. Both go through
+  CLeARINET itself, so the result is captured like any other traffic.
+- Forwarding through the network's own proxy: CLeARINET picks up the
+  proxy the computer used before it started, or one you set under
+  **Tools > Connections**.
+- Capturing phones and other computers: "Allow remote computers to
+  connect", and a page at `http://clearinet/` for installing CLeARINET's
+  certificate on the other device.
 - Rows in the session list can be coloured, bold, italic, struck through
   or hidden by an extension or importer (Fiddler's `ui-backcolor` and
   related session flags), and sessions can be removed from the list
@@ -94,7 +111,8 @@ here yet. Feedback and issues are welcome.
   panels on the main screen, so only what you're actually using takes up
   space.
 - Export captured sessions to a `.saz` (Session Archive Zip) file, or
-  import a previously saved one back in.
+  import a previously saved one back in; export and import HTTP Archive
+  (`.har`) files, the format browsers' developer tools use.
 - An automatic or manually-specified listening port (defaults to Auto).
 - Settings that persist between runs (port choice, Tools-menu panels,
   filter text and more), stored the same way on Windows and macOS in
@@ -186,7 +204,9 @@ way:
 - **macOS support is built, but has had little testing on a real Mac.**
   The first real install found the `.dmg`'s app reported as "damaged",
   because the hand-built app bundle wasn't signed as a whole; it's now
-  ad-hoc signed (see below), which still needs confirming on a Mac. Certificate
+  ad-hoc signed (see below), and CI checks the signature and that the app
+  launches after every macOS build; a hands-on check on a Mac is still to
+  come. Certificate
   trust (via the `security` CLI, into the login keychain, behind
   CLeARINET's own confirmation dialog since `security` has no OS-level
   install prompt the way Windows does) and system proxy registration (via
@@ -210,10 +230,17 @@ way:
   and a Preferences/`about:config` editor aren't there yet. Breakpoints
   and the AutoResponder's on/off switch deliberately always start off. See
   the Preferences Design doc.
-- **No built-in HAR or Chromium NetLog import.** NetLog import works
-  through Eric Lawrence's ported NetLog importer extension (see above),
-  an optional extension in the installers. No explicit HTTP/2 or TLS
-  1.3 handling yet.
+- **HTTPS only.** Plain `http://` requests aren't captured or forwarded
+  yet; CLeARINET answers them with a page saying so. The Composer and
+  Replay send HTTPS only, and their bodies as text.
+- **No built-in Chromium NetLog import.** NetLog import works through
+  Eric Lawrence's ported NetLog importer extension (see above), an
+  optional extension in the installers. No explicit HTTP/2 or TLS 1.3
+  handling yet.
+- **Upstream proxies: plain HTTP proxies only.** An automatic proxy
+  configuration script (PAC), a SOCKS proxy, or a proxy that asks you to
+  sign in can't be used yet; set the proxy's own `host:port` under
+  **Tools > Connections** if you know it.
 - **The main app's own compiled-extension support is source-level, not
   binary.** An already-compiled Fiddler Classic extension `.dll` can't be
   dropped straight into CLeARINET's own Extensions folder as-is; a new
@@ -230,11 +257,21 @@ way:
 
 ## Relationship to Fiddler
 
+CLeARINET is an independent open source project. It isn't affiliated
+with, endorsed by or sponsored by Progress Software Corporation or
+Telerik. Fiddler, Fiddler Classic, Fiddler Everywhere, FiddlerCore and
+Telerik are trademarks of Progress Software Corporation; CLeARINET uses
+those names only to describe what it's compatible with, and never
+presents itself, or anything it ships, as Fiddler.
+
 CLeARINET is built independently: from publicly available documentation,
 publicly observable behavior (such as the structure of `.saz` files
 produced by the real tool), and original design decisions — never from
-decompiled or leaked Fiddler source. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for the full clean-room policy that governs every contribution here.
+decompiled or leaked Fiddler source, and with no code from Fiddler. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the full clean-room policy that
+governs every contribution here. The optional extensions included with
+the installers are separate works by their authors, under their own
+licences (see `THIRD-PARTY-NOTICES.txt` alongside them).
 
 This project is also intended, eventually, to be contributed back to
 Eric Lawrence's [github.com/ericlaw1979/Clearinet](https://github.com/ericlaw1979/Clearinet).

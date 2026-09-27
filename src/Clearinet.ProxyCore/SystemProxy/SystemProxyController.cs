@@ -46,6 +46,34 @@ public static class SystemProxyController
     /// Restores whatever the system proxy was set to before the last
     /// <see cref="Enable"/> call, on whichever platform this is running on.
     /// </summary>
+    /// <summary>
+    /// The proxy this machine was set to use before CLeARINET registered
+    /// itself, for CLeARINET to forward its own connections through. Call
+    /// before <see cref="Enable"/>. Never throws: a failure to read the
+    /// settings is reported in the description and means "connect directly".
+    /// </summary>
+    public static UpstreamProxyDetection DetectUpstream(int ownPort)
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                return WinInetSystemProxy.DetectUpstream(ownPort);
+            }
+
+            if (OperatingSystem.IsMacOS())
+            {
+                return MacOSSystemProxy.DetectUpstream(ownPort);
+            }
+        }
+        catch (Exception ex)
+        {
+            return new UpstreamProxyDetection(null, $"couldn't read the system proxy settings ({ex.Message}), so connecting directly");
+        }
+
+        return UpstreamProxyDetection.None;
+    }
+
     public static void Disable()
     {
         if (OperatingSystem.IsWindows())

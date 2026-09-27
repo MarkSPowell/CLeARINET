@@ -6,11 +6,11 @@ supports today, lists what's missing and proposes an order. It's based on readin
 No Fiddler source was consulted (see the clean-room policy in
 CONTRIBUTING.md).
 
-**Where things stand (0.1.2 preview):** three of the four are working.
-The NetLog importer and the CSP Rule Collector run in CLeARINET on
-Windows and macOS; cookie viewing is built in, with Eric Lawrence's
-cookie sample ported as a test of the extension UI hooks; ImageBloat is
-waiting on its source and license. The Status table below is current; the gap analysis after it was
+**Where things stand:** all four are covered. The NetLog importer and the
+CSP Rule Collector run in CLeARINET on Windows and macOS; cookie viewing
+is built in, with Eric Lawrence's cookie sample ported as a test of the
+extension UI hooks; and image-bloat detection is built in, designed from
+the ImageBloat blog posts' description of what it does (no code from them). The Status table below is current; the gap analysis after it was
 written before the work started and is kept for its reasoning.
 
 | # | Extension | Source | License | Fiddler surface | UI coupling |
@@ -26,7 +26,7 @@ written before the work started and is kept for its reasoning.
 |---|---|---|
 | 1 | NetLog importer | **Ported (milestones 1 and 2).** Builds from upstream with only its three `using Fiddler;` lines deleted. Loads through `ExtensionHost` and imports on both platforms in CI (the extension-ports test step in `ci.yml`). See "NetLog port: known differences" below. Included with the installers as an optional extension. |
 | 2 | Cookie/P3P sample | **Built in, and ported as a test.** Cookie viewing is built in (the Cookies tab, `CookiesInspector`). The sample itself (Eric Lawrence's Privacy Scanner) is also ported, from Telerik's docs repo at a pinned commit, as the test of extension menus, flag-bound session-list columns and row colours. Also included with the installers as an optional extension, off by default. |
-| 3 | ImageBloat | **Waiting on its source and license.** Its GitHub repo isn't publicly available, so neither is confirmed. Proposed: build image-bloat detection in as CLeARINET's own feature. |
+| 3 | ImageBloat | **Built in.** CLeARINET's own `ImageBloatAnalyzer` finds bytes that don't change how a PNG, JPEG, GIF or WebP looks (metadata, comments, text, trailing data), shown in an Image Bloat column (heavily bloated rows are tinted) and on the ImageView tab. Designed from the published description of the extension's behaviour; its rules come from the format specifications, not its code. Not done: the extension's in-page overlay, which rewrites images in flight. |
 | 4 | CSP Rule Collector | **CLeARINET-only fork** ([MarkSPowell/CSP-CLeARINET-Extension](https://github.com/MarkSPowell/CSP-CLeARINET-Extension), builds `CLeARINETCSP.dll`). Its traffic code runs on the new per-request hooks (`ShimAutoTamperSet`) with only renames; its tab is rewritten in Avalonia. Fiddler Classic users keep the original. Headless tests in `tests/ExtensionPorts`, built from the fork at a pinned commit. Tried in the app against real sites. The fork also fixes two things that affect the original: current browsers report inline code and `eval()` as the keywords `inline`/`eval` (the original turned them into `inline:`), and rule order no longer depends on the machine's language settings. It adds **Tools > Hide CSP Report Requests**. Included with the installers as an optional extension. |
 
 ## Port or build in?
@@ -197,6 +197,9 @@ never loads WinForms, which doesn't exist on macOS.
 
 ### 3. ImageBloat (third, once the source is confirmed)
 
+**Superseded:** built in as CLeARINET's own feature instead (see the Status
+table). The notes below are kept for the reasoning.
+
 **Its GitHub repo isn't publicly available.** The source is published in
 the Telerik blog post, but that post's license isn't stated. **Don't build
 against it until the repo or a license for the blog listing is
@@ -281,7 +284,8 @@ has unit tests for it.
    CLeARINET-only fork. `x-replywithtunnel` turned out not to be needed:
    CLeARINET always answers CONNECT itself. **Done.**
 5. **Image-bloat detection built in** (see "Port or build in?"). It
-   replaces porting ImageBloat. **Not started.**
+   replaces porting ImageBloat. **Done** (column and ImageView breakdown;
+   the in-page overlay isn't).
 
 ## NetLog port: known differences
 

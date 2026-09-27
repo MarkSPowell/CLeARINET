@@ -39,12 +39,7 @@ happens:
   dialog is deliberately restrained about *how* to do that beyond
   recompiling -- see `AssemblyMismatch.ToDiagnosticMessage`'s own remarks
   for why it stops short of walking a reader through retargeting a
-  compiled binary's own metadata directly. For a developer who does want
-  to do that anyway, `..\Retarget-LegacyExtension.ps1` automates the
-  `AssemblyRef` edit for the common case (see its own `Get-Help`-style
-  comment header) -- `.\Retarget-LegacyExtension.ps1 -DllPath <path to
-  the extension .dll>` produces a `<name>.Retargeted.dll` you can drop
-  straight into `LegacyExtensions\`. See `AssemblyMismatch` in this
+  compiled binary's own metadata directly. See `AssemblyMismatch` in this
   project and the design doc's "Don't get sued" decision for the full
   reasoning.
 - **If it's been recompiled or re-targeted against `Clearinet.CompatShim`

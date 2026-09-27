@@ -39,9 +39,7 @@ of the box -- each one needs to be recompiled (if its source is
 available) or have its own `AssemblyRef` metadata re-targeted (a
 metadata-only edit -- see `AssemblyMismatch`'s own remarks) before it
 will bind here. Judged worth that cost. See the design doc for the full
-reasoning, including why the August 2026 change to Fiddler Classic's own
-licensing terms raised the stakes on this question, and why the project
-ultimately decided that rename closed it rather than waiting further.
+reasoning.
 
 ## Where every member came from
 

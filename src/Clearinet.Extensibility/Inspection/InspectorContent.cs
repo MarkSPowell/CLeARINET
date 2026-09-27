@@ -5,9 +5,9 @@ namespace Clearinet.Extensibility.Inspection;
 /// purpose: a host needs exactly one renderer per case here, ever, even
 /// for a third-party inspector it has never seen before. Growing this set
 /// is a breaking change to the whole plugin API, so it should only happen
-/// when an existing case genuinely can't express something new -- an
-/// image preview and a structured (JSON/XML) tree view are the two most
-/// likely next additions, once something actually needs them.
+/// when an existing case genuinely can't express something new, as
+/// <see cref="ImageContent"/> did for the ImageView tab. A structured
+/// (JSON/XML) tree view is the most likely next addition.
 /// </summary>
 public abstract record InspectorContent;
 
@@ -45,3 +45,12 @@ public sealed record HexContent(byte[] Bytes) : InspectorContent;
 /// whole detail pane down.
 /// </summary>
 public sealed record ErrorContent(string Message) : InspectorContent;
+
+/// <summary>
+/// An image to draw (the ImageView tab). <see cref="Bytes"/> is the decoded
+/// image file; <see cref="MediaType"/> is its Content-Type media type, which
+/// may be empty; <see cref="Summary"/> is a line of text to show with it
+/// (format, pixel dimensions, size). A host that can't draw the format still
+/// shows <see cref="Summary"/>.
+/// </summary>
+public sealed record ImageContent(byte[] Bytes, string MediaType, string Summary) : InspectorContent;

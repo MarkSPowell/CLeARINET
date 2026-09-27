@@ -75,6 +75,40 @@ public static class MacOSSystemProxy
     /// proxy state off, the same "don't leave it pointed at a dead port"
     /// posture <see cref="WinInetSystemProxy.Disable"/> takes.
     /// </summary>
+    /// <summary>
+    /// The HTTPS (or, failing that, HTTP) proxy an enabled network service
+    /// is set to use right now, for CLeARINET to forward through (see
+    /// <see cref="Proxy.UpstreamProxy"/>). Call before <see cref="Enable"/>
+    /// replaces the setting with CLeARINET itself. Ignores a setting that
+    /// points at CLeARINET's own <paramref name="ownPort"/>.
+    /// </summary>
+    [SupportedOSPlatform("macos")]
+    public static UpstreamProxyDetection DetectUpstream(int ownPort)
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return UpstreamProxyDetection.None;
+        }
+
+        foreach (var serviceName in ListEnabledNetworkServices())
+        {
+            var settings = CaptureServiceBackup(serviceName);
+            var proxy =
+                (settings.SecureWebProxyEnabled && settings.SecureWebProxyServer is { Length: > 0 } secureServer && settings.SecureWebProxyPort is { } securePort
+                    ? new Proxy.UpstreamProxy(secureServer, securePort)
+                    : null) ??
+                (settings.WebProxyEnabled && settings.WebProxyServer is { Length: > 0 } webServer && settings.WebProxyPort is { } webPort
+                    ? new Proxy.UpstreamProxy(webServer, webPort)
+                    : null);
+            if (proxy is not null && !proxy.IsSelf(ownPort))
+            {
+                return new UpstreamProxyDetection(proxy, $"forwarding through {proxy} ({serviceName} proxy settings)");
+            }
+        }
+
+        return UpstreamProxyDetection.None;
+    }
+
     [SupportedOSPlatform("macos")]
     public static void Disable()
     {

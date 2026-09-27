@@ -22,6 +22,11 @@ public partial class MainWindow : Window
         Patterns = ["*.saz"],
     };
 
+    private static readonly FilePickerFileType HarFileType = new("HTTP Archive (*.har)")
+    {
+        Patterns = ["*.har"],
+    };
+
     /// <summary>
     /// Filters <see cref="BrowseFiddlerScriptButton_Click"/>'s own
     /// picker down to <c>*.js</c> -- real FiddlerScript's default,
@@ -83,6 +88,7 @@ public partial class MainWindow : Window
         if (_viewModel is not null)
         {
             _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            _viewModel.ComposerShowRequested -= ShowComposerTab;
         }
 
         _viewModel = DataContext as MainWindowViewModel;
@@ -90,6 +96,7 @@ public partial class MainWindow : Window
         if (_viewModel is not null)
         {
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+            _viewModel.ComposerShowRequested += ShowComposerTab;
             RefreshScriptColumns();
             AddExtensionTabs(_viewModel);
             AttachExtensionMenusAndColumns();
@@ -226,9 +233,20 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>The Delete key removes the selected session, as Edit > Remove Selected Session does.</summary>
+    private void ShowComposerTab() => DetailTabs.SelectedItem = ComposerTab;
+
+    /// <summary>The Delete key removes the selected session, as Edit > Remove Selected Session does; R replays it, as Edit > Replay Selected Session does.</summary>
     private void SessionsDataGrid_KeyDown(object? sender, KeyEventArgs e)
     {
+        // R replays the selected session, as Fiddler Classic's Reissue.
+        if (e.Key == Key.R && e.KeyModifiers == KeyModifiers.None &&
+            _viewModel?.ReplaySelectedSessionCommand is { } replay && replay.CanExecute(null))
+        {
+            replay.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Delete && e.KeyModifiers == KeyModifiers.None &&
             _viewModel?.RemoveSelectedSessionCommand is { } remove && remove.CanExecute(null))
         {
@@ -332,6 +350,46 @@ public partial class MainWindow : Window
         }
 
         await viewModel.ImportSazAsync(file.Path.LocalPath);
+    }
+
+    private async void ImportHarMenuItem_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel || GetTopLevel(this) is not { } topLevel)
+        {
+            return;
+        }
+
+        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Import HAR",
+            AllowMultiple = false,
+            FileTypeFilter = [HarFileType, FilePickerFileTypes.All],
+        });
+        if (files.Count > 0)
+        {
+            await viewModel.ImportHarAsync(files[0].Path.LocalPath);
+        }
+    }
+
+    private async void ExportHarMenuItem_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel viewModel || GetTopLevel(this) is not { } topLevel)
+        {
+            return;
+        }
+
+        var file = await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Export HAR",
+            SuggestedFileName = $"clearinet-capture-{DateTime.Now:yyyyMMdd-HHmmss}.har",
+            DefaultExtension = "har",
+            FileTypeChoices = [HarFileType],
+            ShowOverwritePrompt = true,
+        });
+        if (file is not null)
+        {
+            await viewModel.ExportHarAsync(file.Path.LocalPath);
+        }
     }
 
     /// <summary>
