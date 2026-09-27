@@ -1,0 +1,72 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Eric Lawrence's FiddlerImportNetlog, built unmodified (apart from
+       port.ps1 deleting its `using Fiddler;` lines) against CLeARINET's
+       Fiddler-shaped compatibility layer. Not part of CLeARINET.sln: it
+       needs the upstream source, which port.ps1 fetches into ../.work/.
+       See ../README.md. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Shipped as CLeARINETNetLog.dll: CLeARINET doesn't put "Fiddler" in
+         the names of files it installs (tenet 5). The source is unchanged. -->
+    <AssemblyName>CLeARINETNetLog</AssemblyName>
+    <RootNamespace>FiddlerImportNetlog</RootNamespace>
+
+    <!-- Upstream code is .NET Framework-era C#: no implicit usings, no
+         nullable annotations, and its own Properties/AssemblyInfo.cs. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+
+    <!-- Warnings upstream code raises on modern .NET, none of which the
+         port changes: obsolete certificate APIs (SYSLIB0026/0057, see the
+         Extension Test Targets doc), and unused locals/fields. -->
+    <NoWarn>$(NoWarn);SYSLIB0026;SYSLIB0057;CS0168;CS0169;CS0219;CS0162;CS0414;CS0649;CS1998</NoWarn>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+    <!-- Always built the way the extension ships (Release), whatever
+         configuration the tests run in. Upstream code calls Debug.Assert on
+         paths it expects to hit in normal use. For example, the JSON parser
+         asserts before returning "couldn't parse" for a truncated capture,
+         which the importer then repairs. Released builds compile those
+         asserts out; a Debug build would make them throw inside the test
+         host instead of behaving the way users see it. -->
+    <Optimize>true</Optimize>
+
+    <PortedSourceDir>$(MSBuildThisFileDirectory)../.work/FiddlerImportNetlog/</PortedSourceDir>
+
+    <!-- A fixed, predictable place for the .dll, so the port tests can load
+         it through ExtensionHost exactly as the app would. -->
+    <OutputPath>$(MSBuildThisFileDirectory)../.work/bin/FiddlerImportNetlog/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <!-- Removes DEBUG right before compiling, after the SDK has finished
+       adding its own constants for the current configuration, so the
+       upstream Debug.Assert calls are compiled out (see above). -->
+  <Target Name="BuildPortLikeRelease" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <DefineConstants>$([System.Text.RegularExpressions.Regex]::Replace('$(DefineConstants)', '(^|;)\s*DEBUG\s*(?=;|$)', ''))</DefineConstants>
+    </PropertyGroup>
+    <Message Importance="high" Text="FiddlerImportNetlog port compiled with constants: $(DefineConstants)" />
+  </Target>
+
+  <Target Name="RequirePortedSource" BeforeTargets="BeforeBuild" Condition="!Exists('$(PortedSourceDir)Importer.cs')">
+    <Error Text="The ported FiddlerImportNetlog source isn't at $(PortedSourceDir). Run tests/ExtensionPorts/port.ps1 first (see tests/ExtensionPorts/README.md)." />
+  </Target>
+
+  <ItemGroup>
+    <Compile Include="$(PortedSourceDir)**/*.cs" />
+    <Compile Include="PortGlobalUsings.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Private=false: the host supplies Clearinet.Compatibility at run time;
+         a second copy next to the extension must never be loaded (see
+         ExtensionHost's load context). -->
+    <ProjectReference Include="../../../src/Clearinet.Compatibility/Clearinet.Compatibility.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Eric Lawrence's Privacy Scanner (cookies and P3P), the sample in
+       Telerik's Fiddler docs (Apache-2.0), built against CLeARINET's
+       Fiddler-shaped compatibility layer. port.ps1 fetches it into
+       ../.work/PrivacyScanner/ and makes the port's only changes (see
+       ../README.md). A test of extension menus, flag-bound session-list
+       columns and row colours. Also offered as an optional extension by the
+       installers (off by default; see installer/build-extensions.ps1). -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>PrivacyScanner</AssemblyName>
+    <RootNamespace>PrivacyScanner</RootNamespace>
+
+    <!-- The sample is .NET Framework-era C# with its own assembly attributes. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NoWarn>$(NoWarn);CS0168;CS0169;CS0219;CS0162;CS0414;CS0649</NoWarn>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+    <PortedSourceDir>$(MSBuildThisFileDirectory)../.work/PrivacyScanner/</PortedSourceDir>
+    <OutputPath>$(MSBuildThisFileDirectory)../.work/bin/PrivacyScanner/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <Target Name="RequirePortedSource" BeforeTargets="BeforeBuild" Condition="!Exists('$(PortedSourceDir)TagCookies.cs')">
+    <Error Text="The ported Privacy Scanner source isn't at $(PortedSourceDir). Run tests/ExtensionPorts/port.ps1 first (see tests/ExtensionPorts/README.md)." />
+  </Target>
+
+  <ItemGroup>
+    <Compile Include="$(PortedSourceDir)**/*.cs" />
+    <Compile Include="PortGlobalUsings.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Clearinet.Compatibility/Clearinet.Compatibility.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>

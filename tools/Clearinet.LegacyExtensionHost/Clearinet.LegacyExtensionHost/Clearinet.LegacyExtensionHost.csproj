@@ -1,0 +1,119 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A separate, optional legacy-runtime process: see the design doc's
+    "Sizing option 1" section. Deliberately NOT referenced by the main
+    CLeARINET.sln/apps/Clearinet.DesktopUi. This stays an independently
+    built, independently shipped component so it can never affect the main
+    app's build or release.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>Clearinet.LegacyExtensionHost</AssemblyName>
+    <RootNamespace>Clearinet.LegacyExtensionHost</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <!--
+      Pinned to x86 (not AnyCPU): real testing against AustralianImages.dll
+      found its own PE/CLI header explicitly sets COMIMAGE_FLAGS_32BITREQUIRED,
+      so it can only load into a 32-bit process; without this the .exe
+      runs 64-bit on a 64-bit OS and refuses it with a BadImageFormatException
+      ("incorrect format"). Real Fiddler Classic itself always ran 32-bit,
+      which is presumably why extensions like this one were ever compiled
+      32-bit-only in the first place. The other four samples inspected
+      (SAZClipboard, ContentBlock, JSFormat, Differ) are plain AnyCPU and run
+      fine either way, so pinning x86 here is strictly more compatible with
+      real Fiddler Classic extensions, not less.
+    -->
+    <PlatformTarget>x86</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- For FiddlerAssemblyReferenceInspector's pure-metadata AssemblyRef
+         read (PEReader/MetadataReader): reads a candidate extension's
+         referenced-assembly table without loading or executing it. -->
+    <PackageReference Include="System.Reflection.Metadata" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Clearinet.LegacyExtensionHost.CompatShim\Clearinet.LegacyExtensionHost.CompatShim.csproj" />
+    <!-- The session bridge's shared wire contract (see that project's own
+         csproj remarks on why netstandard2.0 is the meeting point).
+         SessionBridgeServer/SessionBridgeRunner use it to talk to the main
+         app's Clearinet.Compatibility.Extensions.LegacyExtensionHostBridgeClient. -->
+    <ProjectReference Include="..\Clearinet.LegacyExtensionHost.Bridge\Clearinet.LegacyExtensionHost.Bridge.csproj" />
+  </ItemGroup>
+
+  <!--
+    Copies this project's own build output into apps\Clearinet.DesktopUi's
+    own build output, under a "LegacyHost" subfolder: the other half of
+    the fixed path convention LegacyExtensionHostLauncher.ExpectedExecutablePath
+    already expects (AppContext.BaseDirectory\LegacyHost\Clearinet.LegacyExtensionHost.exe).
+    Flagged as an open gap in the design doc's "legacy host launch/stop
+    lifecycle" section when that convention was chosen: it's the
+    INSTALLED-release layout, not what a bare `dotnet build`/`dotnet run`
+    (or F5 in Visual Studio) of Clearinet.DesktopUi produces on its own,
+    so without this, AutoLaunchLegacyHost's Start flow would report
+    NotFound on every dev machine until someone copied these files there
+    by hand (which is exactly what had been happening).
+
+    Deliberately placed here, not in Clearinet.DesktopUi.csproj: this
+    project already documents itself above as intentionally NOT referenced
+    by the main app's build, specifically so nothing about this host can
+    ever affect or break the main app's own build. Pointing the copy the
+    other way (this project reaching into Clearinet.DesktopUi's OWN
+    output directory after ITS OWN build finishes) keeps that
+    one-directional: Clearinet.DesktopUi.csproj stays untouched and still
+    builds (or fails) with zero knowledge this project even exists.
+    Building this project is what additionally seeds Clearinet.DesktopUi's
+    next run with a fresh LegacyHost folder; skipping this project's build
+    (as CI and the installer already do; see the "independently built,
+    independently shipped" comment above) just means that folder doesn't
+    get refreshed, not that anything else breaks.
+
+    AfterTargets="Build", not "AfterBuild": AfterBuild only fires for the
+    top-level project MSBuild was actually invoked on, which would
+    silently skip this step during e.g. `dotnet build CLeARINET.sln` even
+    though this project's own Build target still ran as one of the
+    solution's dependencies. AfterTargets hooks the Build target itself,
+    so it fires no matter which project triggered the build.
+
+    Assumes both projects build with the same $(Configuration)
+    (Debug/Release) at the same time, which is how the solution is
+    normally built; there's no cross-project way to know
+    Clearinet.DesktopUi's Configuration otherwise. Also assumes neither
+    project sets RuntimeIdentifier(s) (neither does today; see each
+    csproj's own PropertyGroup), since that would add a runtime-identifier
+    path segment to one output path but not necessarily the other, and
+    this target doesn't account for that.
+
+    Best-effort: skipped entirely (via the Condition on the Copy itself)
+    if Clearinet.DesktopUi hasn't been built at all yet under this
+    Configuration. Its own output folder won't exist yet, and this
+    project has no business creating it, or failing its own build, over a
+    sibling project's build state.
+  -->
+  <Target Name="CopyOutputToDesktopUiLegacyHostFolder" AfterTargets="Build">
+    <PropertyGroup>
+      <DesktopUiOutputDir>$(MSBuildThisFileDirectory)..\..\..\apps\Clearinet.DesktopUi\bin\$(Configuration)\net10.0\</DesktopUiOutputDir>
+      <LegacyHostTargetDir>$(DesktopUiOutputDir)LegacyHost\</LegacyHostTargetDir>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <LegacyHostOutputFiles Include="$(OutDir)**\*.*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(LegacyHostOutputFiles)"
+          DestinationFolder="$(LegacyHostTargetDir)%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(DesktopUiOutputDir)')" />
+  </Target>
+
+</Project>

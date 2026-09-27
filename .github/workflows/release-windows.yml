@@ -1,0 +1,181 @@
+name: Release Windows Installer
+
+# Builds a self-contained win-x64 publish of the desktop app, packages it
+# with Inno Setup into one setup.exe that can install either per-machine
+# (Program Files, needs an admin elevation prompt) or per-user (the current
+# user's own AppData\Local\Programs folder, no admin needed at all -- the
+# person picks at install time; see installer/CLeARINET.iss for how), and
+# attaches that installer to the GitHub Release for the pushed tag. Separate
+# from ci.yml on purpose: ci.yml runs on every push/PR to build+test both
+# supported OSes; this only runs on an actual version tag, and only builds
+# for Windows, since Inno Setup itself is Windows-only tooling and this
+# workflow's whole job is producing a release artifact, not verifying the
+# code.
+#
+# Also runnable by hand (workflow_dispatch) for a test build without
+# cutting a real tag/Release -- see the "version" input below. A manual run
+# still uploads the installer as a build artifact (Actions tab -> this
+# run -> Artifacts), it just never touches a GitHub Release, since
+# softprops/action-gh-release below is explicitly gated on this being a
+# tag push.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >-
+          Version to stamp a manual test build with (e.g. 0.1.0). Ignored
+          on a real tag push, which derives this from the tag itself
+          instead.
+        required: false
+        default: "0.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Determine version
+        id: version
+        shell: pwsh
+        run: |
+          # A tag push always wins over the workflow_dispatch input -- the
+          # tag is the actual source of truth for a real release; the
+          # input only exists for a manual test build with no tag at all.
+          if ($env:GITHUB_REF -like "refs/tags/v*") {
+            $version = $env:GITHUB_REF -replace "refs/tags/v", ""
+          } else {
+            $version = "${{ inputs.version }}"
+            if ([string]::IsNullOrWhiteSpace($version)) {
+              $version = "0.0.0"
+            }
+          }
+          Write-Host "Building installer version $version"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+          # A separate, strictly-numeric X.X.X.X derivative of the version
+          # above, for the two places downstream that can't accept a
+          # prerelease suffix like "-preview.1" at all: dotnet publish's
+          # own AssemblyVersion/FileVersion (InformationalVersion, set
+          # alongside it below, is what keeps the full string -- see
+          # AboutWindow.axaml.cs's own remarks) and Inno Setup's
+          # VersionInfoVersion directive (installer/CLeARINET.iss's own
+          # VersionInfoTextVersion is the equivalent full-string escape
+          # hatch there). Drops everything from the first "-" onward, then
+          # pads with trailing ".0"s so there are always exactly four
+          # numeric components -- both targets are stricter about the
+          # component count than they are forgiving about a missing one.
+          $versionCore = ($version -split "-")[0]
+          $parts = @($versionCore -split "\.")
+          while ($parts.Count -lt 4) {
+            $parts += "0"
+          }
+          $fileVersion = ($parts[0..3] -join ".")
+          Write-Host "Numeric file/product version: $fileVersion"
+          echo "fileVersion=$fileVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        run: dotnet restore CLeARINET.sln
+
+      # Self-contained: bundles the .NET 10 runtime into the published
+      # output, so the installer works on a machine with no .NET installed
+      # at all -- CLeARINET's own users are the target audience this
+      # matters for, not developers who already have the SDK. Publishing
+      # only the desktop app project (not the whole solution) is
+      # deliberate: DevHost/FiddlerScriptDemo/SampleExtension and the test
+      # projects are developer-only tools, not part of what ships to an
+      # end user. PublishSingleFile bundles the app's own assemblies into
+      # one .exe; loose content files (like the bundled User Guide.md --
+      # see Clearinet.DesktopUi.csproj's own None/Link entry for it) are
+      # NOT folded into that single file by design, and still land next to
+      # it in the publish output, which is exactly what
+      # OpenDocumentationCommand's AppContext.BaseDirectory-relative path
+      # expects.
+      - name: Publish self-contained win-x64 build
+        run: >-
+          dotnet publish apps/Clearinet.DesktopUi/Clearinet.DesktopUi.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:InformationalVersion=${{ steps.version.outputs.version }}
+          --output publish/win-x64
+
+                # Independently built from the main app on purpose -- see this
+      # project's own csproj header comment ("deliberately NOT referenced
+      # by the main CLeARINET.sln/apps/Clearinet.DesktopUi... so it can
+      # never affect the main app's build or release"). This step exists
+      # only so the installer below has something to package for the
+      # optional "legacyhost" Task; skipping/failing it would never affect
+      # the main app's own publish step above, which already ran.
+      #
+      # Plain `dotnet build` with --output, not `dotnet publish`: this is a
+      # net48 project (framework-dependent, not self-contained the way the
+      # win-x64 net10 app above is -- .NET Framework 4.8 ships with Windows
+      # 10/11 already, the same dependency real Fiddler Classic itself
+      # had), so there's no publish-specific packaging step to gain here.
+      # --output flattens this project's own build output *and* its
+      # ProjectReferences' outputs (Clearinet.CompatShim.dll,
+      # Clearinet.LegacyExtensionHost.Bridge.dll) into one folder, exactly
+      # matching what Clearinet.LegacyExtensionHost.csproj's own
+      # CopyOutputToDesktopUiLegacyHostFolder dev-build step already copies
+      # into a local LegacyHost folder -- see that target's own remarks.
+      # No explicit --runtime win-x86: the project's own PlatformTarget=x86
+      # (pinned for real extensions like AustralianImages.dll that only
+      # load 32-bit) already governs the bitness of what gets built; win-x86
+      # would ask for a self-contained-style RID-qualified output this
+      # framework-dependent project doesn't need.
+      - name: Build legacy extension host (optional installer component)
+        run: >-
+          dotnet build tools/Clearinet.LegacyExtensionHost/Clearinet.LegacyExtensionHost/Clearinet.LegacyExtensionHost.csproj
+          --configuration Release
+          --output publish/legacyhost
+
+      - name: Build optional extensions
+        shell: pwsh
+        run: ./installer/build-extensions.ps1 -OutputDir publish/extensions
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DMyAppVersion=${{ steps.version.outputs.version }}" `
+            "/DMyFileVersion=${{ steps.version.outputs.fileVersion }}" `
+            "/DPublishDir=${{ github.workspace }}\publish\win-x64" `
+            "/DLegacyHostDir=${{ github.workspace }}\publish\legacyhost" `
+            "/DExtensionsDir=${{ github.workspace }}\publish\extensions" `
+            installer\CLeARINET.iss
+
+      - name: Upload installer as a build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: CLeARINET-Setup-${{ steps.version.outputs.version }}
+          path: installer/Output/CLeARINET-Setup-*.exe
+          if-no-files-found: error
+
+      # Only on a real tag push -- a workflow_dispatch test build has no
+      # Release to attach to, and shouldn't create one on your behalf.
+      - name: Attach installer to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/Output/CLeARINET-Setup-*.exe
+          fail_on_unmatched_files: true

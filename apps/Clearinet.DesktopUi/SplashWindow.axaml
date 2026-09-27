@@ -1,0 +1,22 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Clearinet.DesktopUi.SplashWindow"
+        Title="CLeARINET"
+        Width="768"
+        Height="429"
+        CanResize="False"
+        WindowDecorations="None"
+        WindowStartupLocation="CenterScreen"
+        ShowInTaskbar="False"
+        Background="#0B0E1A"
+        Icon="avares://Clearinet.DesktopUi/Assets/clearinet.webp">
+
+  <!-- clearinet.webp is the whole splash design in one image, logo,
+       wordmark, tagline and even its own "Initializing..." progress bar
+       are already baked into the artwork at its native 768x429, so this
+       window is just an undecorated frame for it while MainWindow spins
+       up behind the scenes. See App.axaml.cs for how long it stays up and
+       when MainWindow takes over. -->
+  <Image Source="avares://Clearinet.DesktopUi/Assets/clearinet.webp"
+         Stretch="Uniform" />
+</Window>

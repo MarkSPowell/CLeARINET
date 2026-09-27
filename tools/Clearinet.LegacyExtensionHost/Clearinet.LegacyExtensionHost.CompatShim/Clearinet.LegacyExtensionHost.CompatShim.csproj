@@ -1,0 +1,84 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The binary-compatibility shim. AssemblyName is deliberately
+    "Clearinet.CompatShim", NOT "Fiddler", see the ".NET Extension
+    Compatibility Design" doc's "Don't get sued" decision (following the
+    project plan's own tenet 5): shipping an assembly whose own identity
+    presents itself, at the binary level, as the real Fiddler assembly was
+    judged too much trademark exposure to ship, regardless of how the
+    clean-room member surface itself was derived. This project's own honest
+    name is used instead; real extensions compiled against the actual
+    "Fiddler" assembly won't bind to this unmodified (see
+    Clearinet.LegacyExtensionHost's own LegacyExtensionLoader and its
+    assembly-mismatch diagnostic for what happens instead, and the design
+    doc for the full reasoning and what a user can do about it).
+
+    Renamed twice, not once: first from "Fiddler" to "Clearinet.Fiddler"
+    (dropped the exact binary identity real extensions bind to), then from
+    "Clearinet.Fiddler" to this project's current name (dropped "Fiddler"
+    from the assembly's own identity entirely, leaving only nominative
+    references: prose describing compatibility, diagnostic messages that
+    name "Fiddler" to explain a mismatch, the same kind of descriptive
+    use a compatible third-party accessory makes when it says what it's
+    compatible with). See the design doc for the full reasoning.
+
+    Deliberately NOT strong-named (no SignAssembly/key file): unrelated to
+    the identity question above, an unsigned assembly is still required
+    for anyone who does recompile or re-target a real extension against
+    this shim, since all five real compiled extensions this project
+    inspected reference an unsigned "Fiddler" assembly, and a
+    strong-named replacement wouldn't satisfy that shape either.
+
+    net48, not net10.0: this assembly exists specifically because
+    System.Windows.Forms.MenuItem/MainMenu/ContextMenu/StatusBarPanel
+    were removed outright from WinForms on .NET 5+ (confirmed via
+    Microsoft's own WinForms breaking-change docs and a real
+    TypeLoadException report; see the design doc). Only actual .NET
+    Framework still has them, which is the entire reason this lives in
+    a separate legacy host process rather than CLeARINET's main
+    Avalonia/.NET 10 app.
+
+    Every member below is reproduced from this project's own read-only
+    ECMA-335 metadata inspection of five real compiled extension .dll's
+    (AustralianImages, ContentBlock, JSFormat, SAZClipboard, Differ):
+    method/field names, parameter types, and return types only. No IL
+    method body, decompiled logic, or .cs source file was used to write
+    any of these members; see the design doc's clean-room section and
+    each file's own remarks for exactly which sample(s) each member
+    traces back to.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>Clearinet.CompatShim</AssemblyName>
+    <RootNamespace>Clearinet.CompatShim</RootNamespace>
+    <AssemblyVersion>2.4.2.5</AssemblyVersion>
+    <!-- SDK-style csproj defaults LangVersion low for net48 targets unless told otherwise. -->
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <!-- Never sign this: see the remarks above. -->
+    <SignAssembly>false</SignAssembly>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Classic .NET Framework GAC references, not NuGet packages: the
+         UseWindowsForms SDK property is for net5.0-windows+ TFMs and
+         doesn't apply the same way under net48. -->
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <!-- For SazArchive.cs's real .saz read/write: on classic .NET
+         Framework the static System.IO.Compression.ZipFile convenience
+         class (OpenRead/Open/etc.) lives in a separate assembly, apart from
+         ZipArchive itself; both are needed explicitly, since this SDK-style
+         net48 project's implicit default references aren't guaranteed to
+         include either. -->
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <!-- For parsing/writing _m.xml session metadata via XDocument/XElement. -->
+    <Reference Include="System.Xml.Linq" />
+  </ItemGroup>
+
+</Project>

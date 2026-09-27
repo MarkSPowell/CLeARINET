@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Clearinet.FiddlerScriptDemo</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Clearinet.Compatibility\Clearinet.Compatibility.csproj" />
+    <ProjectReference Include="..\..\src\Clearinet.ProxyCore\Clearinet.ProxyCore.csproj" />
+  </ItemGroup>
+
+  <!-- Copied next to the built exe so Program.cs can find it via
+       AppContext.BaseDirectory regardless of the working directory
+       `dotnet run` happens to be invoked from. -->
+  <ItemGroup>
+    <None Include="SampleCustomRules.js" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

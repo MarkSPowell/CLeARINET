@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests for the legacy extension host, added only to this sub-project's
+    own Clearinet.LegacyExtensionHost.sln, never to the main CLeARINET.sln,
+    for the same reason the host and shim projects themselves aren't
+    referenced from there (see their own csproj remarks).
+
+    net48, not net10.0, and PlatformTarget=x86: this test process loads the
+    same real compiled Fiddler Classic extension DLLs the host does, via
+    the real Clearinet.LegacyExtensionHost.LegacyExtensionLoader (not a
+    reimplementation), so it needs to be binary-compatible with them the
+    same way the host process is, including AustralianImages.dll's own
+    32-bit-only requirement (see Clearinet.LegacyExtensionHost.csproj's own
+    remarks on COMIMAGE_FLAGS_32BITREQUIRED).
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+    <IsPackable>false</IsPackable>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>Clearinet.LegacyExtensionHost.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Clearinet.LegacyExtensionHost.CompatShim\Clearinet.LegacyExtensionHost.CompatShim.csproj" />
+    <ProjectReference Include="..\Clearinet.LegacyExtensionHost\Clearinet.LegacyExtensionHost.csproj" />
+    <!-- For SessionBridgeRunnerTests/SessionBridgeServerTests' own use of
+         BridgeRequestMessage/BridgeResponseMessage/WireRequest/WireResponse/
+         SessionBridgeProtocol directly. -->
+    <ProjectReference Include="..\Clearinet.LegacyExtensionHost.Bridge\Clearinet.LegacyExtensionHost.Bridge.csproj" />
+  </ItemGroup>
+
+</Project>
