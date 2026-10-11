@@ -49,6 +49,12 @@ namespace Clearinet.ProxyCore.Sessions;
 /// none, so the common case costs nothing. Kept here so an import loses
 /// nothing; showing them in the UI and writing them to SAZ are follow-ups
 /// (see the Extension Test Targets doc).
+///
+/// <see cref="Scheme"/> is "https" for a request that came through a
+/// CONNECT tunnel, or "http" for a plain HTTP one. Either way the request
+/// target is the path and query, and the server is named by
+/// <see cref="Host"/> and the Host header (see <c>SessionUrl.Of</c> for the
+/// full URL).
 /// </summary>
 public sealed record Session(
     int Id,
@@ -57,7 +63,8 @@ public sealed record Session(
     CapturedRequest Request,
     CapturedResponse Response,
     SessionState State = SessionState.Done,
-    IReadOnlyDictionary<string, string>? Flags = null)
+    IReadOnlyDictionary<string, string>? Flags = null,
+    string Scheme = "https")
 {
     /// <summary>
     /// The original six-argument constructor, kept for binary compatibility:
@@ -67,8 +74,26 @@ public sealed record Session(
     /// SessionBinaryCompatibilityTests.
     /// </summary>
     public Session(int Id, string Host, DateTimeOffset StartedAt, CapturedRequest Request, CapturedResponse Response, SessionState State)
-        : this(Id, Host, StartedAt, Request, Response, State, null)
+        : this(Id, Host, StartedAt, Request, Response, State, null, "https")
     {
+    }
+
+    /// <summary>
+    /// The seven-argument constructor from before <see cref="Scheme"/> was
+    /// added, kept for the same reason (an HTTPS session).
+    /// </summary>
+    public Session(int Id, string Host, DateTimeOffset StartedAt, CapturedRequest Request, CapturedResponse Response, SessionState State, IReadOnlyDictionary<string, string>? Flags)
+        : this(Id, Host, StartedAt, Request, Response, State, Flags, "https")
+    {
+    }
+
+    /// <summary>The seven-value deconstruction from before <see cref="Scheme"/>, kept for the same reason.</summary>
+    public void Deconstruct(
+        out int Id, out string Host, out DateTimeOffset StartedAt, out CapturedRequest Request, out CapturedResponse Response, out SessionState State,
+        out IReadOnlyDictionary<string, string>? Flags)
+    {
+        Deconstruct(out Id, out Host, out StartedAt, out Request, out Response, out State);
+        Flags = this.Flags;
     }
 
     /// <summary>The original six-value deconstruction, kept for the same reason.</summary>

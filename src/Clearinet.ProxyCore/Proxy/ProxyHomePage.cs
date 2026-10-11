@@ -87,14 +87,14 @@ public static class ProxyHomePage
     }
 
     /// <summary>
-    /// The answer to a plain-HTTP request for a website: CLeARINET only
-    /// forwards HTTPS so far.
+    /// The answer to a request CLeARINET can't forward: one sent without a
+    /// CONNECT tunnel whose URL isn't http:// (an ftp:// URL, say).
     /// </summary>
     public static CapturedResponse NotForwarded(string method, string target) =>
         Text(
             501,
             "Not Implemented",
-            $"CLeARINET only captures HTTPS so far, so it didn't forward this plain-HTTP request ({method} {target}). " +
+            $"CLeARINET forwards http:// and https:// requests only, so it didn't forward this one ({method} {target}). " +
             $"To install CLeARINET's certificate on this device, browse to http://{HostName}/ with the proxy set.");
 
     private static CapturedResponse Text(int status, string reason, string message)

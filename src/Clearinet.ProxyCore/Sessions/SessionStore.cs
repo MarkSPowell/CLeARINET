@@ -29,24 +29,41 @@ public sealed class SessionStore
         Add(host, startedAt, request, response, flags: null);
 
     /// <summary>
-    /// As <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/>,
-    /// for a session that arrives already carrying Fiddler-style string
-    /// flags -- see <see cref="Session.Flags"/>. An empty dictionary is
-    /// stored as null.
+    /// As <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse, IReadOnlyDictionary{string, string}?, string)"/>
+    /// for an HTTPS session. Kept as its own overload (rather than a
+    /// default parameter value) so extensions compiled against an earlier
+    /// CLeARINET still find it.
     /// </summary>
     public Session Add(
         string host,
         DateTimeOffset startedAt,
         CapturedRequest request,
         CapturedResponse response,
-        IReadOnlyDictionary<string, string>? flags)
+        IReadOnlyDictionary<string, string>? flags) =>
+        Add(host, startedAt, request, response, flags, "https");
+
+    /// <summary>
+    /// As <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/>,
+    /// for a session that arrives already carrying Fiddler-style string
+    /// flags -- see <see cref="Session.Flags"/>. An empty dictionary is
+    /// stored as null. <paramref name="scheme"/> is "https"
+    /// or "http" -- see <see cref="Session.Scheme"/>.
+    /// </summary>
+    public Session Add(
+        string host,
+        DateTimeOffset startedAt,
+        CapturedRequest request,
+        CapturedResponse response,
+        IReadOnlyDictionary<string, string>? flags,
+        string scheme)
     {
         Session session;
         lock (_gate)
         {
             session = new Session(
                 _nextId++, host, startedAt, request, response,
-                Flags: flags is { Count: > 0 } ? flags : null);
+                Flags: flags is { Count: > 0 } ? flags : null,
+                Scheme: scheme);
             _sessions.Add(session);
         }
 

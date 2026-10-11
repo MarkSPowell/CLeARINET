@@ -92,7 +92,7 @@ public static class Http1MessageReader
 
         var body = ResponseHasNoBody(preamble.StatusCode, isResponseToHeadRequest)
             ? Array.Empty<byte>()
-            : await ReadBodyAsync(source, preamble.Headers, cancellationToken);
+            : await ReadResponseBodyAsync(source, preamble.Headers, cancellationToken);
         return preamble with { Body = body };
     }
 
@@ -216,6 +216,96 @@ public static class Http1MessageReader
         }
 
         return Task.FromResult(Array.Empty<byte>());
+    }
+
+    /// <summary>
+    /// True when a response has neither <c>Transfer-Encoding: chunked</c>
+    /// nor <c>Content-Length</c>, so its body runs until the server closes
+    /// the connection (RFC 9112 section 6.3) -- common from older servers,
+    /// and on plain HTTP. The connection can't carry another exchange after
+    /// one of these.
+    /// </summary>
+    public static bool IsCloseDelimited(IReadOnlyList<(string Name, string Value)> headers)
+    {
+        var transferEncoding = FindHeader(headers, "Transfer-Encoding");
+        return !(transferEncoding is not null && transferEncoding.Contains("chunked", StringComparison.OrdinalIgnoreCase)) &&
+               FindHeader(headers, "Content-Length") is null;
+    }
+
+    /// <summary>
+    /// Reads a response body: like <see cref="ReadBodyAsync"/>, except that a
+    /// response with no framing (see <see cref="IsCloseDelimited"/>) is read
+    /// until the connection closes rather than treated as empty.
+    /// </summary>
+    public static Task<byte[]> ReadResponseBodyAsync(
+        Stream source, IReadOnlyList<(string Name, string Value)> headers, CancellationToken cancellationToken) =>
+        IsCloseDelimited(headers) ? ReadToEndAsync(source, cancellationToken) : ReadBodyAsync(source, headers, cancellationToken);
+
+    /// <summary>
+    /// Relays a response body: like <see cref="RelayBodyAsync"/>, except that
+    /// a response with no framing (see <see cref="IsCloseDelimited"/>) is
+    /// relayed until the connection closes rather than treated as empty.
+    /// </summary>
+    public static Task<byte[]> RelayResponseBodyAsync(
+        Stream source, Stream destination, IReadOnlyList<(string Name, string Value)> headers, CancellationToken cancellationToken) =>
+        IsCloseDelimited(headers)
+            ? RelayToEndAsync(source, destination, cancellationToken)
+            : RelayBodyAsync(source, destination, headers, cancellationToken);
+
+    private static async Task<byte[]> ReadToEndAsync(Stream source, CancellationToken cancellationToken)
+    {
+        using var body = new MemoryStream();
+        await CopyUntilClosedAsync(source, body, cancellationToken);
+        return body.ToArray();
+    }
+
+    private static async Task<byte[]> RelayToEndAsync(Stream source, Stream destination, CancellationToken cancellationToken)
+    {
+        using var body = new MemoryStream();
+        var buffer = new byte[RelayBufferSize];
+        while (true)
+        {
+            var read = await ReadOrEndAsync(source, buffer, cancellationToken);
+            if (read == 0)
+            {
+                return body.ToArray();
+            }
+
+            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+            body.Write(buffer, 0, read);
+        }
+    }
+
+    private static async Task CopyUntilClosedAsync(Stream source, Stream destination, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[RelayBufferSize];
+        while (true)
+        {
+            var read = await ReadOrEndAsync(source, buffer, cancellationToken);
+            if (read == 0)
+            {
+                return;
+            }
+
+            destination.Write(buffer, 0, read);
+        }
+    }
+
+    /// <summary>
+    /// Reads what's available, treating an abrupt close (a TLS server that
+    /// closes without a close_notify, or a reset) as the end of the body,
+    /// which is how close-delimited bodies end in practice.
+    /// </summary>
+    private static async Task<int> ReadOrEndAsync(Stream source, byte[] buffer, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await source.ReadAsync(buffer.AsMemory(), cancellationToken);
+        }
+        catch (IOException)
+        {
+            return 0;
+        }
     }
 
     private static async Task<List<(string Name, string Value)>> ReadHeadersAsync(

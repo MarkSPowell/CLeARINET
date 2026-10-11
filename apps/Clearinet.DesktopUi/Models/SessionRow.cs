@@ -96,7 +96,7 @@ public sealed class SessionRow
             Time = session.StartedAt.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture),
             StatusCode = session.Response.StatusCode,
             Method = session.Request.Method,
-            Url = $"https://{session.Host}{session.Request.Target}",
+            Url = $"{session.Scheme}://{session.Host}{session.Request.Target}",
             RequestSize = FormatBytes(session.Request.Body.Length),
             ResponseSize = FormatBytes(session.Response.Body.Length),
             Session = session,

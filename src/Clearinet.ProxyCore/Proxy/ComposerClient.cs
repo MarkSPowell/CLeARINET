@@ -13,7 +13,7 @@ namespace Clearinet.ProxyCore.Proxy;
 /// (AutoResponder, breakpoints, FiddlerScript, extensions, the upstream
 /// proxy).
 ///
-/// HTTPS only, like the listener. The connection trusts CLeARINET's root
+/// http:// and https:// URLs. An HTTPS connection trusts CLeARINET's root
 /// certificate specifically, so it works whether or not that root is in the
 /// system's trust store.
 /// </summary>
@@ -21,8 +21,8 @@ public static class ComposerClient
 {
     /// <summary>
     /// Works out where a composed request goes. <paramref name="request"/> is
-    /// as typed: its target may be an absolute https:// URL, or a path with
-    /// a Host header. Returns the URL and the request to send (path-only
+    /// as typed: its target may be an absolute http:// or https:// URL, or a
+    /// path with a Host header (sent as HTTPS). Returns the URL and the request to send (path-only
     /// target, Host header matching the URL), or false with an
     /// <paramref name="error"/> a person can act on.
     /// </summary>
@@ -38,7 +38,7 @@ public static class ComposerClient
             var host = ContentDecoder.FindHeader(request.Headers, "Host");
             if (string.IsNullOrWhiteSpace(host))
             {
-                error = "The request needs a full https:// URL, or a Host header to go with its path.";
+                error = "The request needs a full http:// or https:// URL, or a Host header to go with its path.";
                 return false;
             }
 
@@ -51,9 +51,10 @@ public static class ComposerClient
             return false;
         }
 
-        if (!string.Equals(parsed.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(parsed.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(parsed.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
         {
-            error = $"CLeARINET only sends HTTPS requests so far, and this one is {parsed.Scheme}://.";
+            error = $"CLeARINET only sends HTTP and HTTPS requests, and this one is {parsed.Scheme}://.";
             return false;
         }
 
@@ -103,10 +104,23 @@ public static class ComposerClient
         CapturedRequest request,
         CancellationToken cancellationToken)
     {
-        using var root = X509CertificateLoader.LoadCertificate(rootCertificateDer);
         using var client = new TcpClient();
         await client.ConnectAsync(System.Net.IPAddress.Loopback, listenerPort, cancellationToken);
         var stream = client.GetStream();
+        var isHead = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
+
+        if (string.Equals(url.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+        {
+            // Plain HTTP: an ordinary proxy request, the full URL in the
+            // request line, as a browser sends it.
+            var authority = url.IsDefaultPort ? url.Host : $"{url.Host}:{url.Port}";
+            var absolute = request.Target.StartsWith('/') ? request with { Target = $"http://{authority}{request.Target}" } : request;
+            await HttpMessageWriter.WriteRequestAsync(stream, absolute, cancellationToken);
+            return await Http1MessageReader.ReadResponseAsync(stream, isHead, cancellationToken)
+                ?? throw new IOException("The connection closed before a response arrived.");
+        }
+
+        using var root = X509CertificateLoader.LoadCertificate(rootCertificateDer);
         await UpstreamProxy.EstablishTunnelAsync(stream, url.Host, url.Port, "CLeARINET's own listener", cancellationToken);
 
         using var tls = new SslStream(stream, leaveInnerStreamOpen: false);
@@ -120,7 +134,6 @@ public static class ComposerClient
             cancellationToken);
 
         await HttpMessageWriter.WriteRequestAsync(tls, request, cancellationToken);
-        var isHead = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
         return await Http1MessageReader.ReadResponseAsync(tls, isHead, cancellationToken)
             ?? throw new IOException("The connection closed before a response arrived.");
     }

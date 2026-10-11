@@ -14,11 +14,12 @@ using Clearinet.ProxyCore.Sessions;
 namespace Clearinet.ProxyCore.Proxy;
 
 /// <summary>
-/// An HTTPS-intercepting proxy: accepts a CONNECT tunnel, terminates TLS
-/// toward the client with a freshly-signed leaf, and reads each
-/// request/response pair on the connection as HTTP/1.1 (see
+/// An intercepting HTTP proxy: accepts a CONNECT tunnel and terminates TLS
+/// toward the client with a freshly-signed leaf, or takes plain http://
+/// proxy requests as they come (see <see cref="PlainHttpRequest"/>), and
+/// reads each request/response pair on the connection as HTTP/1.1 (see
 /// <see cref="Http1MessageReader"/>), capturing it into
-/// <see cref="SessionStore"/> along the way. The upstream TLS connection
+/// <see cref="SessionStore"/> along the way. The upstream connection
 /// itself is opened lazily, inside <c>PumpSessionsAsync</c>, the first time
 /// a request actually needs to reach the real server -- see that method's
 /// own remarks on why <see cref="AutoResponderRules"/> requires that.
@@ -208,28 +209,39 @@ public sealed class InterceptingProxyListener
         try
         {
             using var clientStream = client.GetStream();
-            var (method, target) = await ReadRequestLineAndHeadersAsync(clientStream, cancellationToken);
-
-            if (method is null)
+            var first = await Http1MessageReader.ReadRequestPreambleAsync(clientStream, cancellationToken);
+            if (first is null)
             {
                 return;
             }
 
-            if (!string.Equals(method, "CONNECT", StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(first.Method, "CONNECT", StringComparison.OrdinalIgnoreCase))
             {
-                // Plain HTTP. Requests addressed to CLeARINET itself get its
+                // Plain HTTP. A request addressed to CLeARINET itself gets its
                 // home page and root certificate (how a phone installs it);
-                // anything else is answered rather than silently dropped, since
-                // only HTTPS is forwarded so far.
-                var answer = ProxyHomePage.IsRequestForProxy(target, Port)
-                    ? ProxyHomePage.Build(target!, _leafProvider.IssuerCertificateDer)
-                    : ProxyHomePage.NotForwarded(method, target ?? string.Empty);
-                await HttpMessageWriter.WriteResponseAsync(clientStream, answer, cancellationToken);
-                Console.WriteLine($"[proxy] {method} {target} -> {answer.StatusCode} (answered by CLeARINET)");
+                // an http:// request is captured and forwarded like HTTPS
+                // traffic; anything else (an ftp:// URL, say) is answered
+                // rather than silently dropped.
+                if (ProxyHomePage.IsRequestForProxy(first.Target, Port))
+                {
+                    await AnswerAsync(clientStream, first, ProxyHomePage.Build(first.Target, _leafProvider.IssuerCertificateDer), cancellationToken);
+                    return;
+                }
+
+                if (!first.Target.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+                {
+                    await AnswerAsync(clientStream, first, ProxyHomePage.NotForwarded(first.Method, first.Target), cancellationToken);
+                    return;
+                }
+
+                await PumpSessionsAsync(
+                    isTls: false, string.Empty, PlainHttpRequest.DefaultPort, client, clientStream, first, _sessionStore,
+                    _breakpointManager, _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, Gateway, Port,
+                    () => _leafProvider.IssuerCertificateDer, cancellationToken);
                 return;
             }
 
-            var (targetHost, targetPort) = ParseConnectTarget(target!);
+            var (targetHost, targetPort) = ParseConnectTarget(first.Target);
 
             var established = "HTTP/1.1 200 Connection Established\r\n\r\n"u8.ToArray();
             await clientStream.WriteAsync(established, cancellationToken);
@@ -248,8 +260,9 @@ public sealed class InterceptingProxyListener
             // The upstream connection is NOT made here anymore -- see
             // PumpSessionsAsync's own remarks on why it has to be lazy.
             await PumpSessionsAsync(
-                targetHost, targetPort, client, clientTls, _sessionStore, _breakpointManager, _autoResponderRules,
-                _scriptRunner, _extensionHost, _sessionHost, Gateway, cancellationToken);
+                isTls: true, targetHost, targetPort, client, clientTls, firstRequest: null, _sessionStore, _breakpointManager,
+                _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, Gateway, Port,
+                () => _leafProvider.IssuerCertificateDer, cancellationToken);
         }
         catch (BreakpointAbortedException ex)
         {
@@ -259,6 +272,14 @@ public sealed class InterceptingProxyListener
         {
             Console.WriteLine($"[proxy] Connection ended: {DescribeException(ex)}");
         }
+    }
+
+    /// <summary>Drains a plain request's body, sends CLeARINET's own answer, and logs it.</summary>
+    private static async Task AnswerAsync(Stream clientStream, CapturedRequest request, CapturedResponse answer, CancellationToken cancellationToken)
+    {
+        await Http1MessageReader.ReadBodyAsync(clientStream, request.Headers, cancellationToken);
+        await HttpMessageWriter.WriteResponseAsync(clientStream, answer, cancellationToken);
+        Console.WriteLine($"[proxy] {request.Method} {request.Target} -> {answer.StatusCode} (answered by CLeARINET)");
     }
 
     private static string DescribeException(Exception ex)
@@ -323,10 +344,12 @@ public sealed class InterceptingProxyListener
     /// rejoins rather than from inside either branch.
     /// </summary>
     private static async Task PumpSessionsAsync(
+        bool isTls,
         string targetHost,
         int targetPort,
         TcpClient clientConnection,
-        SslStream clientTls,
+        Stream clientTls,
+        CapturedRequest? firstRequest,
         SessionStore sessionStore,
         BreakpointManager breakpointManager,
         AutoResponderRules autoResponderRules,
@@ -334,41 +357,126 @@ public sealed class InterceptingProxyListener
         IExtensionAutoTamperHost? extensionHost,
         IExtensionSessionHost? sessionHost,
         UpstreamProxy? gateway,
+        int ownPort,
+        Func<byte[]> rootCertificateDer,
         CancellationToken cancellationToken)
     {
+        // clientTls is the client's TLS stream for a CONNECT tunnel, or its
+        // plain connection for http:// requests (isTls false). A plain
+        // connection can carry requests for different servers one after
+        // another, so for those targetHost/targetPort are set per request
+        // and the server connection is replaced when they change.
+        var scheme = isTls ? "https" : "http";
         TcpClient? upstreamClient = null;
-        SslStream? upstreamTls = null;
+        Stream? upstreamTls = null;
+        string? upstreamKey = null;
+        var sendAbsoluteForm = false;
+        var pendingRequest = firstRequest;
 
         // Opens the upstream connection the first time a request on this
         // tunnel actually has to reach the real server, then reuses it. A
         // request that AutoResponder or an extension answers never gets
         // here, so a host that doesn't even resolve (the CSP extension's
         // report host, say) still works.
-        async Task<SslStream> EnsureUpstreamAsync()
+        async Task<Stream> EnsureUpstreamAsync()
         {
+            var key = $"{targetHost}:{targetPort}";
+            if (upstreamTls is not null && upstreamKey != key)
+            {
+                // A plain HTTP client moved on to a different server.
+                upstreamTls.Dispose();
+                upstreamClient?.Dispose();
+                upstreamTls = null;
+                upstreamClient = null;
+            }
+
             if (upstreamTls is null)
             {
-                if (gateway is not null && !gateway.ShouldBypass(targetHost))
+                var useGateway = gateway is not null && !gateway.ShouldBypass(targetHost);
+                if (isTls)
                 {
-                    // Through the network's own proxy (see UpstreamProxy):
-                    // a CONNECT tunnel, then TLS to the server inside it.
-                    upstreamClient = await gateway.ConnectTunnelAsync(targetHost, targetPort, cancellationToken);
+                    if (useGateway)
+                    {
+                        // Through the network's own proxy (see UpstreamProxy):
+                        // a CONNECT tunnel, then TLS to the server inside it.
+                        upstreamClient = await gateway!.ConnectTunnelAsync(targetHost, targetPort, cancellationToken);
+                    }
+                    else
+                    {
+                        upstreamClient = new TcpClient();
+                        await upstreamClient.ConnectAsync(targetHost, targetPort, cancellationToken);
+                    }
+
+                    var tls = new SslStream(upstreamClient.GetStream(), leaveInnerStreamOpen: false);
+                    // Deliberately using default certificate validation
+                    // here: this proxy should surface a real upstream cert
+                    // problem, not hide it, even though it's standing in
+                    // the middle of the connection for the client's side.
+                    await tls.AuthenticateAsClientAsync(targetHost);
+                    upstreamTls = tls;
+                    sendAbsoluteForm = false;
                 }
                 else
                 {
+                    // Plain HTTP goes to the network's proxy as an ordinary
+                    // proxy request (full URL in the request line), or
+                    // straight to the server.
                     upstreamClient = new TcpClient();
-                    await upstreamClient.ConnectAsync(targetHost, targetPort, cancellationToken);
+                    if (useGateway)
+                    {
+                        await upstreamClient.ConnectAsync(gateway!.Host, gateway.Port, cancellationToken);
+                    }
+                    else
+                    {
+                        await upstreamClient.ConnectAsync(targetHost, targetPort, cancellationToken);
+                    }
+
+                    upstreamTls = upstreamClient.GetStream();
+                    sendAbsoluteForm = useGateway;
                 }
 
-                upstreamTls = new SslStream(upstreamClient.GetStream(), leaveInnerStreamOpen: false);
-                // Deliberately using default certificate validation
-                // here: this proxy should surface a real upstream cert
-                // problem, not hide it, even though it's standing in
-                // the middle of the connection for the client's side.
-                await upstreamTls.AuthenticateAsClientAsync(targetHost);
+                upstreamKey = key;
             }
 
             return upstreamTls;
+        }
+
+        // What actually goes to the server (or the network's proxy) for a
+        // request: unchanged for HTTPS; for plain HTTP, without the
+        // proxy-only headers, and with the full URL when going via a proxy.
+        CapturedRequest ForUpstream(CapturedRequest outgoing) =>
+            isTls ? outgoing : PlainHttpRequest.ForUpstream(outgoing, sendAbsoluteForm);
+
+        // For plain HTTP, the server a request goes to comes from its Host
+        // header, which a script, extension or breakpoint may have changed.
+        void RouteFrom(CapturedRequest outgoing)
+        {
+            if (!isTls && PlainHttpRequest.TryGetRoute(outgoing.Headers, out var host, out var port))
+            {
+                targetHost = host;
+                targetPort = port;
+            }
+        }
+
+        // Opens the server connection, or, if that fails (the name doesn't
+        // resolve, nothing's listening, the network's proxy refuses), answers
+        // the client with 502 Bad Gateway and records that as the session --
+        // returns null then, and the connection ends.
+        async Task<Stream?> TryEnsureUpstreamAsync(CapturedRequest outgoing, DateTimeOffset startedAt)
+        {
+            try
+            {
+                return await EnsureUpstreamAsync();
+            }
+            catch (Exception ex) when (ex is SocketException or IOException or AuthenticationException)
+            {
+                var failure = BadGateway(targetHost, targetPort, ex);
+                await HttpMessageWriter.WriteResponseAsync(clientTls, failure, cancellationToken);
+                var failed = sessionStore.Add(targetHost, startedAt, outgoing, failure, flags: null, scheme);
+                Console.WriteLine(
+                    $"[{startedAt:HH:mm:ss}] #{failed.Id} 502 {outgoing.Method} {scheme}://{targetHost}{outgoing.Target} -- {ex.Message}");
+                return null;
+            }
         }
 
         try
@@ -376,7 +484,8 @@ public sealed class InterceptingProxyListener
             while (true)
             {
                 var startedAt = DateTimeOffset.Now;
-                var requestPreamble = await Http1MessageReader.ReadRequestPreambleAsync(clientTls, cancellationToken);
+                var requestPreamble = pendingRequest ?? await Http1MessageReader.ReadRequestPreambleAsync(clientTls, cancellationToken);
+                pendingRequest = null;
                 if (requestPreamble is null)
                 {
                     // The client closed the connection between requests --
@@ -384,11 +493,37 @@ public sealed class InterceptingProxyListener
                     return;
                 }
 
+                if (!isTls)
+                {
+                    // Store and process plain HTTP the way HTTPS is: a
+                    // path-only target plus a Host header (see
+                    // PlainHttpRequest). A later request on the same
+                    // connection may be for CLeARINET itself, or something
+                    // that can't be forwarded.
+                    if (ProxyHomePage.IsRequestForProxy(requestPreamble.Target, ownPort) && !requestPreamble.Target.StartsWith('/'))
+                    {
+                        await AnswerAsync(clientTls, requestPreamble, ProxyHomePage.Build(requestPreamble.Target, rootCertificateDer()), cancellationToken);
+                        return;
+                    }
+
+                    if (!PlainHttpRequest.TryNormalize(requestPreamble, out var normalized, out var plainHost, out var plainPort))
+                    {
+                        await AnswerAsync(clientTls, requestPreamble, ProxyHomePage.NotForwarded(requestPreamble.Method, requestPreamble.Target), cancellationToken);
+                        return;
+                    }
+
+                    requestPreamble = normalized;
+                    targetHost = plainHost;
+                    targetPort = plainPort;
+                }
+
                 // AutoResponderRules only ever looks at method/URL, never
                 // the body -- same reasoning as BreakpointRules.ShouldBreakBeforeRequest
                 // (see its own remarks) -- so this, too, can be decided
                 // from the preamble alone.
-                var url = $"https://{targetHost}{requestPreamble.Target}";
+                var url = isTls
+                    ? $"https://{targetHost}{requestPreamble.Target}"
+                    : $"http://{ContentDecoder.FindHeader(requestPreamble.Headers, "Host") ?? targetHost}{requestPreamble.Target}";
                 var outcome = autoResponderRules.AnyActive
                     ? autoResponderRules.Evaluate(requestPreamble.Method, url)
                     : AutoResponderOutcome.PassThrough;
@@ -418,7 +553,7 @@ public sealed class InterceptingProxyListener
 
                     if (outcome.FinalActionKind == AutoResponderActionKind.Reset)
                     {
-                        RecordAutoRespondedSession(sessionStore, targetHost, startedAt, localRequest, "Connection Reset (AutoResponder *reset)");
+                        RecordAutoRespondedSession(sessionStore, targetHost, scheme, startedAt, localRequest, "Connection Reset (AutoResponder *reset)");
                         // A graceful Dispose sends a normal FIN; a TCP RST
                         // needs the zero-second linger option set first --
                         // this is the one case that needs the raw
@@ -432,7 +567,7 @@ public sealed class InterceptingProxyListener
 
                     if (outcome.FinalActionKind == AutoResponderActionKind.Drop)
                     {
-                        RecordAutoRespondedSession(sessionStore, targetHost, startedAt, localRequest, "Connection Dropped (AutoResponder *drop)");
+                        RecordAutoRespondedSession(sessionStore, targetHost, scheme, startedAt, localRequest, "Connection Dropped (AutoResponder *drop)");
                         // No response, no RST -- just stop. The outer
                         // `using` declarations in HandleClientAsync close
                         // this connection normally once this method returns.
@@ -441,7 +576,7 @@ public sealed class InterceptingProxyListener
 
                     var localResponse = await BuildMockResponseAsync(outcome, localRequest, cancellationToken);
                     await HttpMessageWriter.WriteResponseAsync(clientTls, localResponse, cancellationToken);
-                    var localSession = sessionStore.Add(targetHost, startedAt, localRequest, localResponse);
+                    var localSession = sessionStore.Add(targetHost, startedAt, localRequest, localResponse, flags: null, scheme);
                     Console.WriteLine(
                         $"[{startedAt:HH:mm:ss}] #{localSession.Id} {localResponse.StatusCode} {localRequest.Method} {url} " +
                         $"(AutoResponder: {outcome.FinalActionKind})");
@@ -461,7 +596,7 @@ public sealed class InterceptingProxyListener
                 // matching ones, an assumed ordering like the one described
                 // in this method's remarks.
                 var extensionSession = sessionHost is { IsActive: true }
-                    ? sessionHost.BeginSession(sessionStore.PeekNextId(), targetHost, "https")
+                    ? sessionHost.BeginSession(sessionStore.PeekNextId(), targetHost, scheme)
                     : null;
                 extensionSession?.PeekAtRequestHeaders(outgoingPreamble);
 
@@ -523,13 +658,26 @@ public sealed class InterceptingProxyListener
                         // or AutoResponder's own *bpu) can hold this connection
                         // open and edit the request before it's forwarded.
                         request = await breakpointManager.ApplyRequestBreakpointAsync(targetHost, request, cancellationToken);
-                        await HttpMessageWriter.WriteRequestAsync(await EnsureUpstreamAsync(), request, cancellationToken);
+                        RouteFrom(request);
+                        var bufferedUpstream = await TryEnsureUpstreamAsync(request, startedAt);
+                        if (bufferedUpstream is null)
+                        {
+                            return;
+                        }
+
+                        await HttpMessageWriter.WriteRequestAsync(bufferedUpstream, ForUpstream(request), cancellationToken);
                     }
                 }
                 else
                 {
-                    var upstream = await EnsureUpstreamAsync();
-                    await HttpMessageWriter.WriteRequestPreambleAsync(upstream, outgoingPreamble, cancellationToken);
+                    RouteFrom(outgoingPreamble);
+                    var upstream = await TryEnsureUpstreamAsync(outgoingPreamble, startedAt);
+                    if (upstream is null)
+                    {
+                        return;
+                    }
+
+                    await HttpMessageWriter.WriteRequestPreambleAsync(upstream, ForUpstream(outgoingPreamble), cancellationToken);
                     var requestBody = await Http1MessageReader.RelayBodyAsync(
                         clientTls, upstream, outgoingPreamble.Headers, cancellationToken);
                     request = outgoingPreamble with { Body = requestBody };
@@ -546,7 +694,7 @@ public sealed class InterceptingProxyListener
                     await HttpMessageWriter.WriteResponseAsync(clientTls, localResponse, cancellationToken);
                     extensionSession.ResponseAfter(request, localResponse);
 
-                    var answeredSession = sessionStore.Add(targetHost, startedAt, request, localResponse, extensionSession.Flags);
+                    var answeredSession = sessionStore.Add(targetHost, startedAt, request, localResponse, extensionSession.Flags, scheme);
                     Console.WriteLine(
                         $"[{startedAt:HH:mm:ss}] #{answeredSession.Id} {localResponse.StatusCode} {request.Method} {url} (answered by an extension)");
                     continue;
@@ -584,7 +732,7 @@ public sealed class InterceptingProxyListener
                 {
                     var responseBody = responseHasNoBody
                         ? Array.Empty<byte>()
-                        : await Http1MessageReader.ReadBodyAsync(upstreamStream, responsePreamble.Headers, cancellationToken);
+                        : await Http1MessageReader.ReadResponseBodyAsync(upstreamStream, responsePreamble.Headers, cancellationToken);
                     response = responsePreamble with { Body = responseBody };
 
                     // Same ordering rationale as the request side: the
@@ -626,7 +774,7 @@ public sealed class InterceptingProxyListener
                     await HttpMessageWriter.WriteResponsePreambleAsync(clientTls, responsePreamble, cancellationToken);
                     var responseBody = responseHasNoBody
                         ? Array.Empty<byte>()
-                        : await Http1MessageReader.RelayBodyAsync(
+                        : await Http1MessageReader.RelayResponseBodyAsync(
                             upstreamStream, clientTls, responsePreamble.Headers, cancellationToken);
                     response = responsePreamble with { Body = responseBody };
                 }
@@ -637,9 +785,9 @@ public sealed class InterceptingProxyListener
                 extensionHost?.RunResponseAfter(sessionStore.PeekNextId(), targetHost, request, response);
                 extensionSession?.ResponseAfter(request, response);
 
-                var session = sessionStore.Add(targetHost, startedAt, request, response, extensionSession?.Flags);
+                var session = sessionStore.Add(targetHost, startedAt, request, response, extensionSession?.Flags, scheme);
                 Console.WriteLine(
-                    $"[{startedAt:HH:mm:ss}] #{session.Id} {response.StatusCode} {request.Method} https://{targetHost}{request.Target} " +
+                    $"[{startedAt:HH:mm:ss}] #{session.Id} {response.StatusCode} {request.Method} {scheme}://{targetHost}{request.Target} " +
                     $"({request.Body.Length} B req, {response.Body.Length} B resp)");
 
                 if (response.StatusCode == 101)
@@ -656,6 +804,16 @@ public sealed class InterceptingProxyListener
                     // life -- the same raw pump this spike used everywhere
                     // before it understood HTTP/1.1 at all.
                     await RelayRawBytesUntilClosedAsync(clientTls, upstreamStream, cancellationToken);
+                    return;
+                }
+
+                // A response whose body ran until the server closed the
+                // connection, or either side asking to close, ends this
+                // connection too: the client can't tell where a further
+                // response would start.
+                if ((!responseHasNoBody && Http1MessageReader.IsCloseDelimited(responsePreamble.Headers)) ||
+                    AsksToClose(request.HttpVersion, request.Headers) || AsksToClose(responsePreamble.HttpVersion, responsePreamble.Headers))
+                {
                     return;
                 }
             }
@@ -677,11 +835,52 @@ public sealed class InterceptingProxyListener
     /// grid from every genuine (even error) status code.
     /// </summary>
     private static void RecordAutoRespondedSession(
-        SessionStore sessionStore, string targetHost, DateTimeOffset startedAt, CapturedRequest request, string reason)
+        SessionStore sessionStore, string targetHost, string scheme, DateTimeOffset startedAt, CapturedRequest request, string reason)
     {
         var response = new CapturedResponse("HTTP/1.1", 0, reason, [], []);
-        var session = sessionStore.Add(targetHost, startedAt, request, response);
-        Console.WriteLine($"[{startedAt:HH:mm:ss}] #{session.Id} {request.Method} https://{targetHost}{request.Target} -- {reason}");
+        var session = sessionStore.Add(targetHost, startedAt, request, response, flags: null, scheme);
+        Console.WriteLine($"[{startedAt:HH:mm:ss}] #{session.Id} {request.Method} {scheme}://{targetHost}{request.Target} -- {reason}");
+    }
+
+    /// <summary>The response sent when CLeARINET can't reach the server.</summary>
+    private static CapturedResponse BadGateway(string host, int port, Exception ex)
+    {
+        var body = Encoding.UTF8.GetBytes($"CLeARINET couldn't connect to {host}:{port}: {ex.Message}");
+        return new CapturedResponse(
+            "HTTP/1.1",
+            502,
+            "Bad Gateway",
+            [("Content-Type", "text/plain; charset=utf-8"), ("Content-Length", body.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)), ("Connection", "close")],
+            body);
+    }
+
+    /// <summary>
+    /// True when a message ends its connection: its Connection header
+    /// includes "close", or it's HTTP/1.0 without "keep-alive" (RFC 9112
+    /// section 9.3).
+    /// </summary>
+    private static bool AsksToClose(string httpVersion, IReadOnlyList<(string Name, string Value)> headers)
+    {
+        var keepAlive = false;
+        foreach (var (name, value) in headers)
+        {
+            if (!string.Equals(name, "Connection", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (var token in value.Split(','))
+            {
+                if (string.Equals(token.Trim(), "close", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                keepAlive |= string.Equals(token.Trim(), "keep-alive", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return string.Equals(httpVersion, "HTTP/1.0", StringComparison.OrdinalIgnoreCase) && !keepAlive;
     }
 
     /// <summary>
@@ -839,7 +1038,7 @@ public sealed class InterceptingProxyListener
     }
 
     private static async Task RelayRawBytesUntilClosedAsync(
-        SslStream clientTls, SslStream upstreamTls, CancellationToken cancellationToken)
+        Stream clientTls, Stream upstreamTls, CancellationToken cancellationToken)
     {
         var clientToUpstream = clientTls.CopyToAsync(upstreamTls, cancellationToken);
         var upstreamToClient = upstreamTls.CopyToAsync(clientTls, cancellationToken);
@@ -853,64 +1052,6 @@ public sealed class InterceptingProxyListener
             // A one-sided close is the normal way an upgraded connection
             // like a WebSocket ends here; nothing to act on.
         }
-    }
-
-    private static async Task<(string? Method, string? Target)> ReadRequestLineAndHeadersAsync(
-        NetworkStream stream,
-        CancellationToken cancellationToken)
-    {
-        var line = await ReadLineAsync(stream, cancellationToken);
-        if (line is null)
-        {
-            return (null, null);
-        }
-
-        var parts = line.Split(' ', 3);
-        var method = parts.Length > 0 ? parts[0] : null;
-        var target = parts.Length > 1 ? parts[1] : null;
-
-        // Drain the rest of the request headers up to the blank line;
-        // CONNECT never carries a body.
-        while (true)
-        {
-            var headerLine = await ReadLineAsync(stream, cancellationToken);
-            if (string.IsNullOrEmpty(headerLine))
-            {
-                break;
-            }
-        }
-
-        return (method, target);
-    }
-
-    private static async Task<string?> ReadLineAsync(NetworkStream stream, CancellationToken cancellationToken)
-    {
-        // Byte-at-a-time on purpose: the only thing read this way is the
-        // small, plaintext CONNECT request that precedes the TLS
-        // handshake, so simplicity matters more than throughput here.
-        var bytes = new List<byte>();
-        var single = new byte[1];
-
-        while (true)
-        {
-            var read = await stream.ReadAsync(single.AsMemory(), cancellationToken);
-            if (read == 0)
-            {
-                return bytes.Count == 0 ? null : Encoding.ASCII.GetString(bytes.ToArray());
-            }
-
-            if (single[0] == (byte)'\n')
-            {
-                break;
-            }
-
-            if (single[0] != (byte)'\r')
-            {
-                bytes.Add(single[0]);
-            }
-        }
-
-        return Encoding.ASCII.GetString(bytes.ToArray());
     }
 
     private static (string Host, int Port) ParseConnectTarget(string target)

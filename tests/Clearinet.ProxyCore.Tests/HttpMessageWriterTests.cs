@@ -96,4 +96,28 @@ public class HttpMessageWriterTests
         Assert.Contains("Content-Length: 11\r\n", text);
         Assert.EndsWith("\r\n\r\n", text);
     }
+
+    [Theory]
+    [InlineData(302, true)]
+    [InlineData(200, true)]
+    [InlineData(204, false)]
+    [InlineData(304, false)]
+    public void AnEmptyResponseIsFramedUnlessItsStatusNeverHasABody(int status, bool framed)
+    {
+        // Without Content-Length a response runs until the connection
+        // closes, so a client keeping the connection open would wait forever.
+        var text = Encoding.ASCII.GetString(HttpMessageWriter.BuildResponseBytes(
+            new CapturedResponse("HTTP/1.1", status, "X", [("Location", "https://example.test/")], [])));
+
+        Assert.Equal(framed, text.Contains("Content-Length: 0\r\n"));
+    }
+
+    [Fact]
+    public void AnEmptyRequestGetsNoContentLength()
+    {
+        var text = Encoding.ASCII.GetString(HttpMessageWriter.BuildRequestBytes(
+            new CapturedRequest("GET", "/", "HTTP/1.1", [("Host", "example.test")], [])));
+
+        Assert.DoesNotContain("Content-Length", text);
+    }
 }

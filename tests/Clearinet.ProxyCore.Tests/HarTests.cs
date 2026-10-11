@@ -161,4 +161,29 @@ public class HarTests
         await Assert.ThrowsAsync<InvalidDataException>(() =>
             HarReader.ImportAsync(new MemoryStream(Encoding.UTF8.GetBytes("{\"hello\":1}")), new SessionStore()));
     }
+
+    [Fact]
+    public async Task PlainHttpSessionsKeepTheirScheme()
+    {
+        var store = new SessionStore();
+        var request = new CapturedRequest("GET", "/page", "HTTP/1.1", [("Host", "example.test")], []);
+        var response = new CapturedResponse("HTTP/1.1", 200, "OK", [], []);
+        var written = store.Add("example.test", Started, request, response, flags: null, "http");
+
+        using var buffer = new MemoryStream();
+        HarWriter.Write(buffer, [written]);
+        using (var har = JsonDocument.Parse(buffer.ToArray()))
+        {
+            var entry = Assert.Single(har.RootElement.GetProperty("log").GetProperty("entries").EnumerateArray());
+            Assert.Equal("http://example.test/page", entry.GetProperty("request").GetProperty("url").GetString());
+        }
+
+        buffer.Position = 0;
+        var imported = new SessionStore();
+        await HarReader.ImportAsync(buffer, imported);
+
+        var session = Assert.Single(imported.Snapshot());
+        Assert.Equal("http", session.Scheme);
+        Assert.Equal("/page", session.Request.Target);
+    }
 }

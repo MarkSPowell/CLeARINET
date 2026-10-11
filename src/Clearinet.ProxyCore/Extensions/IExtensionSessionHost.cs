@@ -36,8 +36,8 @@ public interface IExtensionSessionHost
     /// its headers have arrived and before any hook runs.
     /// </summary>
     /// <param name="sessionOrdinal">The id the session will most likely get in the session list.</param>
-    /// <param name="hostname">The host from the CONNECT tunnel the request arrived on.</param>
-    /// <param name="scheme">The request's scheme, e.g. <c>https</c>.</param>
+    /// <param name="hostname">The server the request is going to: the CONNECT tunnel's host, or a plain HTTP request's.</param>
+    /// <param name="scheme">The request's scheme: <c>https</c> or <c>http</c>.</param>
     IExtensionSession BeginSession(int sessionOrdinal, string hostname, string scheme);
 }
 

@@ -62,16 +62,20 @@ public static class HttpMessageWriter
     }
 
     public static byte[] BuildRequestBytes(CapturedRequest request) =>
-        BuildMessageBytes($"{request.Method} {request.Target} {request.HttpVersion}", request.Headers, request.Body);
+        BuildMessageBytes($"{request.Method} {request.Target} {request.HttpVersion}", request.Headers, request.Body, frameEmptyBody: false);
 
     public static byte[] BuildResponseBytes(CapturedResponse response)
     {
         var reason = string.IsNullOrEmpty(response.ReasonPhrase) ? string.Empty : $" {response.ReasonPhrase}";
-        return BuildMessageBytes($"{response.HttpVersion} {response.StatusCode}{reason}", response.Headers, response.Body);
+        // A response without Content-Length runs until the connection
+        // closes (RFC 9112 section 6.3), so even an empty one gets
+        // "Content-Length: 0" -- except the statuses that never have a body.
+        var frameEmptyBody = response.StatusCode is not (>= 100 and < 200 or 204 or 304);
+        return BuildMessageBytes($"{response.HttpVersion} {response.StatusCode}{reason}", response.Headers, response.Body, frameEmptyBody);
     }
 
     private static byte[] BuildMessageBytes(
-        string startLine, IReadOnlyList<(string Name, string Value)> headers, byte[] body)
+        string startLine, IReadOnlyList<(string Name, string Value)> headers, byte[] body, bool frameEmptyBody)
     {
         var text = new StringBuilder();
         text.Append(startLine).Append("\r\n");
@@ -94,7 +98,7 @@ public static class HttpMessageWriter
             text.Append(name).Append(": ").Append(value).Append("\r\n");
         }
 
-        if (!sawContentLength && body.Length > 0)
+        if (!sawContentLength && (body.Length > 0 || frameEmptyBody))
         {
             text.Append("Content-Length: ").Append(body.Length.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
         }

@@ -190,4 +190,33 @@ public class SazReaderTests
         var bytes = Encoding.ASCII.GetBytes(content);
         stream.Write(bytes, 0, bytes.Length);
     }
+
+    [Fact]
+    public async Task PlainHttpSessionsKeepTheirScheme()
+    {
+        var store = new SessionStore();
+        var request = new CapturedRequest("GET", "/page?x=1", "HTTP/1.1", [("Host", "example.test:8080")], []);
+        var response = new CapturedResponse("HTTP/1.1", 200, "OK", [], Encoding.ASCII.GetBytes("hi"));
+        var written = store.Add("example.test", DateTimeOffset.UtcNow, request, response, flags: null, "http");
+
+        using var zipStream = new MemoryStream();
+        SazWriter.Write(zipStream, [written]);
+        zipStream.Position = 0;
+
+        // Written the way Fiddler Classic writes plain HTTP: the full URL in the request line.
+        using (var archive = new System.IO.Compression.ZipArchive(zipStream, System.IO.Compression.ZipArchiveMode.Read, leaveOpen: true))
+        {
+            using var reader = new StreamReader(archive.GetEntry($"raw/{written.Id}_c.txt")!.Open());
+            Assert.StartsWith("GET http://example.test:8080/page?x=1 HTTP/1.1", reader.ReadLine());
+        }
+
+        zipStream.Position = 0;
+        var imported = new SessionStore();
+        await SazReader.ImportAsync(zipStream, imported);
+
+        var session = Assert.Single(imported.Snapshot());
+        Assert.Equal("http", session.Scheme);
+        Assert.Equal("/page?x=1", session.Request.Target);
+        Assert.Equal("example.test:8080", ContentDecoder.FindHeader(session.Request.Headers, "Host"));
+    }
 }

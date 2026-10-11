@@ -44,9 +44,53 @@ public class ComposerClientTests
         Assert.Equal(("Host", "new.example.test"), Assert.Single(toSend!.Headers));
     }
 
+    [Fact]
+    public void AcceptsPlainHttpUrls()
+    {
+        Assert.True(ComposerClient.TryResolve(Typed("http://example.test:8080/a"), out var url, out var toSend, out var error));
+
+        Assert.Null(error);
+        Assert.Equal("http", url!.Scheme);
+        Assert.Equal("/a", toSend!.Target);
+        Assert.Equal(("Host", "example.test:8080"), Assert.Single(toSend.Headers));
+    }
+
+    [Fact]
+    public async Task SendsPlainHttpThroughTheListener()
+    {
+        var notBefore = DateTimeOffset.UtcNow.AddMinutes(-1);
+        using var root = CertificateAuthority.GenerateRoot(notBefore, notBefore.AddDays(1));
+        var store = new SessionStore();
+        var recorded = new TaskCompletionSource<Session>(TaskCreationOptions.RunContinuationsAsynchronously);
+        store.SessionAdded += session => recorded.TrySetResult(session);
+
+        var rules = new AutoResponderRules { IsEnabled = true };
+        rules.Rules.Add(new AutoResponderRule { MatchPattern = "composer.invalid", Action = "*redir:http://elsewhere.test/" });
+
+        var leaves = new LeafCertificateProvider(root);
+        var listener = InterceptingProxyListener.StartOnAvailablePort(0, leaves, store, autoResponderRules: rules);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            Assert.True(ComposerClient.TryResolve(Typed("http://composer.invalid/page"), out var url, out var toSend, out _));
+
+            var response = await ComposerClient.SendAsync(listener.Port, leaves.IssuerCertificateDer, url!, toSend!, timeout.Token);
+
+            Assert.Equal(302, response.StatusCode);
+            var session = await recorded.Task.WaitAsync(timeout.Token);
+            Assert.Equal("http", session.Scheme);
+            Assert.Equal("/page", session.Request.Target);
+            Assert.Equal("composer.invalid", ContentDecoder.FindHeader(session.Request.Headers, "Host"));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     [Theory]
     [InlineData("/no-host", "Host header")]
-    [InlineData("http://example.test/", "only sends HTTPS")]
+    [InlineData("ftp://example.test/", "only sends HTTP and HTTPS")]
     [InlineData("not a url", "isn't a URL")]
     public void ExplainsWhatItCantSend(string target, string expected)
     {

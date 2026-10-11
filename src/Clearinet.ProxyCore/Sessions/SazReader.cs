@@ -92,18 +92,30 @@ public static class SazReader
         await using (var responseStream = responseEntry.Open())
         {
             // isResponseToHeadRequest: false is always safe here -- SazWriter
-            // only ever omits Content-Length when the body is genuinely
-            // empty (see its own remarks on always rebuilding it from the
-            // real body length), so there's no ambiguous framing this could
-            // misread regardless of what the original request method was.
+            // always writes Content-Length from the real body length (see
+            // HttpMessageWriter), and a response with no length at all
+            // (from another tool) is read to the end of its file, so
+            // there's no ambiguous framing this could misread regardless of
+            // what the original request method was.
             response = await Http1MessageReader.ReadResponseAsync(responseStream, isResponseToHeadRequest: false, cancellationToken)
                 ?? throw new InvalidDataException("response file was empty");
+        }
+
+        // A plain HTTP request is saved with its full URL in the request line
+        // (Fiddler Classic does the same); store it path-only with the scheme
+        // on the session, like a captured one.
+        var scheme = "https";
+        if (request.Target.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            Proxy.PlainHttpRequest.TryNormalize(request, out var normalized, out _, out _))
+        {
+            request = normalized;
+            scheme = "http";
         }
 
         var host = ExtractHost(request.Headers);
         var startedAt = TryReadTimestamp(archive.GetEntry($"raw/{number}_m.xml")) ?? DateTimeOffset.Now;
 
-        sessionStore.Add(host, startedAt, request, response);
+        sessionStore.Add(host, startedAt, request, response, flags: null, scheme);
     }
 
     private static List<int> FindSessionNumbers(ZipArchive archive)
@@ -135,10 +147,10 @@ public static class SazReader
     /// own Host header instead, the same header every real HTTP/1.1 client
     /// already sends. A Host header can carry an explicit port
     /// ("example.com:8443"); <see cref="Session.Host"/> elsewhere in this
-    /// codebase is always a bare hostname (see SessionQuery.Url's own
-    /// remarks on this proxy's HTTPS-only, port-443-assumed design), so any
-    /// port suffix is stripped to match rather than introduce a
-    /// "host:port" shape this codebase doesn't otherwise use.
+    /// codebase is always a bare hostname (the port, when there is one,
+    /// stays in the Host header -- see SessionUrl.Of), so any port suffix
+    /// is stripped to match rather than introduce a "host:port" shape this
+    /// codebase doesn't otherwise use.
     /// </summary>
     private static string ExtractHost(IReadOnlyList<(string Name, string Value)> headers)
     {

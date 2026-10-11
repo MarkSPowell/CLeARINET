@@ -200,8 +200,9 @@ Reissue.
 Both send through CLeARINET itself, so capture has to be running. What they
 send shows up as a new session, and goes through the AutoResponder,
 breakpoints, FiddlerScript and extensions just like traffic from a browser.
-The Host header is set from the URL, and Content-Length from the body. Only
-HTTPS requests can be sent so far, and the body is sent as text.
+The Host header is set from the URL, and Content-Length from the body. The
+URL can be `http://` or `https://` (a path with no URL is sent as HTTPS),
+and the body is sent as text.
 
 ## Connections: upstream proxy and other devices
 
@@ -218,7 +219,7 @@ asks you to sign in; if yours is one of those, type the proxy's own
 `host:port` if you know it.
 
 **Allow remote computers to connect.** Lets phones, tablets and other
-computers use CLeARINET as their proxy, so their HTTPS traffic shows up
+computers use CLeARINET as their proxy, so their traffic shows up
 here. Check it, then click Start (it takes effect on the next Start; your
 firewall may ask whether to allow it). The row then shows the address and
 port to set as the proxy on the other device. On that device, with the
@@ -435,6 +436,6 @@ had is lost. To reset every setting, quit CLeARINET and delete the file.
 
 CLeARINET is an early, working MVP, not a 1.0 release. See
 [README.md](../README.md)'s Known limitations section for what's
-deliberately not here yet (plain `http://` capture, HTTP/2, proxies
+deliberately not here yet (HTTP/2, proxies
 that need a sign-in, little testing on a real Mac so far, and more) — that list is kept in one place, in README.md, rather than
 duplicated here.

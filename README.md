@@ -15,10 +15,10 @@ here yet. Feedback and issues are welcome.
 
 ## What it does today
 
-- Intercepts and decrypts HTTP(S) traffic through a local proxy, using a
-  per-install root certificate installed into the current user's trusted
-  root store so HTTPS traffic can be inspected — the same mechanism
-  Fiddler Classic uses.
+- Captures plain `http://` and HTTPS traffic through a local proxy,
+  decrypting HTTPS with a per-install root certificate installed into the
+  current user's trusted root store — the same mechanism Fiddler Classic
+  uses.
 - Registers itself as the system proxy while running — WinINET on
   Windows, per network service via `networksetup` on macOS — and recovers
   cleanly if a previous run didn't shut down properly (crash, kill,
@@ -230,9 +230,8 @@ way:
   and a Preferences/`about:config` editor aren't there yet. Breakpoints
   and the AutoResponder's on/off switch deliberately always start off. See
   the Preferences Design doc.
-- **HTTPS only.** Plain `http://` requests aren't captured or forwarded
-  yet; CLeARINET answers them with a page saying so. The Composer and
-  Replay send HTTPS only, and their bodies as text.
+- **The Composer and Replay send bodies as text.** A binary request body
+  can't be composed or replayed exactly yet.
 - **No built-in Chromium NetLog import.** NetLog import works through
   Eric Lawrence's ported NetLog importer extension (see above), an
   optional extension in the installers. No explicit HTTP/2 or TLS 1.3

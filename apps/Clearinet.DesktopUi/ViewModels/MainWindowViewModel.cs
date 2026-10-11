@@ -1213,7 +1213,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 StatusText =
                     $"Listening on {listeningOn}{portNote}, but couldn't register as the system " +
-                    $"proxy ({ex.Message}) -- point a browser's HTTPS proxy here manually instead. Outgoing: {gatewayNote}.";
+                    $"proxy ({ex.Message}) -- point a browser's proxy settings here manually instead. Outgoing: {gatewayNote}.";
             }
         }
         catch (Exception ex)

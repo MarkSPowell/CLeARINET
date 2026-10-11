@@ -53,11 +53,10 @@ internal static class SessionMapping
         session.id = id;
         session.host = hostname;
         session.PathAndQuery = request.Target;
-        // CLeARINET's own InterceptingProxyListener only ever intercepts
-        // HTTPS tunnels today (see that class's own remarks: "this spike
-        // only handles HTTPS tunnels") -- url/fullUrl/UriScheme below all
-        // assume that scope. Revisit if/when plain-HTTP proxying is added
-        // and this bridge starts seeing requests that came in that way too.
+        // The wire request this bridge receives doesn't carry the scheme,
+        // so url/fullUrl/UriScheme below assume HTTPS. CLeARINET's listener
+        // now captures plain http:// too; carry Session.Scheme across if
+        // this bridge ever needs to tell the two apart.
         session.url = $"{hostname}{request.Target}";
         session.fullUrl = $"https://{hostname}{request.Target}";
         session.state = SessionStates.Done;

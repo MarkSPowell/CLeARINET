@@ -83,7 +83,13 @@ public static class SazWriter
         // de-chunk) and Content-Length is set to this decoded body's real
         // length, which may differ from whatever the original header said
         // (or said nothing at all, for a chunked message).
-        stream.Write(HttpMessageWriter.BuildRequestBytes(session.Request));
+        // A plain HTTP request is written with its full URL in the request
+        // line, as Fiddler Classic writes it; SazReader reads the scheme
+        // back from that. HTTPS requests keep their path-only target.
+        var request = string.Equals(session.Scheme, "http", StringComparison.OrdinalIgnoreCase) && session.Request.Target.StartsWith('/')
+            ? session.Request with { Target = SessionUrl.Of(session) }
+            : session.Request;
+        stream.Write(HttpMessageWriter.BuildRequestBytes(request));
     }
 
     private static void WriteResponse(ZipArchive archive, Session session)

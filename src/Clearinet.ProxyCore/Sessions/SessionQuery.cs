@@ -157,11 +157,8 @@ public sealed class SessionQuery
         || HeadersContain(session.Request.Headers, text)
         || HeadersContain(session.Response.Headers, text);
 
-    // Matches SessionRow.Url's own scheme assumption -- CapturedRequest
-    // doesn't carry an explicit scheme (this proxy's whole design centers
-    // on CONNECT-tunneled HTTPS interception), so this is cosmetic text for
-    // substring matching, not a claim about what actually went on the wire.
-    private static string Url(Session session) => $"https://{session.Host}{session.Request.Target}";
+    // Matches SessionRow.Url: the session's scheme, host and target.
+    private static string Url(Session session) => $"{session.Scheme}://{session.Host}{session.Request.Target}";
 
     private static bool HeadersContain(IReadOnlyList<(string Name, string Value)> headers, string text)
     {

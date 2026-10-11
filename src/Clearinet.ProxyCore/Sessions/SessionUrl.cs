@@ -6,9 +6,9 @@ namespace Clearinet.ProxyCore.Sessions;
 public static class SessionUrl
 {
     /// <summary>
-    /// The request's full URL. CLeARINET captures HTTPS, so a relative target
-    /// is https://, using the Host header (which carries any non-default
-    /// port) or else the session's host. An absolute target is returned as is.
+    /// The request's full URL: the session's scheme, then the Host header
+    /// (which carries any non-default port) or else the session's host, then
+    /// the target. An absolute target is returned as is.
     /// </summary>
     public static string Of(Session session)
     {
@@ -20,6 +20,7 @@ public static class SessionUrl
         }
 
         var authority = ContentDecoder.FindHeader(session.Request.Headers, "Host") ?? session.Host;
-        return $"https://{authority}{(target.StartsWith('/') ? target : "/" + target)}";
+        var scheme = string.IsNullOrEmpty(session.Scheme) ? "https" : session.Scheme;
+        return $"{scheme}://{authority}{(target.StartsWith('/') ? target : "/" + target)}";
     }
 }

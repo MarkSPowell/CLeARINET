@@ -352,7 +352,7 @@
             <CheckBox Content="Allow remote computers to connect"
                       IsChecked="{Binding AllowRemoteClients, Mode=TwoWay}"
                       IsEnabled="{Binding !IsRunning}"
-                      ToolTip.Tip="Lets phones and other computers on your network use CLeARINET as their proxy, so their HTTPS traffic shows here. Anyone on the network can then use it, so turn it off when you've finished. Takes effect the next time you click Start."
+                      ToolTip.Tip="Lets phones and other computers on your network use CLeARINET as their proxy, so their web traffic shows here. Anyone on the network can then use it, so turn it off when you've finished. Takes effect the next time you click Start."
                       VerticalAlignment="Center" />
             <TextBlock Text="{Binding RemoteClientsHint}" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap" />
           </StackPanel>

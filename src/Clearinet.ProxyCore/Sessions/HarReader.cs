@@ -50,8 +50,8 @@ public static class HarReader
             index++;
             try
             {
-                var (host, startedAt, request, response, flags) = ReadEntry(entry);
-                sessionStore.Add(host, startedAt, request, response, flags);
+                var (host, startedAt, request, response, flags, scheme) = ReadEntry(entry);
+                sessionStore.Add(host, startedAt, request, response, flags, scheme);
                 imported++;
             }
             catch (Exception ex) when (ex is InvalidDataException or FormatException or InvalidOperationException or KeyNotFoundException or UriFormatException)
@@ -63,7 +63,7 @@ public static class HarReader
         return new HarImportResult(imported, skipped);
     }
 
-    private static (string Host, DateTimeOffset StartedAt, CapturedRequest Request, CapturedResponse Response, IReadOnlyDictionary<string, string>? Flags)
+    private static (string Host, DateTimeOffset StartedAt, CapturedRequest Request, CapturedResponse Response, IReadOnlyDictionary<string, string>? Flags, string Scheme)
         ReadEntry(JsonElement entry)
     {
         var harRequest = Required(entry, "request");
@@ -111,7 +111,7 @@ public static class HarReader
             ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["ui-comments"] = comment }
             : null;
 
-        return (uri.Host, startedAt, request, response, flags);
+        return (uri.Host, startedAt, request, response, flags, string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase) ? "http" : "https");
     }
 
     private static JsonElement Required(JsonElement parent, string name) =>

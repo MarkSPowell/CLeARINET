@@ -47,16 +47,143 @@ public class ListenerConnectionsTests
     }
 
     [Fact]
-    public async Task AnswersOtherPlainHttpRequestsInsteadOfDroppingThem()
+    public async Task ForwardsPlainHttpAndRecordsIt()
+    {
+        using var root = NewRoot();
+        await using var origin = UpstreamProxyTests.FakeProxy.Start("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello");
+        var (store, recorded) = RecordingStore();
+        var listener = InterceptingProxyListener.StartOnAvailablePort(0, new LeafCertificateProvider(root), store);
+        try
+        {
+            var response = await SendPlainAsync(
+                listener.Port,
+                $"GET http://127.0.0.1:{origin.Port}/hello?x=1 HTTP/1.1\r\nHost: 127.0.0.1:{origin.Port}\r\nProxy-Connection: keep-alive\r\n\r\n");
+
+            Assert.Equal(200, response.StatusCode);
+            Assert.Equal("hello", Encoding.ASCII.GetString(response.Body));
+
+            // The server gets an ordinary request: path only, no proxy headers.
+            var head = await origin.Received.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.StartsWith("GET /hello?x=1 HTTP/1.1\r\n", head);
+            Assert.DoesNotContain("Proxy-Connection", head);
+
+            var session = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Equal("http", session.Scheme);
+            Assert.Equal("127.0.0.1", session.Host);
+            Assert.Equal("/hello?x=1", session.Request.Target);
+            Assert.Equal($"127.0.0.1:{origin.Port}", ContentDecoder.FindHeader(session.Request.Headers, "Host"));
+            Assert.Equal($"http://127.0.0.1:{origin.Port}/hello?x=1", SessionUrl.Of(session));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task OneClientConnectionCanReachDifferentServers()
+    {
+        using var root = NewRoot();
+        await using var first = UpstreamProxyTests.FakeProxy.Start("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst");
+        await using var second = UpstreamProxyTests.FakeProxy.Start("HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecond");
+        var listener = InterceptingProxyListener.StartOnAvailablePort(0, new LeafCertificateProvider(root), new SessionStore());
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, listener.Port, timeout.Token);
+            var stream = client.GetStream();
+
+            foreach (var (server, expected) in new[] { (first, "first"), (second, "second") })
+            {
+                await stream.WriteAsync(
+                    Encoding.ASCII.GetBytes($"GET http://127.0.0.1:{server.Port}/ HTTP/1.1\r\nHost: 127.0.0.1:{server.Port}\r\n\r\n"), timeout.Token);
+                var response = await Http1MessageReader.ReadResponseAsync(stream, isResponseToHeadRequest: false, timeout.Token);
+                Assert.Equal(expected, Encoding.ASCII.GetString(response!.Body));
+            }
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task RelaysAResponseThatEndsWhenTheServerCloses()
+    {
+        using var root = NewRoot();
+        // No Content-Length and not chunked: the body runs until the server
+        // closes the connection (the fake server closes shortly after replying).
+        await using var origin = UpstreamProxyTests.FakeProxy.Start("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nuntil close");
+        var listener = InterceptingProxyListener.StartOnAvailablePort(0, new LeafCertificateProvider(root), new SessionStore());
+        try
+        {
+            var response = await SendPlainAsync(listener.Port, $"GET http://127.0.0.1:{origin.Port}/ HTTP/1.1\r\nHost: 127.0.0.1:{origin.Port}\r\n\r\n");
+
+            Assert.Equal("until close", Encoding.ASCII.GetString(response.Body));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task AnswersBadGatewayWhenTheServerCantBeReached()
+    {
+        using var root = NewRoot();
+        var (store, recorded) = RecordingStore();
+        var listener = InterceptingProxyListener.StartOnAvailablePort(0, new LeafCertificateProvider(root), store);
+        try
+        {
+            // Nothing listens on port 1.
+            var response = await SendPlainAsync(listener.Port, "GET http://127.0.0.1:1/ HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n");
+
+            Assert.Equal(502, response.StatusCode);
+            Assert.Contains("couldn't connect to 127.0.0.1:1", Encoding.UTF8.GetString(response.Body));
+
+            var session = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Equal(502, session.Response.StatusCode);
+            Assert.Equal("http", session.Scheme);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task AnswersRequestsItCantForwardInsteadOfDroppingThem()
     {
         using var root = NewRoot();
         var listener = InterceptingProxyListener.StartOnAvailablePort(0, new LeafCertificateProvider(root), new SessionStore());
         try
         {
-            var response = await SendPlainAsync(listener.Port, "GET http://example.test/ HTTP/1.1\r\nHost: example.test\r\n\r\n");
+            var response = await SendPlainAsync(listener.Port, "GET ftp://example.test/file HTTP/1.1\r\nHost: example.test\r\n\r\n");
 
             Assert.Equal(501, response.StatusCode);
-            Assert.Contains("only captures HTTPS", Encoding.UTF8.GetString(response.Body));
+            Assert.Contains("forwards http:// and https:// requests only", Encoding.UTF8.GetString(response.Body));
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task SendsPlainHttpThroughTheGatewayAsAProxyRequest()
+    {
+        using var root = NewRoot();
+        await using var gateway = UpstreamProxyTests.FakeProxy.Start("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
+        var listener = InterceptingProxyListener.StartOnAvailablePort(0, new LeafCertificateProvider(root), new SessionStore());
+        listener.Gateway = new UpstreamProxy("127.0.0.1", gateway.Port);
+        try
+        {
+            var response = await SendPlainAsync(listener.Port, "GET http://example.test/a?b=1 HTTP/1.1\r\nHost: example.test\r\n\r\n");
+
+            Assert.Equal("ok", Encoding.ASCII.GetString(response.Body));
+            var head = await gateway.Received.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.StartsWith("GET http://example.test/a?b=1 HTTP/1.1\r\n", head);
         }
         finally
         {
@@ -123,6 +250,14 @@ public class ListenerConnectionsTests
     public void RecognisesRequestsForItself(string target, bool forProxy)
     {
         Assert.Equal(forProxy, ProxyHomePage.IsRequestForProxy(target, 8888));
+    }
+
+    private static (SessionStore Store, TaskCompletionSource<Session> Recorded) RecordingStore()
+    {
+        var store = new SessionStore();
+        var recorded = new TaskCompletionSource<Session>(TaskCreationOptions.RunContinuationsAsynchronously);
+        store.SessionAdded += session => recorded.TrySetResult(session);
+        return (store, recorded);
     }
 
     private static async Task<CapturedResponse> SendPlainAsync(int port, string request)
