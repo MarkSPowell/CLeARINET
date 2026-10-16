@@ -34,7 +34,8 @@ of this doc is filled in.
 | JSON / WebForms / ImageView inspectors | Shipped (JSON as indented text, not a tree) |
 | Image bloat detection (ImageBloat extension) | Built in: Image Bloat column, row tint, ImageView breakdown; no in-page overlay |
 | Composer and Reissue (Replay) | Shipped: raw-request Composer tab and Edit > Replay (R); http:// and https://, sent through CLeARINET so the result is captured |
-| Upstream gateway (chain to the system proxy) | Shipped: the proxy set before Start, or one set under Tools > Connections; no PAC, SOCKS or proxy authentication yet |
+| Upstream gateway (chain to the system proxy) | Shipped: the proxy set before Start, or one set under Tools > Connections; signs in to a proxy that asks (Negotiate/Kerberos, NTLM, Basic); no SOCKS yet |
+| Automatic proxy configuration (PAC script, WPAD) | Shipped: the system's setup script or automatic detection, run per request with the standard PAC functions (Jint), falling back to the next proxy listed or the manual proxy; turned off while capturing and restored on Stop |
 | Allow remote computers to connect, certificate download page | Shipped: Tools > Connections, and http://clearinet/ on the other device |
 | HAR export | Shipped |
 | Response decompression (gzip, deflate, zstd, chains) | Shipped |

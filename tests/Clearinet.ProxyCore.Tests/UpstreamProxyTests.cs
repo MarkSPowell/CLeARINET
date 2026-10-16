@@ -92,12 +92,15 @@ public class UpstreamProxyTests
     [Fact]
     public async Task ExplainsAProxyThatWantsASignIn()
     {
-        await using var fake = FakeProxy.Start("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Negotiate\r\n\r\n");
+        // Basic needs a user name and password, and none was given.
+        await using var fake = FakeProxy.Start(
+            "HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"corp\"\r\nContent-Length: 0\r\n\r\n");
 
         var error = await Assert.ThrowsAsync<IOException>(() =>
             new UpstreamProxy("127.0.0.1", fake.Port).ConnectTunnelAsync("example.test", 443, CancellationToken.None));
 
-        Assert.Contains("authentication", error.Message);
+        Assert.Contains("asked for a sign-in", error.Message);
+        Assert.Contains("Basic", error.Message);
     }
 
     [Fact]

@@ -27,6 +27,12 @@
       Clearinet.Extensibility) so HAR export can decode bodies too.
     -->
     <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
+    <!--
+      Runs proxy auto-config (PAC) scripts; see Proxy/AutoConfig/PacScript.
+      The same pure-C# ECMAScript interpreter (BSD-2-Clause) and version
+      Clearinet.Compatibility uses for FiddlerScript.
+    -->
+    <PackageReference Include="Jint" Version="4.16.3" />
   </ItemGroup>
 
 </Project>

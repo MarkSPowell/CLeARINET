@@ -349,6 +349,20 @@
             <TextBlock Text="{Binding GatewayStatus}" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap" />
           </StackPanel>
           <StackPanel Orientation="Horizontal" Spacing="10">
+            <TextBlock Text="Proxy sign-in:" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" />
+            <TextBox Text="{Binding ProxyUserName, Mode=TwoWay}"
+                     PlaceholderText="User name (optional)"
+                     ToolTip.Tip="For an upstream proxy that asks for a sign-in. Leave empty to sign in as you (Windows sign-in), which is what most company proxies use. Type DOMAIN\user or a user name to use a different account."
+                     VerticalAlignment="Center"
+                     Width="180" />
+            <TextBox Text="{Binding ProxyPassword, Mode=TwoWay}"
+                     PasswordChar="&#x2022;"
+                     PlaceholderText="Password"
+                     ToolTip.Tip="Only kept while CLeARINET is running; it's never saved."
+                     VerticalAlignment="Center"
+                     Width="160" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="10">
             <CheckBox Content="Allow remote computers to connect"
                       IsChecked="{Binding AllowRemoteClients, Mode=TwoWay}"
                       IsEnabled="{Binding !IsRunning}"

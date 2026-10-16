@@ -178,11 +178,15 @@ server.
    wins, so order matters when two rules could both match the same request.
    **Remove** deletes the selected rule.
 
+Rules are saved as you edit them, with each row's checkbox, and are back
+the next time you open CLeARINET. The panel's own switch always starts
+off (see "Settings that are remembered").
+
 ## Composer and Replay
 
 The **Composer** tab (next to **Inspectors**) sends a request you've
 written or edited, like Fiddler Classic's Composer. Type the request as raw
-HTTP: a first line with the method, a full `https://` URL and the version,
+HTTP: a first line with the method, a full `https://` or `http://` URL and the version,
 then headers, a blank line, and any body. Click **Execute**.
 
 ```
@@ -213,10 +217,29 @@ through a proxy (common at work), CLeARINET has to send its own connections
 through that proxy too. Leave the box empty and CLeARINET uses whatever
 proxy the computer was set to before you clicked Start; the status line
 says what it chose. Type `host:port` to use a specific proxy, or `none` to
-connect directly. Changes apply straight away. CLeARINET can't yet use an
-automatic proxy configuration script (PAC), a SOCKS proxy, or a proxy that
-asks you to sign in; if yours is one of those, type the proxy's own
-`host:port` if you know it.
+connect directly. Changes apply straight away.
+
+If the computer uses an automatic proxy configuration script ("Use setup
+script" on Windows, "Automatic proxy configuration" on macOS) or
+"Automatically detect settings", CLeARINET fetches the script when you
+click Start and asks it which proxy to use for each site, as a browser
+would; the status line shows the script's address once it has loaded. If
+the script can't be found or loaded, CLeARINET uses the computer's manual
+proxy setting if there is one, or connects directly, and the status line
+says why. While capturing, CLeARINET turns those automatic settings off
+(browsers would otherwise skip CLeARINET) and turns them back on when you
+click Stop.
+
+**Proxy sign-in.** If the upstream proxy asks for a sign-in, CLeARINET
+signs in as you, the way browsers do on a company network (Windows
+sign-in: Negotiate, which is Kerberos, or NTLM). To use a different
+account, or for a proxy that wants a plain user name and password
+(Basic), enter them on the **Proxy sign-in** line. Type `DOMAIN\user` for
+a domain account. The password is kept only while CLeARINET is running
+and is never saved. If signing in doesn't work, the 502 page CLeARINET
+shows says what the proxy offered.
+
+CLeARINET can't yet use a SOCKS proxy.
 
 **Allow remote computers to connect.** Lets phones, tablets and other
 computers use CLeARINET as their proxy, so their traffic shows up
@@ -399,7 +422,11 @@ and macOS:
 - The port choice (Auto or a specific port number)
 - Which Tools-menu panels are shown (FiddlerScript, Extensions, Legacy
   Extension Host, Also Break On, Connections)
-- The upstream proxy setting and whether remote computers may connect
+- The upstream proxy setting, the proxy sign-in user name (not the
+  password) and whether remote computers may connect
+- The window's size and position, and whether it was maximized
+- The AutoResponder rules (in their own file, `autoresponder-rules.json`,
+  next to `preferences.json`)
 - The session filter text
 - The FiddlerScript path you last entered
 - Whether the legacy extension host launches automatically

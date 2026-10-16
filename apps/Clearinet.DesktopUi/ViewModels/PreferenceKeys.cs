@@ -27,11 +27,21 @@ internal static class PreferenceKeys
     public const string FiddlerScriptPath = "clearinet.fiddlerscript.path";
     public const string AutoLaunchLegacyHost = "clearinet.extensions.legacyhost.autolaunch";
 
-    /// <summary>The Import/Export via Extension picker's last choice (see FormatChoice.Key), highlighted next time.</summary>
     public const string ShowConnectionsRow = "clearinet.ui.panels.connections";
     public const string UpstreamProxy = "clearinet.proxy.upstream";
     public const string AllowRemoteClients = "clearinet.proxy.allowremote";
 
+    /// <summary>The user name for an upstream proxy that asks for a sign-in. The password is never saved.</summary>
+    public const string UpstreamProxyUserName = "clearinet.proxy.upstream.username";
+
+    /// <summary>The main window's placement: position in screen pixels, size in the window's own units.</summary>
+    public const string WindowLeft = "clearinet.ui.window.left";
+    public const string WindowTop = "clearinet.ui.window.top";
+    public const string WindowWidth = "clearinet.ui.window.width";
+    public const string WindowHeight = "clearinet.ui.window.height";
+    public const string WindowMaximized = "clearinet.ui.window.maximized";
+
+    /// <summary>The Import/Export via Extension picker's last choice (see FormatChoice.Key), highlighted next time.</summary>
     public const string LastImportFormat = "clearinet.extensions.import.lastformat";
     public const string LastExportFormat = "clearinet.extensions.export.lastformat";
 }

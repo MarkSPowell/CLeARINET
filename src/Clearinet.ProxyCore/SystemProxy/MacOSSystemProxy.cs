@@ -63,24 +63,24 @@ public static class MacOSSystemProxy
             RunNetworkSetupCommand(BuildSetProxyStateArguments(serviceName, enabled: true, secure: false));
             RunNetworkSetupCommand(BuildSetProxyArguments(serviceName, "127.0.0.1", port, secure: true));
             RunNetworkSetupCommand(BuildSetProxyStateArguments(serviceName, enabled: true, secure: true));
+
+            // An automatic proxy configuration script, or automatic proxy
+            // discovery, would take priority over the proxy just set, so
+            // turn both off for the capture; the backup puts them back.
+            TryRunNetworkSetupCommand(BuildSetAutoProxyStateArguments(serviceName, enabled: false));
+            TryRunNetworkSetupCommand(BuildSetProxyAutoDiscoveryArguments(serviceName, enabled: false));
         }
     }
 
-    /// <summary>
-    /// Restores every network service's proxy settings to whatever
-    /// <see cref="Enable"/> last backed up, and deletes the backup file. A
-    /// no-op on anything but macOS. If no backup file exists -- Disable
-    /// called without a matching Enable, or it was already cleaned up --
-    /// the safe fallback is just turning each currently-enabled service's
-    /// proxy state off, the same "don't leave it pointed at a dead port"
-    /// posture <see cref="WinInetSystemProxy.Disable"/> takes.
-    /// </summary>
     /// <summary>
     /// The HTTPS (or, failing that, HTTP) proxy an enabled network service
     /// is set to use right now, for CLeARINET to forward through (see
     /// <see cref="Proxy.UpstreamProxy"/>). Call before <see cref="Enable"/>
     /// replaces the setting with CLeARINET itself. Ignores a setting that
-    /// points at CLeARINET's own <paramref name="ownPort"/>.
+    /// points at CLeARINET's own <paramref name="ownPort"/>. A service using
+    /// an automatic proxy configuration script or automatic proxy discovery
+    /// gets a <see cref="Proxy.AutoConfig.ProxyAutoConfig"/> instead, with
+    /// its manual proxy (if any) as the fallback.
     /// </summary>
     [SupportedOSPlatform("macos")]
     public static UpstreamProxyDetection DetectUpstream(int ownPort)
@@ -100,7 +100,20 @@ public static class MacOSSystemProxy
                 (settings.WebProxyEnabled && settings.WebProxyServer is { Length: > 0 } webServer && settings.WebProxyPort is { } webPort
                     ? new Proxy.UpstreamProxy(webServer, webPort)
                     : null);
-            if (proxy is not null && !proxy.IsSelf(ownPort))
+            if (proxy is not null && proxy.IsSelf(ownPort))
+            {
+                proxy = null;
+            }
+
+            var scriptUrl = settings.AutoProxyEnabled == true ? settings.AutoProxyUrl : null;
+            if (settings.AutoDiscoveryEnabled == true || !string.IsNullOrWhiteSpace(scriptUrl))
+            {
+                return UpstreamProxyDetection.Automatic(
+                    Proxy.AutoConfig.ProxyAutoConfig.Create(settings.AutoDiscoveryEnabled == true, scriptUrl, proxy),
+                    $"{serviceName} proxy settings");
+            }
+
+            if (proxy is not null)
             {
                 return new UpstreamProxyDetection(proxy, $"forwarding through {proxy} ({serviceName} proxy settings)");
             }
@@ -109,6 +122,15 @@ public static class MacOSSystemProxy
         return UpstreamProxyDetection.None;
     }
 
+    /// <summary>
+    /// Restores every network service's proxy settings to whatever
+    /// <see cref="Enable"/> last backed up, and deletes the backup file. A
+    /// no-op on anything but macOS. If no backup file exists -- Disable
+    /// called without a matching Enable, or it was already cleaned up --
+    /// the safe fallback is just turning each currently-enabled service's
+    /// proxy state off, the same "don't leave it pointed at a dead port"
+    /// posture <see cref="WinInetSystemProxy.Disable"/> takes.
+    /// </summary>
     [SupportedOSPlatform("macos")]
     public static void Disable()
     {
@@ -167,9 +189,18 @@ public static class MacOSSystemProxy
     {
         var web = ParseProxyState(RunNetworkSetupCommand(BuildGetProxyArguments(serviceName, secure: false)));
         var secureWeb = ParseProxyState(RunNetworkSetupCommand(BuildGetProxyArguments(serviceName, secure: true)));
+        var autoProxy = TryRunNetworkSetupCommand(BuildGetAutoProxyUrlArguments(serviceName)) is { } autoProxyOutput
+            ? ParseAutoProxyUrl(autoProxyOutput)
+            : ((string? Url, bool Enabled)?)null;
+        var autoDiscovery = TryRunNetworkSetupCommand(BuildGetProxyAutoDiscoveryArguments(serviceName)) is { } discoveryOutput
+            ? ParseProxyAutoDiscovery(discoveryOutput)
+            : null;
 
         return new NetworkServiceProxyBackup
         {
+            AutoProxyUrl = autoProxy?.Url,
+            AutoProxyEnabled = autoProxy?.Enabled,
+            AutoDiscoveryEnabled = autoDiscovery,
             ServiceName = serviceName,
             WebProxyEnabled = web.Enabled,
             WebProxyServer = web.Server,
@@ -202,6 +233,22 @@ public static class MacOSSystemProxy
         }
 
         RunNetworkSetupCommand(BuildSetProxyStateArguments(service.ServiceName, service.SecureWebProxyEnabled, secure: true));
+
+        // Null in a backup from an older version, which didn't change these.
+        if (service.AutoProxyEnabled is { } autoProxyEnabled)
+        {
+            if (service.AutoProxyUrl is not null)
+            {
+                TryRunNetworkSetupCommand(BuildSetAutoProxyUrlArguments(service.ServiceName, service.AutoProxyUrl));
+            }
+
+            TryRunNetworkSetupCommand(BuildSetAutoProxyStateArguments(service.ServiceName, autoProxyEnabled));
+        }
+
+        if (service.AutoDiscoveryEnabled is { } autoDiscoveryEnabled)
+        {
+            TryRunNetworkSetupCommand(BuildSetProxyAutoDiscoveryArguments(service.ServiceName, autoDiscoveryEnabled));
+        }
     }
 
     /// <summary>
@@ -228,6 +275,65 @@ public static class MacOSSystemProxy
 
     internal static string[] BuildSetProxyStateArguments(string serviceName, bool enabled, bool secure) =>
         [secure ? "-setsecurewebproxystate" : "-setwebproxystate", serviceName, enabled ? "on" : "off"];
+
+    internal static string[] BuildGetAutoProxyUrlArguments(string serviceName) => ["-getautoproxyurl", serviceName];
+
+    internal static string[] BuildSetAutoProxyUrlArguments(string serviceName, string url) => ["-setautoproxyurl", serviceName, url];
+
+    internal static string[] BuildSetAutoProxyStateArguments(string serviceName, bool enabled) =>
+        ["-setautoproxystate", serviceName, enabled ? "on" : "off"];
+
+    internal static string[] BuildGetProxyAutoDiscoveryArguments(string serviceName) => ["-getproxyautodiscovery", serviceName];
+
+    internal static string[] BuildSetProxyAutoDiscoveryArguments(string serviceName, bool enabled) =>
+        ["-setproxyautodiscovery", serviceName, enabled ? "on" : "off"];
+
+    /// <summary>
+    /// Parses <c>networksetup -getautoproxyurl</c>'s output:
+    /// <code>
+    /// URL: http://wpad.example.com/proxy.pac
+    /// Enabled: Yes
+    /// </code>
+    /// with "URL: (null)" when none is set.
+    /// </summary>
+    internal static (string? Url, bool Enabled) ParseAutoProxyUrl(string output)
+    {
+        string? url = null;
+        var enabled = false;
+        foreach (var rawLine in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var line = rawLine.Trim();
+            if (line.StartsWith("URL:", StringComparison.Ordinal))
+            {
+                var value = line["URL:".Length..].Trim();
+                url = value.Length == 0 || value == "(null)" ? null : value;
+            }
+            else if (line.StartsWith("Enabled:", StringComparison.Ordinal))
+            {
+                enabled = line["Enabled:".Length..].Trim().Equals("Yes", StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        return (url, enabled);
+    }
+
+    /// <summary>Parses <c>networksetup -getproxyautodiscovery</c>'s "Auto Proxy Discovery: On" (or Off).</summary>
+    internal static bool? ParseProxyAutoDiscovery(string output)
+    {
+        var colon = output.IndexOf(':');
+        if (colon < 0)
+        {
+            return null;
+        }
+
+        var value = output[(colon + 1)..].Trim();
+        if (value.Equals("On", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return value.Equals("Off", StringComparison.OrdinalIgnoreCase) ? false : null;
+    }
 
     /// <summary>
     /// Parses <c>networksetup -listallnetworkservices</c>' output: a
@@ -302,6 +408,24 @@ public static class MacOSSystemProxy
         }
 
         return new ProxyState(enabled, server, port);
+    }
+
+    /// <summary>
+    /// For the automatic-proxy settings, which a service may not support:
+    /// returns null instead of throwing when <c>networksetup</c> fails.
+    /// </summary>
+    [SupportedOSPlatform("macos")]
+    private static string? TryRunNetworkSetupCommand(string[] arguments)
+    {
+        try
+        {
+            return RunNetworkSetupCommand(arguments);
+        }
+        catch (SystemProxyCommandException ex)
+        {
+            Console.WriteLine($"[proxy] {ex.Message}");
+            return null;
+        }
     }
 
     [SupportedOSPlatform("macos")]
@@ -412,6 +536,15 @@ public static class MacOSSystemProxy
         public string? SecureWebProxyServer { get; set; }
 
         public int? SecureWebProxyPort { get; set; }
+
+        /// <summary>The automatic proxy configuration script's URL ("Automatic proxy configuration").</summary>
+        public string? AutoProxyUrl { get; set; }
+
+        /// <summary>Whether that script was on; null in a backup from an older version.</summary>
+        public bool? AutoProxyEnabled { get; set; }
+
+        /// <summary>"Auto proxy discovery"; null in a backup from an older version.</summary>
+        public bool? AutoDiscoveryEnabled { get; set; }
     }
 
     /// <summary>

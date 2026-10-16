@@ -8,6 +8,7 @@ using Clearinet.ProxyCore.Breakpoints;
 using Clearinet.ProxyCore.Certificates;
 using Clearinet.ProxyCore.Extensions;
 using Clearinet.ProxyCore.Http;
+using Clearinet.ProxyCore.Proxy.AutoConfig;
 using Clearinet.ProxyCore.Scripting;
 using Clearinet.ProxyCore.Sessions;
 
@@ -65,6 +66,8 @@ public sealed class InterceptingProxyListener
     private readonly TcpListener _listener;
     private CancellationTokenSource? _cts;
     private UpstreamProxy? _gateway;
+    private ProxyAutoConfig? _autoConfig;
+    private NetworkCredential? _proxyCredential;
 
     public InterceptingProxyListener(
         int port,
@@ -132,6 +135,62 @@ public sealed class InterceptingProxyListener
     {
         get => Volatile.Read(ref _gateway);
         set => Volatile.Write(ref _gateway, value);
+    }
+
+    /// <summary>
+    /// Automatic proxy configuration (a PAC script): when set and
+    /// <see cref="Gateway"/> isn't, each server connection asks it which
+    /// proxy to use, trying the next one it lists when one can't be reached.
+    /// Read when each server connection is opened, like <see cref="Gateway"/>.
+    /// The listener doesn't own it; whoever sets it disposes it.
+    /// </summary>
+    public ProxyAutoConfig? AutoConfig
+    {
+        get => Volatile.Read(ref _autoConfig);
+        set => Volatile.Write(ref _autoConfig, value);
+    }
+
+    /// <summary>
+    /// The user name and password for an upstream proxy that asks for a
+    /// sign-in (see <see cref="ProxyAuthenticator"/>), or null to sign in as
+    /// the signed-in account (Windows sign-in: Negotiate or NTLM). Read
+    /// each time a sign-in is needed.
+    /// </summary>
+    public NetworkCredential? ProxyCredential
+    {
+        get => Volatile.Read(ref _proxyCredential);
+        set => Volatile.Write(ref _proxyCredential, value);
+    }
+
+    private static readonly IReadOnlyList<UpstreamProxy?> DirectOnly = [null];
+
+    /// <summary>
+    /// The routes to try for a server connection, in order: a proxy, or
+    /// null for direct. This machine is always reached directly.
+    /// </summary>
+    private async Task<IReadOnlyList<UpstreamProxy?>> ChooseRoutesAsync(
+        bool isTls, string host, int port, string target, CancellationToken cancellationToken)
+    {
+        if (UpstreamProxy.IsLoopback(host))
+        {
+            return DirectOnly;
+        }
+
+        if (Gateway is { } gateway)
+        {
+            return gateway.ShouldBypass(host) ? DirectOnly : [gateway];
+        }
+
+        if (AutoConfig is not { } autoConfig)
+        {
+            return DirectOnly;
+        }
+
+        // Browsers give a PAC script only the scheme, host and port of an
+        // HTTPS request (the path is private), and the whole URL for HTTP.
+        var authority = (host.Contains(':') ? $"[{host}]" : host) + (port == (isTls ? 443 : 80) ? string.Empty : $":{port}");
+        var url = isTls ? $"https://{authority}/" : $"http://{authority}{target}";
+        return await autoConfig.GetRoutesAsync(url, host, cancellationToken);
     }
 
     /// <summary>
@@ -236,7 +295,7 @@ public sealed class InterceptingProxyListener
 
                 await PumpSessionsAsync(
                     isTls: false, string.Empty, PlainHttpRequest.DefaultPort, client, clientStream, first, _sessionStore,
-                    _breakpointManager, _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, Gateway, Port,
+                    _breakpointManager, _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, Port,
                     () => _leafProvider.IssuerCertificateDer, cancellationToken);
                 return;
             }
@@ -261,7 +320,7 @@ public sealed class InterceptingProxyListener
             // PumpSessionsAsync's own remarks on why it has to be lazy.
             await PumpSessionsAsync(
                 isTls: true, targetHost, targetPort, client, clientTls, firstRequest: null, _sessionStore, _breakpointManager,
-                _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, Gateway, Port,
+                _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, Port,
                 () => _leafProvider.IssuerCertificateDer, cancellationToken);
         }
         catch (BreakpointAbortedException ex)
@@ -356,7 +415,8 @@ public sealed class InterceptingProxyListener
         IFiddlerScriptRunner? scriptRunner,
         IExtensionAutoTamperHost? extensionHost,
         IExtensionSessionHost? sessionHost,
-        UpstreamProxy? gateway,
+        Func<bool, string, int, string, CancellationToken, Task<IReadOnlyList<UpstreamProxy?>>> chooseRoutes,
+        Func<NetworkCredential?> proxyCredential,
         int ownPort,
         Func<byte[]> rootCertificateDer,
         CancellationToken cancellationToken)
@@ -371,6 +431,7 @@ public sealed class InterceptingProxyListener
         Stream? upstreamTls = null;
         string? upstreamKey = null;
         var sendAbsoluteForm = false;
+        UpstreamProxy? upstreamRoute = null;
         var pendingRequest = firstRequest;
 
         // Opens the upstream connection the first time a request on this
@@ -378,7 +439,7 @@ public sealed class InterceptingProxyListener
         // request that AutoResponder or an extension answers never gets
         // here, so a host that doesn't even resolve (the CSP extension's
         // report host, say) still works.
-        async Task<Stream> EnsureUpstreamAsync()
+        async Task<Stream> EnsureUpstreamAsync(string target)
         {
             var key = $"{targetHost}:{targetPort}";
             if (upstreamTls is not null && upstreamKey != key)
@@ -392,22 +453,30 @@ public sealed class InterceptingProxyListener
 
             if (upstreamTls is null)
             {
-                var useGateway = gateway is not null && !gateway.ShouldBypass(targetHost);
+                // Directly, through the network's proxy, or as its PAC
+                // script says -- trying the next route when one can't be
+                // reached, as browsers do.
+                upstreamClient?.Dispose(); // left over from a failed TLS handshake
+                upstreamClient = null;
+                var routes = await chooseRoutes(isTls, targetHost, targetPort, target, cancellationToken);
+                UpstreamProxy? route = null;
+                for (var i = 0; upstreamClient is null; i++)
+                {
+                    route = routes[i];
+                    try
+                    {
+                        upstreamClient = await ConnectAsync(route);
+                    }
+                    catch (SocketException ex) when (i + 1 < routes.Count)
+                    {
+                        Console.WriteLine(
+                            $"[proxy] {targetHost}: couldn't reach {DescribeRoute(route)} ({ex.Message}); trying {DescribeRoute(routes[i + 1])}.");
+                    }
+                }
+
                 if (isTls)
                 {
-                    if (useGateway)
-                    {
-                        // Through the network's own proxy (see UpstreamProxy):
-                        // a CONNECT tunnel, then TLS to the server inside it.
-                        upstreamClient = await gateway!.ConnectTunnelAsync(targetHost, targetPort, cancellationToken);
-                    }
-                    else
-                    {
-                        upstreamClient = new TcpClient();
-                        await upstreamClient.ConnectAsync(targetHost, targetPort, cancellationToken);
-                    }
-
-                    var tls = new SslStream(upstreamClient.GetStream(), leaveInnerStreamOpen: false);
+                    var tls = new SslStream(upstreamClient!.GetStream(), leaveInnerStreamOpen: false);
                     // Deliberately using default certificate validation
                     // here: this proxy should surface a real upstream cert
                     // problem, not hide it, even though it's standing in
@@ -418,27 +487,98 @@ public sealed class InterceptingProxyListener
                 }
                 else
                 {
-                    // Plain HTTP goes to the network's proxy as an ordinary
-                    // proxy request (full URL in the request line), or
-                    // straight to the server.
-                    upstreamClient = new TcpClient();
-                    if (useGateway)
-                    {
-                        await upstreamClient.ConnectAsync(gateway!.Host, gateway.Port, cancellationToken);
-                    }
-                    else
-                    {
-                        await upstreamClient.ConnectAsync(targetHost, targetPort, cancellationToken);
-                    }
-
-                    upstreamTls = upstreamClient.GetStream();
-                    sendAbsoluteForm = useGateway;
+                    // Plain HTTP goes to a proxy as an ordinary proxy
+                    // request (full URL in the request line).
+                    upstreamTls = upstreamClient!.GetStream();
+                    sendAbsoluteForm = route is not null;
                 }
+
+                upstreamRoute = route;
 
                 upstreamKey = key;
             }
 
             return upstreamTls;
+        }
+
+        // One route: a CONNECT tunnel through a proxy for HTTPS, a plain
+        // connection to the proxy for HTTP, or straight to the server.
+        async Task<TcpClient> ConnectAsync(UpstreamProxy? route)
+        {
+            if (route is not null && isTls)
+            {
+                return await route.ConnectTunnelAsync(targetHost, targetPort, proxyCredential(), cancellationToken);
+            }
+
+            var client = new TcpClient();
+            try
+            {
+                if (route is null)
+                {
+                    await client.ConnectAsync(targetHost, targetPort, cancellationToken);
+                }
+                else
+                {
+                    await client.ConnectAsync(route.Host, route.Port, cancellationToken);
+                }
+
+                return client;
+            }
+            catch
+            {
+                client.Dispose();
+                throw;
+            }
+        }
+
+        // A plain HTTP request sent through a proxy that answered 407:
+        // sign in (see ProxyAuthenticator) and send the request again, on
+        // the same connection when the proxy keeps it open. Returns the
+        // answer to pass on: the real response, or the last 407 when
+        // signing in didn't work. Null if the proxy closed the connection.
+        async Task<CapturedResponse?> SignInToProxyAsync(CapturedRequest request, CapturedResponse challenge)
+        {
+            var proxy = upstreamRoute!;
+            var credential = proxyCredential();
+            using var authenticator = new ProxyAuthenticator(proxy.Host, credential);
+            var reply = challenge;
+            while (reply.StatusCode == 407)
+            {
+                var authorization = authenticator.Respond(reply.Headers);
+                if (authorization is null)
+                {
+                    Console.WriteLine($"[proxy] {proxy}: {UpstreamProxy.SignInFailedMessage(authenticator, credential)}");
+                    return reply;
+                }
+
+                if (UpstreamProxy.KeepsConnection(reply))
+                {
+                    await Http1MessageReader.ReadBodyAsync(upstreamTls!, reply.Headers, cancellationToken);
+                }
+                else
+                {
+                    upstreamTls?.Dispose();
+                    upstreamClient?.Dispose();
+                    upstreamTls = null;
+                    upstreamClient = new TcpClient();
+                    await upstreamClient.ConnectAsync(proxy.Host, proxy.Port, cancellationToken);
+                    upstreamTls = upstreamClient.GetStream();
+                }
+
+                var stream = upstreamTls!;
+                var outgoing = ForUpstream(request);
+                outgoing = outgoing with { Headers = [.. outgoing.Headers, ("Proxy-Authorization", authorization)] };
+                await HttpMessageWriter.WriteRequestAsync(stream, outgoing, cancellationToken);
+                var next = await Http1MessageReader.ReadResponsePreambleAsync(stream, cancellationToken);
+                if (next is null)
+                {
+                    return null;
+                }
+
+                reply = next;
+            }
+
+            return reply;
         }
 
         // What actually goes to the server (or the network's proxy) for a
@@ -466,7 +606,7 @@ public sealed class InterceptingProxyListener
         {
             try
             {
-                return await EnsureUpstreamAsync();
+                return await EnsureUpstreamAsync(outgoing.Target);
             }
             catch (Exception ex) when (ex is SocketException or IOException or AuthenticationException)
             {
@@ -713,6 +853,14 @@ public sealed class InterceptingProxyListener
 
                 var isHeadRequest = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
                 var responsePreamble = await Http1MessageReader.ReadResponsePreambleAsync(upstreamStream, cancellationToken);
+                if (responsePreamble is { StatusCode: 407 } && !isTls && upstreamRoute is not null)
+                {
+                    // The network's proxy wants a sign-in for plain HTTP.
+                    // (For HTTPS that happened when the tunnel was opened.)
+                    responsePreamble = await SignInToProxyAsync(request, responsePreamble);
+                    upstreamStream = upstreamTls!;
+                }
+
                 if (responsePreamble is null)
                 {
                     Console.WriteLine(
@@ -841,6 +989,9 @@ public sealed class InterceptingProxyListener
         var session = sessionStore.Add(targetHost, startedAt, request, response, flags: null, scheme);
         Console.WriteLine($"[{startedAt:HH:mm:ss}] #{session.Id} {request.Method} {scheme}://{targetHost}{request.Target} -- {reason}");
     }
+
+    private static string DescribeRoute(UpstreamProxy? route) =>
+        route is null ? "a direct connection" : $"the proxy {route}";
 
     /// <summary>The response sent when CLeARINET can't reach the server.</summary>
     private static CapturedResponse BadGateway(string host, int port, Exception ex)

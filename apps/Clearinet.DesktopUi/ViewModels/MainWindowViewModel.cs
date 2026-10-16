@@ -1086,6 +1086,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         _autoLaunchLegacyHost = _preferences.GetBoolPref(PreferenceKeys.AutoLaunchLegacyHost, false);
         LoadNetworkPreferences();
+        LoadAutoResponderRules();
         if (_autoLaunchLegacyHost)
         {
             _legacyExtensionHostStatus = "Auto-launch is on -- it will launch the next time you click Start.";
@@ -1283,9 +1284,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         var rule = new AutoResponderRule { IsEnabled = false };
         _autoResponderRules.Rules.Add(rule);
-        var vm = new AutoResponderRuleViewModel(rule);
+        var vm = CreateAutoResponderRow(rule);
         AutoResponderRuleRows.Add(vm);
         SelectedAutoResponderRule = vm;
+        ScheduleAutoResponderSave();
     }
 
     /// <summary>
@@ -1561,6 +1563,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         var index = AutoResponderRuleRows.IndexOf(selected);
         _autoResponderRules.Rules.Remove(selected.Rule);
         AutoResponderRuleRows.Remove(selected);
+        selected.PropertyChanged -= OnAutoResponderRowChanged;
+        ScheduleAutoResponderSave();
 
         SelectedAutoResponderRule = AutoResponderRuleRows.Count == 0
             ? null
@@ -1601,6 +1605,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         AutoResponderRuleRows.Move(index, newIndex);
         _autoResponderRules.Rules.RemoveAt(index);
         _autoResponderRules.Rules.Insert(newIndex, selected.Rule);
+        ScheduleAutoResponderSave();
 
         MoveAutoResponderRuleUpCommand.RaiseCanExecuteChanged();
         MoveAutoResponderRuleDownCommand.RaiseCanExecuteChanged();
@@ -1748,6 +1753,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // settings in OnBeforeUnload, through FiddlerApplication.Prefs), but
         // before the early return below, so settings are saved whether or
         // not the proxy was ever started.
+        SaveAutoResponderRulesNow();
         _preferences.Dispose();
 
         if (_proxy is null)

@@ -61,6 +61,14 @@ public partial class MainWindow : Window
 
     private readonly List<Control> _extensionToolsItems = [];
 
+    private bool _placementApplied;
+
+    // The window's last position and size while it was neither maximized
+    // nor minimized -- what's saved, so a maximized window comes back
+    // maximized and un-maximizes to where it was.
+    private PixelPoint _normalPosition;
+    private Size _normalSize;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -69,6 +77,82 @@ public partial class MainWindow : Window
         // constructor returns -- DataContextChanged is what actually gets
         // a live MainWindowViewModel to subscribe PropertyChanged against.
         DataContextChanged += (_, _) => AttachViewModel();
+        PositionChanged += (_, _) => RememberNormalBounds();
+        Closing += (_, _) => SavePlacement();
+    }
+
+    /// <summary>
+    /// Puts the window back where it was last time (see
+    /// <see cref="MainWindowViewModel.LoadWindowPlacement"/>), as long as
+    /// that's still on a connected screen -- a monitor may have been
+    /// unplugged since. Runs once, before the window is shown.
+    /// </summary>
+    private void ApplyPlacement(MainWindowViewModel viewModel)
+    {
+        if (_placementApplied)
+        {
+            return;
+        }
+
+        _placementApplied = true;
+        if (viewModel.LoadWindowPlacement() is not { } placement)
+        {
+            return;
+        }
+
+        Width = Math.Max(placement.Width, 480);
+        Height = Math.Max(placement.Height, 320);
+
+        var position = new PixelPoint(placement.X, placement.Y);
+        var screens = Screens?.All ?? Array.Empty<Avalonia.Platform.Screen>();
+        // Enough of the title bar to grab must be on some screen.
+        var visible = screens.Any(screen => screen.WorkingArea.Contains(new PixelPoint(position.X + 40, position.Y + 10)));
+        if (visible)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Position = position;
+        }
+
+        _normalPosition = Position;
+        _normalSize = new Size(Width, Height);
+        if (placement.Maximized)
+        {
+            WindowState = WindowState.Maximized;
+        }
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == ClientSizeProperty || change.Property == WindowStateProperty)
+        {
+            RememberNormalBounds();
+        }
+    }
+
+    private void RememberNormalBounds()
+    {
+        if (WindowState == WindowState.Normal && IsVisible)
+        {
+            _normalPosition = Position;
+            _normalSize = ClientSize;
+        }
+    }
+
+    private void SavePlacement()
+    {
+        RememberNormalBounds();
+        if (_viewModel is null || _normalSize.Width <= 0 || _normalSize.Height <= 0)
+        {
+            return;
+        }
+
+        _viewModel.SaveWindowPlacement(new WindowPlacement(
+            _normalPosition.X,
+            _normalPosition.Y,
+            (int)Math.Round(_normalSize.Width),
+            (int)Math.Round(_normalSize.Height),
+            WindowState == WindowState.Maximized));
     }
 
     /// <summary>
@@ -97,6 +181,7 @@ public partial class MainWindow : Window
         {
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
             _viewModel.ComposerShowRequested += ShowComposerTab;
+            ApplyPlacement(_viewModel);
             RefreshScriptColumns();
             AddExtensionTabs(_viewModel);
             AttachExtensionMenusAndColumns();

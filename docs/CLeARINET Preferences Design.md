@@ -41,9 +41,11 @@ in "Platform parity," below.
 - Watching the file for edits made while the app is running. The file is
   read once at startup. See "Why no file watcher" below.
 - Syncing preferences across machines.
-- Persisting AutoResponder rules. Those belong in their own file (Fiddler
-  Classic has its own AutoResponder rules format), which is a separate
-  follow-up.
+- Persisting AutoResponder rules in the preferences file. They have their
+  own file, `autoresponder-rules.json` (see `AutoResponderRuleFile`): each
+  rule's match, action and checkbox, in order, written half a second after
+  the last edit and on exit. A file that can't be read is kept as
+  `autoresponder-rules.json.unreadable` rather than overwritten.
 
 ## What gets persisted
 
@@ -58,6 +60,15 @@ in "Platform parity," below.
 | `clearinet.ui.filter.text` | string | `""` | Session filter box |
 | `clearinet.fiddlerscript.path` | string | `""` | FiddlerScript panel's path box |
 | `clearinet.extensions.legacyhost.autolaunch` | bool | `false` | Legacy host auto-launch |
+| `clearinet.proxy.upstream.username` | string | `""` | Proxy sign-in user name (the password is never saved) |
+| `clearinet.ui.window.left` / `.top` | int | unset | Window position, in screen pixels |
+| `clearinet.ui.window.width` / `.height` | int | unset | Window size, in the window's own units |
+| `clearinet.ui.window.maximized` | bool | `false` | Whether the window was maximized |
+
+The window comes back where it was only if its title bar would be on a
+connected screen; otherwise it opens centered, at its saved size. A
+maximized window saves the size and position it had before it was
+maximized, so un-maximizing puts it back there.
 
 The legacy extension host only runs on Windows (it's a `net48` process).
 Its auto-launch key still exists on macOS for file parity. It's read and
@@ -83,8 +94,9 @@ remembered values that need one click to arm again. That can be added
 later without changing the file format.
 
 The AutoResponder's on/off switch isn't persisted for the same reason. It
-changes what every app on the machine receives, and the rules it would
-switch on aren't persisted yet anyway.
+changes what every app on the machine receives. The rules themselves are
+saved (in their own file), each with its own checkbox, so switching the
+AutoResponder back on is one click.
 
 ## Naming
 
@@ -367,7 +379,5 @@ already the same in both.
    this store.
 4. First real list preference: `clearinet.config.processnames.browsers`,
    when per-process capture is built.
-5. AutoResponder rules persistence, in their own file.
-6. Window size and position. They're left out here because Avalonia's
-   window placement differs across displays and platforms enough to
-   deserve its own small design.
+5. ~~AutoResponder rules persistence, in their own file.~~ Done.
+6. ~~Window size and position.~~ Done; see the table above.

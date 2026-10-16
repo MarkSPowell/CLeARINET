@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
+using Clearinet.ProxyCore.Http;
 
 namespace Clearinet.ProxyCore.Proxy;
 
@@ -13,9 +14,10 @@ namespace Clearinet.ProxyCore.Proxy;
 /// everything CLeARINET forwards would try to connect directly and fail.
 ///
 /// Only plain HTTP proxies are supported, reached with a <c>CONNECT</c>
-/// tunnel. Not supported yet: automatic configuration scripts (PAC/WPAD),
-/// SOCKS, and proxies that require authentication (a 407 response is
-/// reported as an error saying so).
+/// tunnel for HTTPS. Automatic configuration (PAC scripts and WPAD) is
+/// handled by <see cref="AutoConfig.ProxyAutoConfig"/>, which picks one of
+/// these per request. A proxy that asks for a sign-in (407) gets one: see
+/// <see cref="ProxyAuthenticator"/>. Not supported yet: SOCKS.
 /// </summary>
 /// <param name="Host">The proxy's host name or address.</param>
 /// <param name="Port">The proxy's port.</param>
@@ -27,8 +29,6 @@ namespace Clearinet.ProxyCore.Proxy;
 /// </param>
 public sealed record UpstreamProxy(string Host, int Port, IReadOnlyList<string> BypassList)
 {
-    private const int MaxResponseHeaderBytes = 64 * 1024;
-
     public UpstreamProxy(string host, int port)
         : this(host, port, [])
     {
@@ -176,94 +176,154 @@ public sealed record UpstreamProxy(string Host, int Port, IReadOnlyList<string> 
     /// connection (TLS to the target goes over it). Throws
     /// <see cref="IOException"/> when the proxy refuses.
     /// </summary>
-    public async Task<TcpClient> ConnectTunnelAsync(string targetHost, int targetPort, CancellationToken cancellationToken)
+    public Task<TcpClient> ConnectTunnelAsync(string targetHost, int targetPort, CancellationToken cancellationToken) =>
+        ConnectTunnelAsync(targetHost, targetPort, credential: null, cancellationToken);
+
+    /// <summary>
+    /// As <see cref="ConnectTunnelAsync(string, int, CancellationToken)"/>,
+    /// signing in when the proxy asks (407) -- see
+    /// <see cref="ProxyAuthenticator"/>: as the signed-in Windows account,
+    /// or with <paramref name="credential"/> when given.
+    /// </summary>
+    public async Task<TcpClient> ConnectTunnelAsync(
+        string targetHost, int targetPort, NetworkCredential? credential, CancellationToken cancellationToken)
     {
-        var client = new TcpClient();
-        try
+        using var authenticator = new ProxyAuthenticator(Host, credential);
+        string? authorization = null;
+
+        // A proxy may close the connection after a 407; the sign-in then
+        // carries on over a new one.
+        for (var connection = 0; connection < 3; connection++)
         {
-            await client.ConnectAsync(Host, Port, cancellationToken);
-            await EstablishTunnelAsync(client.GetStream(), targetHost, targetPort, ToString(), cancellationToken);
-            return client;
-        }
-        catch
-        {
+            var client = new TcpClient();
+            try
+            {
+                await client.ConnectAsync(Host, Port, cancellationToken);
+                var stream = client.GetStream();
+                while (true)
+                {
+                    var reply = await SendConnectAsync(stream, targetHost, targetPort, authorization, ToString(), cancellationToken);
+                    if (reply.StatusCode is >= 200 and <= 299)
+                    {
+                        return client;
+                    }
+
+                    if (reply.StatusCode != 407)
+                    {
+                        throw Refused(reply, targetHost, targetPort, ToString());
+                    }
+
+                    authorization = authenticator.Respond(reply.Headers)
+                        ?? throw new IOException(SignInFailedMessage(authenticator, credential));
+
+                    if (KeepsConnection(reply))
+                    {
+                        await Http1MessageReader.ReadBodyAsync(stream, reply.Headers, cancellationToken);
+                        continue;
+                    }
+
+                    break; // reconnect and carry on
+                }
+            }
+            catch
+            {
+                client.Dispose();
+                throw;
+            }
+
             client.Dispose();
-            throw;
         }
+
+        throw new IOException(SignInFailedMessage(authenticator, credential));
     }
 
     /// <summary>
     /// Sends <c>CONNECT</c> for <paramref name="targetHost"/>:<paramref name="targetPort"/>
     /// on <paramref name="stream"/> (already connected to a proxy) and reads
     /// the proxy's answer. Returns once the tunnel is open; throws
-    /// <see cref="IOException"/> otherwise. Used for upstream proxies and by
-    /// the Composer, which sends through CLeARINET's own listener.
+    /// <see cref="IOException"/> otherwise. Used by the Composer, which
+    /// sends through CLeARINET's own listener.
     /// </summary>
     public static async Task EstablishTunnelAsync(
         Stream stream, string targetHost, int targetPort, string proxyName, CancellationToken cancellationToken)
     {
+        var reply = await SendConnectAsync(stream, targetHost, targetPort, authorization: null, proxyName, cancellationToken);
+        if (reply.StatusCode is < 200 or > 299)
+        {
+            throw Refused(reply, targetHost, targetPort, proxyName);
+        }
+    }
+
+    /// <summary>
+    /// A user name and password as typed: "DOMAIN\user" or "user@domain"
+    /// keep their domain. Null when <paramref name="userName"/> is empty.
+    /// </summary>
+    public static NetworkCredential? CredentialFor(string? userName, string? password)
+    {
+        if (string.IsNullOrWhiteSpace(userName))
+        {
+            return null;
+        }
+
+        var name = userName.Trim();
+        var backslash = name.IndexOf('\\');
+        return backslash > 0
+            ? new NetworkCredential(name[(backslash + 1)..], password ?? string.Empty, name[..backslash])
+            : new NetworkCredential(name, password ?? string.Empty);
+    }
+
+    internal static string SignInFailedMessage(ProxyAuthenticator authenticator, NetworkCredential? credential)
+    {
+        var offered = authenticator.OfferedSchemes.Count == 0 ? "no sign-in method" : string.Join(", ", authenticator.OfferedSchemes);
+        return credential is null
+            ? $"The proxy asked for a sign-in (it offers {offered}) and signing in as you didn't work. " +
+              "Enter a user name and password for the proxy under Tools > Connections."
+            : $"The proxy didn't accept the user name and password from Tools > Connections (it offers {offered}).";
+    }
+
+    private static async Task<CapturedResponse> SendConnectAsync(
+        Stream stream, string targetHost, int targetPort, string? authorization, string proxyName, CancellationToken cancellationToken)
+    {
         var authority = $"{FormatHost(targetHost)}:{targetPort}";
-        var connect = $"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\nProxy-Connection: keep-alive\r\n\r\n";
-        await stream.WriteAsync(Encoding.ASCII.GetBytes(connect), cancellationToken);
+        var connect = new StringBuilder($"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\nProxy-Connection: keep-alive\r\n");
+        if (authorization is not null)
+        {
+            connect.Append("Proxy-Authorization: ").Append(authorization).Append("\r\n");
+        }
+
+        connect.Append("\r\n");
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(connect.ToString()), cancellationToken);
         await stream.FlushAsync(cancellationToken);
 
-        var statusLine = await ReadResponseHeadAsync(stream, cancellationToken);
-        var parts = statusLine.Split(' ', 3);
-        if (parts.Length < 2 || !int.TryParse(parts[1], out var status))
+        try
         {
-            throw new IOException($"Proxy {proxyName} sent an unreadable answer to CONNECT {authority}: \"{statusLine}\".");
+            return await Http1MessageReader.ReadResponsePreambleAsync(stream, cancellationToken)
+                ?? throw new IOException($"Proxy {proxyName} closed the connection before answering CONNECT.");
         }
-
-        if (status == 407)
+        catch (InvalidDataException ex)
         {
-            throw new IOException(
-                $"Proxy {proxyName} requires authentication (407), which CLeARINET doesn't support yet. " +
-                "Set an upstream proxy that doesn't need a sign-in, or \"none\" to connect directly.");
-        }
-
-        if (status is < 200 or > 299)
-        {
-            throw new IOException($"Proxy {proxyName} refused CONNECT {authority}: \"{statusLine}\".");
+            throw new IOException($"Proxy {proxyName} sent an unreadable answer to CONNECT {authority}: {ex.Message}", ex);
         }
     }
 
-    /// <summary>Reads a response's status line and headers, up to the blank line, and returns the status line.</summary>
-    private static async Task<string> ReadResponseHeadAsync(Stream stream, CancellationToken cancellationToken)
+    private static IOException Refused(CapturedResponse reply, string targetHost, int targetPort, string proxyName) =>
+        new($"Proxy {proxyName} refused CONNECT {FormatHost(targetHost)}:{targetPort}: \"{reply.StatusCode} {reply.ReasonPhrase}\".");
+
+    /// <summary>Whether the proxy keeps the connection open after this answer, so the sign-in can carry on over it.</summary>
+    internal static bool KeepsConnection(CapturedResponse reply)
     {
-        var bytes = new List<byte>();
-        var one = new byte[1];
-        while (true)
+        var connection = (ContentDecoder.FindHeader(reply.Headers, "Proxy-Connection") ?? string.Empty) + "," +
+                         (ContentDecoder.FindHeader(reply.Headers, "Connection") ?? string.Empty);
+        if (connection.Split(',').Any(token => string.Equals(token.Trim(), "close", StringComparison.OrdinalIgnoreCase)))
         {
-            var read = await stream.ReadAsync(one.AsMemory(), cancellationToken);
-            if (read == 0)
-            {
-                throw new IOException("The proxy closed the connection before answering CONNECT.");
-            }
-
-            bytes.Add(one[0]);
-            var count = bytes.Count;
-            if (count >= 4 && bytes[count - 4] == '\r' && bytes[count - 3] == '\n' && bytes[count - 2] == '\r' && bytes[count - 1] == '\n')
-            {
-                break;
-            }
-
-            if (count >= 2 && bytes[count - 2] == '\n' && bytes[count - 1] == '\n')
-            {
-                break;
-            }
-
-            if (count > MaxResponseHeaderBytes)
-            {
-                throw new IOException("The proxy's answer to CONNECT was too long.");
-            }
+            return false;
         }
 
-        var text = Encoding.ASCII.GetString(bytes.ToArray());
-        var endOfLine = text.IndexOf('\n');
-        return (endOfLine < 0 ? text : text[..endOfLine]).TrimEnd('\r');
+        return !Http1MessageReader.IsCloseDelimited(reply.Headers) &&
+               !string.Equals(reply.HttpVersion, "HTTP/1.0", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsLoopback(string host) =>
+    internal static bool IsLoopback(string host) =>
         string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
         (IPAddress.TryParse(host.Trim('[', ']'), out var address) && IPAddress.IsLoopback(address));
 

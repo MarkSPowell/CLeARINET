@@ -40,8 +40,11 @@ here yet. Feedback and issues are welcome.
   Replay (**R**) to send a captured request again. Both go through
   CLeARINET itself, so the result is captured like any other traffic.
 - Forwarding through the network's own proxy: CLeARINET picks up the
-  proxy the computer used before it started, or one you set under
-  **Tools > Connections**.
+  proxy the computer used before it started, including an automatic
+  proxy configuration script (PAC) or "Automatically detect settings"
+  (WPAD), or uses one you set under **Tools > Connections**. A proxy
+  that asks for a sign-in gets one: as you (Windows sign-in, Negotiate or
+  NTLM), or with a user name and password entered there.
 - Capturing phones and other computers: "Allow remote computers to
   connect", and a page at `http://clearinet/` for installing CLeARINET's
   certificate on the other device.
@@ -224,22 +227,21 @@ way:
   notarized (no Apple Developer account available to this project), so
   macOS asks you to allow it once, in System Settings > Privacy & Security;
   see `installer/macos/build-installer.sh`'s own remarks.
-- **Only some settings persist yet.** The port choice, Tools-menu panel
-  toggles, filter text, FiddlerScript path and legacy-host auto-launch are
-  remembered between runs. Window size and position, AutoResponder rules
-  and a Preferences/`about:config` editor aren't there yet. Breakpoints
-  and the AutoResponder's on/off switch deliberately always start off. See
-  the Preferences Design doc.
+- **No Preferences/`about:config` editor yet.** Settings, the window's
+  size and position, and AutoResponder rules are remembered between runs,
+  but changed only through the app's own controls. Breakpoints and the
+  AutoResponder's on/off switch deliberately always start off. See the
+  Preferences Design doc.
 - **The Composer and Replay send bodies as text.** A binary request body
   can't be composed or replayed exactly yet.
 - **No built-in Chromium NetLog import.** NetLog import works through
   Eric Lawrence's ported NetLog importer extension (see above), an
   optional extension in the installers. No explicit HTTP/2 or TLS 1.3
   handling yet.
-- **Upstream proxies: plain HTTP proxies only.** An automatic proxy
-  configuration script (PAC), a SOCKS proxy, or a proxy that asks you to
-  sign in can't be used yet; set the proxy's own `host:port` under
-  **Tools > Connections** if you know it.
+- **Upstream proxies: plain HTTP proxies only.** A SOCKS proxy can't be
+  used yet (a PAC script's SOCKS entries are skipped). Proxy sign-in
+  supports Negotiate (Kerberos), NTLM and Basic, not Digest. Automatic proxy detection on macOS looks only in
+  DNS (`wpad.<your domain>`), not DHCP.
 - **The main app's own compiled-extension support is source-level, not
   binary.** An already-compiled Fiddler Classic extension `.dll` can't be
   dropped straight into CLeARINET's own Extensions folder as-is; a new

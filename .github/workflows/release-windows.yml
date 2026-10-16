@@ -33,8 +33,21 @@ on:
         required: false
         default: "0.0.0"
 
+# id-token: write lets the job sign in to Azure with GitHub's own OIDC
+# token for code signing (see "Sign with Azure Artifact Signing" below),
+# so no Azure password or secret key is stored in the repository.
 permissions:
   contents: write
+  id-token: write
+
+# Code signing (Azure Artifact Signing) runs only when these repository
+# variables are set (Settings > Secrets and variables > Actions >
+# Variables); without them the build is unsigned, as before:
+#   ARTIFACT_SIGNING_ENDPOINT  e.g. https://eus.codesigning.azure.net/
+#   ARTIFACT_SIGNING_ACCOUNT   the Artifact Signing account name
+#   ARTIFACT_SIGNING_PROFILE   the certificate profile name
+# plus these repository secrets for the Azure sign-in:
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
 
 jobs:
   build-installer:
@@ -150,6 +163,47 @@ jobs:
         shell: pwsh
         run: ./installer/build-extensions.ps1 -OutputDir publish/extensions
 
+      - name: Sign in to Azure for code signing
+        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # Everything the installer will put on disk -- the app itself, the
+      # optional legacy extension host and the optional extensions -- is
+      # signed before Inno Setup packs it, so the installed files are signed
+      # too, not just the installer. Only files that aren't signed already:
+      # a file its publisher signed (Microsoft's own, say) keeps that.
+      - name: List files to sign
+        id: tosign
+        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem publish -Recurse -Include *.exe,*.dll |
+            Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -eq 'NotSigned' } |
+            ForEach-Object { $_.FullName })
+          Write-Host "Signing $($files.Count) files:"
+          $files | ForEach-Object { Write-Host "  $_" }
+          "files<<SIGN_EOF" >> $env:GITHUB_OUTPUT
+          $files >> $env:GITHUB_OUTPUT
+          "SIGN_EOF" >> $env:GITHUB_OUTPUT
+
+      - name: Sign the app and optional components
+        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files: ${{ steps.tosign.outputs.files }}
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: CLeARINET
+          description-url: https://github.com/MarkSPowell/CLeARINET
+
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
@@ -163,6 +217,35 @@ jobs:
             "/DLegacyHostDir=${{ github.workspace }}\publish\legacyhost" `
             "/DExtensionsDir=${{ github.workspace }}\publish\extensions" `
             installer\CLeARINET.iss
+
+      - name: Sign the installer
+        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\installer\Output
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: CLeARINET Setup
+          description-url: https://github.com/MarkSPowell/CLeARINET
+
+      # Fails the release if anything that should be signed isn't, so an
+      # unsigned build can't go out by accident once signing is set up.
+      - name: Check signatures
+        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem installer/Output -Filter *.exe) + @(Get-ChildItem publish -Recurse -Include *.exe,*.dll)
+          $unsigned = $files | Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' }
+          if ($unsigned) {
+            $unsigned | ForEach-Object { Write-Host "Not signed: $($_.FullName)" }
+            exit 1
+          }
+          Write-Host "All $($files.Count) files are signed."
 
       - name: Upload installer as a build artifact
         uses: actions/upload-artifact@v7

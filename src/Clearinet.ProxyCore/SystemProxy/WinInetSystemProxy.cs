@@ -58,6 +58,7 @@ public static class WinInetSystemProxy
         }
 
         using var key = OpenInternetSettingsKey();
+        var connection = TryReadConnectionOptions();
 
         if (!File.Exists(BackupFilePath))
         {
@@ -67,14 +68,86 @@ public static class WinInetSystemProxy
                 ProxyServer = key.GetValue("ProxyServer") as string,
                 ProxyOverride = key.GetValue("ProxyOverride") as string,
                 ManagedPort = port,
+                ConnectionFlags = connection?.Flags,
+                AutoConfigUrl = connection?.AutoConfigUrl,
             });
         }
 
+        var server = $"127.0.0.1:{port}";
+        var bypass = MergeBypassList(key.GetValue("ProxyOverride") as string);
         key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
-        key.SetValue("ProxyServer", $"127.0.0.1:{port}", RegistryValueKind.String);
-        key.SetValue("ProxyOverride", MergeBypassList(key.GetValue("ProxyOverride") as string), RegistryValueKind.String);
+        key.SetValue("ProxyServer", server, RegistryValueKind.String);
+        key.SetValue("ProxyOverride", bypass, RegistryValueKind.String);
+
+        // "Automatically detect settings" and "Use setup script" take
+        // priority over the manual proxy, so while either is on, browsers
+        // would never reach CLeARINET. Turn them off for the capture (the
+        // backup above puts them back). The setup script's address is kept.
+        if (connection is not null &&
+            (connection.Flags & (WinInetConnectionOptions.AutoDetect | WinInetConnectionOptions.AutoProxyUrl)) != 0)
+        {
+            WinInetConnectionOptions.Write(new WinInetConnectionOptions.Settings(
+                WinInetConnectionOptions.Direct | WinInetConnectionOptions.ManualProxy, server, bypass, AutoConfigUrl: null));
+        }
 
         BroadcastSettingsChanged();
+    }
+
+    /// <summary>
+    /// The proxy Windows is set to use right now, for CLeARINET to forward
+    /// through (see <see cref="Proxy.UpstreamProxy"/>). Call before
+    /// <see cref="Enable"/> replaces the setting with CLeARINET itself.
+    /// Ignores a setting that points at CLeARINET's own
+    /// <paramref name="ownPort"/>. With "Automatically detect settings" or
+    /// "Use setup script" on, returns a <see cref="Proxy.AutoConfig.ProxyAutoConfig"/>
+    /// that starts looking for and loading the script straight away, with
+    /// the manual proxy (if any) as its fallback, as Windows itself uses them.
+    /// </summary>
+    public static UpstreamProxyDetection DetectUpstream(int ownPort)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return UpstreamProxyDetection.None;
+        }
+
+        using var key = OpenInternetSettingsKey();
+        var connection = TryReadConnectionOptions();
+
+        Proxy.UpstreamProxy? manual;
+        bool autoDetect;
+        string? scriptUrl;
+        if (connection is not null)
+        {
+            manual = (connection.Flags & WinInetConnectionOptions.ManualProxy) != 0
+                ? Proxy.UpstreamProxy.FromWindowsSettings(connection.ProxyServer, connection.ProxyBypass)
+                : null;
+            autoDetect = (connection.Flags & WinInetConnectionOptions.AutoDetect) != 0;
+            scriptUrl = (connection.Flags & WinInetConnectionOptions.AutoProxyUrl) != 0 ? connection.AutoConfigUrl : null;
+        }
+        else
+        {
+            // Couldn't use the API: the registry values have the manual
+            // proxy and the script address, but not "Automatically detect".
+            manual = Convert.ToInt32(key.GetValue("ProxyEnable", 0)) != 0
+                ? Proxy.UpstreamProxy.FromWindowsSettings(key.GetValue("ProxyServer") as string, key.GetValue("ProxyOverride") as string)
+                : null;
+            autoDetect = false;
+            scriptUrl = key.GetValue("AutoConfigURL") as string;
+        }
+
+        if (manual is not null && manual.IsSelf(ownPort))
+        {
+            manual = null;
+        }
+
+        if (autoDetect || !string.IsNullOrWhiteSpace(scriptUrl))
+        {
+            return UpstreamProxyDetection.Automatic(Proxy.AutoConfig.ProxyAutoConfig.Create(autoDetect, scriptUrl, manual), "Windows proxy settings");
+        }
+
+        return manual is not null
+            ? new UpstreamProxyDetection(manual, $"forwarding through {manual} (Windows proxy settings)")
+            : UpstreamProxyDetection.None;
     }
 
     /// <summary>
@@ -85,40 +158,6 @@ public static class WinInetSystemProxy
     /// fallback is just turning the proxy off, rather than risking it stay
     /// pointed at a port nothing is listening on any more.
     /// </summary>
-    /// <summary>
-    /// The proxy Windows is set to use right now, for CLeARINET to forward
-    /// through (see <see cref="Proxy.UpstreamProxy"/>). Call before
-    /// <see cref="Enable"/> replaces the setting with CLeARINET itself.
-    /// Ignores a setting that points at CLeARINET's own
-    /// <paramref name="ownPort"/>. Reports, but can't use, an automatic
-    /// configuration script (PAC).
-    /// </summary>
-    public static UpstreamProxyDetection DetectUpstream(int ownPort)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            return UpstreamProxyDetection.None;
-        }
-
-        using var key = OpenInternetSettingsKey();
-        var enabled = Convert.ToInt32(key.GetValue("ProxyEnable", 0)) != 0;
-        var proxy = enabled
-            ? Proxy.UpstreamProxy.FromWindowsSettings(key.GetValue("ProxyServer") as string, key.GetValue("ProxyOverride") as string)
-            : null;
-        if (proxy is not null && !proxy.IsSelf(ownPort))
-        {
-            return new UpstreamProxyDetection(proxy, $"forwarding through {proxy} (Windows proxy settings)");
-        }
-
-        var autoConfigUrl = key.GetValue("AutoConfigURL") as string;
-        return string.IsNullOrWhiteSpace(autoConfigUrl)
-            ? UpstreamProxyDetection.None
-            : new UpstreamProxyDetection(
-                null,
-                $"Windows uses an automatic proxy configuration script ({autoConfigUrl}), which CLeARINET can't read yet, " +
-                "so it connects directly. If sites don't load, set the upstream proxy under Tools > Connections");
-    }
-
     public static void Disable()
     {
         if (!OperatingSystem.IsWindows())
@@ -134,6 +173,26 @@ public static class WinInetSystemProxy
                 key.SetValue("ProxyEnable", backup.ProxyEnable ? 1 : 0, RegistryValueKind.DWord);
                 SetOrRemove(key, "ProxyServer", backup.ProxyServer);
                 SetOrRemove(key, "ProxyOverride", backup.ProxyOverride);
+
+                // Enable only touched these when automatic detection or a
+                // setup script was on; put them back exactly.
+                if (backup.ConnectionFlags is { } flags &&
+                    (flags & (WinInetConnectionOptions.AutoDetect | WinInetConnectionOptions.AutoProxyUrl)) != 0)
+                {
+                    try
+                    {
+                        WinInetConnectionOptions.Write(new WinInetConnectionOptions.Settings(
+                            flags, backup.ProxyServer ?? string.Empty, backup.ProxyOverride ?? string.Empty, backup.AutoConfigUrl ?? string.Empty));
+                    }
+                    catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or DllNotFoundException or EntryPointNotFoundException)
+                    {
+                        // The manual settings above are restored either way;
+                        // say what couldn't be, rather than fail Stop.
+                        Console.WriteLine(
+                            $"[proxy] Couldn't turn automatic proxy settings back on ({ex.Message}); " +
+                            "check Settings > Network & internet > Proxy.");
+                    }
+                }
             }
             else
             {
@@ -170,6 +229,19 @@ public static class WinInetSystemProxy
     // before calling them. [SupportedOSPlatform] here is what tells the
     // analyzer these two are Windows-only by contract instead, which is
     // enough for it to stop warning at those (already-guarded) call sites.
+    [SupportedOSPlatform("windows")]
+    private static WinInetConnectionOptions.Settings? TryReadConnectionOptions()
+    {
+        try
+        {
+            return WinInetConnectionOptions.Read();
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or DllNotFoundException or EntryPointNotFoundException)
+        {
+            return null;
+        }
+    }
+
     [SupportedOSPlatform("windows")]
     private static RegistryKey OpenInternetSettingsKey() =>
         Registry.CurrentUser.OpenSubKey(InternetSettingsKeyPath, writable: true)
@@ -289,5 +361,11 @@ public static class WinInetSystemProxy
         public string? ProxyOverride { get; set; }
 
         public int ManagedPort { get; set; }
+
+        /// <summary>The LAN connection's proxy flags before capture (null in a backup from an older version).</summary>
+        public int? ConnectionFlags { get; set; }
+
+        /// <summary>The "Use setup script" address before capture.</summary>
+        public string? AutoConfigUrl { get; set; }
     }
 }

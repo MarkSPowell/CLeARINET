@@ -1,12 +1,15 @@
+using Avalonia.Threading;
 using Clearinet.ProxyCore.Proxy;
+using Clearinet.ProxyCore.Proxy.AutoConfig;
 using Clearinet.ProxyCore.SystemProxy;
 
 namespace Clearinet.DesktopUi.ViewModels;
 
 /// <summary>
 /// Tools &gt; Connections: forwarding through the network's own proxy
-/// (<see cref="UpstreamProxy"/>), and letting phones and other computers
-/// use CLeARINET as their proxy.
+/// (<see cref="UpstreamProxy"/>, or the network's automatic configuration
+/// script via <see cref="ProxyAutoConfig"/>), and letting phones and other
+/// computers use CLeARINET as their proxy.
 /// </summary>
 public sealed partial class MainWindowViewModel
 {
@@ -17,6 +20,8 @@ public sealed partial class MainWindowViewModel
     private bool _allowRemoteClients;
     private string _gatewayStatus = "Upstream proxy: decided when capture starts.";
     private UpstreamProxyDetection? _detectedUpstream;
+    private string _proxyUserName = string.Empty;
+    private string _proxyPassword = string.Empty;
 
     /// <summary>Whether the Connections row shows (Tools &gt; Connections). Purely a visibility switch.</summary>
     public bool ShowConnectionsRow
@@ -49,6 +54,50 @@ public sealed partial class MainWindowViewModel
                     ApplyGateway(_proxy);
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// The user name for an upstream proxy that asks for a sign-in. Empty
+    /// means sign in as the current Windows account (Negotiate or NTLM),
+    /// which is what most company proxies want. Saved; see
+    /// <see cref="ProxyPassword"/> for the password.
+    /// </summary>
+    public string ProxyUserName
+    {
+        get => _proxyUserName;
+        set
+        {
+            if (SetField(ref _proxyUserName, value ?? string.Empty))
+            {
+                _preferences.SetStringPref(PreferenceKeys.UpstreamProxyUserName, _proxyUserName);
+                ApplyProxyCredential();
+            }
+        }
+    }
+
+    /// <summary>
+    /// The password that goes with <see cref="ProxyUserName"/>. Kept in
+    /// memory only, never written to disk, so it's asked for again after a
+    /// restart.
+    /// </summary>
+    public string ProxyPassword
+    {
+        get => _proxyPassword;
+        set
+        {
+            if (SetField(ref _proxyPassword, value ?? string.Empty))
+            {
+                ApplyProxyCredential();
+            }
+        }
+    }
+
+    private void ApplyProxyCredential()
+    {
+        if (_proxy is not null)
+        {
+            _proxy.ProxyCredential = UpstreamProxy.CredentialFor(ProxyUserName, ProxyPassword);
         }
     }
 
@@ -104,6 +153,7 @@ public sealed partial class MainWindowViewModel
     {
         _showConnectionsRow = _preferences.GetBoolPref(PreferenceKeys.ShowConnectionsRow, false);
         _upstreamProxySetting = _preferences.GetStringPref(PreferenceKeys.UpstreamProxy, string.Empty);
+        _proxyUserName = _preferences.GetStringPref(PreferenceKeys.UpstreamProxyUserName, string.Empty);
         _allowRemoteClients = _preferences.GetBoolPref(PreferenceKeys.AllowRemoteClients, false);
     }
 
@@ -115,6 +165,13 @@ public sealed partial class MainWindowViewModel
     private string StartGateway(InterceptingProxyListener listener)
     {
         _detectedUpstream = SystemProxyController.DetectUpstream(listener.Port);
+        ApplyProxyCredential();
+        if (_detectedUpstream.AutoConfig is { } autoConfig)
+        {
+            // The script loads in the background; show what happened.
+            autoConfig.DescriptionChanged += OnAutoConfigDescriptionChanged;
+        }
+
         var status = ApplyGateway(listener);
         RaisePropertyChanged(nameof(RemoteClientsHint));
         return status;
@@ -125,11 +182,15 @@ public sealed partial class MainWindowViewModel
     {
         var setting = UpstreamProxySetting.Trim();
         string description;
+        listener.AutoConfig = null;
         if (setting.Length == 0)
         {
             var detected = _detectedUpstream ?? UpstreamProxyDetection.None;
             listener.Gateway = detected.Proxy;
-            description = detected.Description;
+            listener.AutoConfig = detected.AutoConfig;
+            description = detected.AutoConfig is { } autoConfig
+                ? DescribeAutoConfig(autoConfig.Description)
+                : detected.Description;
         }
         else if (string.Equals(setting, DirectSetting, StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(setting, "direct", StringComparison.OrdinalIgnoreCase))
@@ -160,8 +221,27 @@ public sealed partial class MainWindowViewModel
         return description;
     }
 
+    private string DescribeAutoConfig(string description) =>
+        _detectedUpstream?.Source is { } source ? $"{description} ({source})" : description;
+
+    private void OnAutoConfigDescriptionChanged(string description) => Dispatcher.UIThread.Post(() =>
+    {
+        // Only while it's still the one in use (not replaced by a manual
+        // setting, or stopped).
+        if (_proxy?.AutoConfig is { } current && ReferenceEquals(current, _detectedUpstream?.AutoConfig))
+        {
+            GatewayStatus = "Upstream: " + DescribeAutoConfig(description) + ".";
+        }
+    });
+
     private void StopGateway()
     {
+        if (_detectedUpstream?.AutoConfig is { } autoConfig)
+        {
+            autoConfig.DescriptionChanged -= OnAutoConfigDescriptionChanged;
+            autoConfig.Dispose();
+        }
+
         _detectedUpstream = null;
         GatewayStatus = "Upstream proxy: decided when capture starts.";
         RaisePropertyChanged(nameof(RemoteClientsHint));

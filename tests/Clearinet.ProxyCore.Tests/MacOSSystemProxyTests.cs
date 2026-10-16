@@ -124,4 +124,32 @@ public class MacOSSystemProxyTests
 
         Assert.True(MacOSSystemProxy.ParseProxyState(output).Enabled);
     }
+
+    [Fact]
+    public void BuildsTheAutomaticProxyArguments()
+    {
+        Assert.Equal(["-getautoproxyurl", "Wi-Fi"], MacOSSystemProxy.BuildGetAutoProxyUrlArguments("Wi-Fi"));
+        Assert.Equal(["-setautoproxyurl", "Wi-Fi", "http://wpad/proxy.pac"], MacOSSystemProxy.BuildSetAutoProxyUrlArguments("Wi-Fi", "http://wpad/proxy.pac"));
+        Assert.Equal(["-setautoproxystate", "Wi-Fi", "off"], MacOSSystemProxy.BuildSetAutoProxyStateArguments("Wi-Fi", enabled: false));
+        Assert.Equal(["-getproxyautodiscovery", "Wi-Fi"], MacOSSystemProxy.BuildGetProxyAutoDiscoveryArguments("Wi-Fi"));
+        Assert.Equal(["-setproxyautodiscovery", "Wi-Fi", "on"], MacOSSystemProxy.BuildSetProxyAutoDiscoveryArguments("Wi-Fi", enabled: true));
+    }
+
+    [Theory]
+    [InlineData("URL: http://wpad.example.com/proxy.pac\nEnabled: Yes\n", "http://wpad.example.com/proxy.pac", true)]
+    [InlineData("URL: (null)\nEnabled: No\n", null, false)]
+    [InlineData("URL: http://a/p.pac\nEnabled: No\n", "http://a/p.pac", false)]
+    public void ParsesTheAutomaticProxyUrl(string output, string? url, bool enabled)
+    {
+        Assert.Equal((url, enabled), MacOSSystemProxy.ParseAutoProxyUrl(output));
+    }
+
+    [Theory]
+    [InlineData("Auto Proxy Discovery: On\n", true)]
+    [InlineData("Auto Proxy Discovery: Off\n", false)]
+    [InlineData("** Error: unknown\n", null)]
+    public void ParsesAutomaticProxyDiscovery(string output, bool? expected)
+    {
+        Assert.Equal(expected, MacOSSystemProxy.ParseProxyAutoDiscovery(output));
+    }
 }

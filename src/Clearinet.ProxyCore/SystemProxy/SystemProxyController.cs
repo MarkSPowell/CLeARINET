@@ -43,10 +43,6 @@ public static class SystemProxyController
     }
 
     /// <summary>
-    /// Restores whatever the system proxy was set to before the last
-    /// <see cref="Enable"/> call, on whichever platform this is running on.
-    /// </summary>
-    /// <summary>
     /// The proxy this machine was set to use before CLeARINET registered
     /// itself, for CLeARINET to forward its own connections through. Call
     /// before <see cref="Enable"/>. Never throws: a failure to read the
@@ -74,6 +70,10 @@ public static class SystemProxyController
         return UpstreamProxyDetection.None;
     }
 
+    /// <summary>
+    /// Restores whatever the system proxy was set to before the last
+    /// <see cref="Enable"/> call, on whichever platform this is running on.
+    /// </summary>
     public static void Disable()
     {
         if (OperatingSystem.IsWindows())
