@@ -51,7 +51,7 @@ public static class HarReader
             try
             {
                 var (host, startedAt, request, response, flags, scheme) = ReadEntry(entry);
-                sessionStore.Add(host, startedAt, request, response, flags, scheme);
+                sessionStore.Add(host, startedAt, request, response, flags, scheme, ReadTimings(entry));
                 imported++;
             }
             catch (Exception ex) when (ex is InvalidDataException or FormatException or InvalidOperationException or KeyNotFoundException or UriFormatException)
@@ -112,6 +112,49 @@ public static class HarReader
             : null;
 
         return (uri.Host, startedAt, request, response, flags, string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase) ? "http" : "https");
+    }
+
+    /// <summary>
+    /// An entry's timings, as <see cref="HarWriter.Timings"/> writes them
+    /// (and browsers' developer tools do): <c>connect</c> includes
+    /// <c>ssl</c>, so that's taken back out. Null when the entry has none,
+    /// or only the zeros a tool writes when it doesn't measure.
+    /// </summary>
+    internal static SessionTimings? ReadTimings(JsonElement entry)
+    {
+        if (!entry.TryGetProperty("timings", out var timings) || timings.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        double Phase(string name) =>
+            timings.TryGetProperty(name, out var value) && value.TryGetDouble(out var ms) ? ms : SessionTimings.NotApplicable;
+
+        var ssl = Phase("ssl");
+        var connect = Phase("connect");
+        if (connect >= 0 && ssl > 0)
+        {
+            connect = Math.Max(0, connect - ssl);
+        }
+
+        var result = new SessionTimings
+        {
+            Blocked = Phase("blocked"),
+            Dns = Phase("dns"),
+            Connect = connect,
+            Ssl = ssl,
+            Send = Phase("send"),
+            Wait = Phase("wait"),
+            Receive = Phase("receive"),
+            Paused = Math.Max(0, Phase("_paused")),
+            ConnectionId = entry.TryGetProperty("connection", out var connection) &&
+                           int.TryParse(connection.ValueKind == JsonValueKind.String ? connection.GetString() : connection.GetRawText(),
+                               System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var id)
+                ? id
+                : 0,
+        };
+
+        return result.Total > 0 ? result : null;
     }
 
     private static JsonElement Required(JsonElement parent, string name) =>

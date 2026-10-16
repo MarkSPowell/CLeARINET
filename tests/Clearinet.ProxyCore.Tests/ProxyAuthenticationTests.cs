@@ -174,7 +174,7 @@ public class ProxyAuthenticationTests
     /// the next scripted reply, recording what it received (head and any
     /// Content-Length body).
     /// </summary>
-    private sealed class ScriptedProxy : IAsyncDisposable
+    internal sealed class ScriptedProxy : IAsyncDisposable
     {
         private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
         private readonly Task _serve;

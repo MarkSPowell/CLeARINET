@@ -3,6 +3,7 @@
         xmlns:vm="using:Clearinet.DesktopUi.ViewModels"
         xmlns:inspect="using:Clearinet.Extensibility.Inspection"
         xmlns:conv="using:Clearinet.DesktopUi.Converters"
+        xmlns:controls="using:Clearinet.DesktopUi.Controls"
         xmlns:avc="using:Avalonia.Data.Converters"
         x:Class="Clearinet.DesktopUi.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -143,6 +144,10 @@
              first. Both send through CLeARINET, so capture must be running. -->
         <MenuItem Header="_Replay Selected Session" Command="{Binding ReplaySelectedSessionCommand}" InputGesture="R" />
         <MenuItem Header="Edit in _Composer" Command="{Binding EditInComposerCommand}" />
+        <Separator />
+        <!-- Two sessions side by side (Ctrl+click the second one first).
+             See CompareWindow. -->
+        <MenuItem Header="Co_mpare Sessions" Click="CompareSessionsMenuItem_Click" HotKey="Ctrl+W" InputGesture="Ctrl+W" />
       </MenuItem>
 
       <!-- Phase B: one checkable entry per RulesOption/RulesStringChoice the
@@ -197,6 +202,15 @@
         <MenuItem Header="Also Break On" ToggleType="CheckBox" IsChecked="{Binding ShowAlsoBreakOnRow, Mode=TwoWay}" />
         <MenuItem Header="AutoResponder" ToggleType="CheckBox" IsChecked="{Binding AutoResponderEnabled, Mode=TwoWay}" />
         <MenuItem Header="Connections" ToggleType="CheckBox" IsChecked="{Binding ShowConnectionsRow, Mode=TwoWay}" />
+        <Separator />
+        <!-- Encodes and decodes text: Base64, URL, hex, JWT... (see
+             TextWizardWindow). Text selected in an inspector when it opens
+             becomes its input. -->
+        <MenuItem Header="_TextWizard…" Click="TextWizardMenuItem_Click" HotKey="Ctrl+E" InputGesture="Ctrl+E" />
+        <!-- Show or hide session-list columns (also on right-click of a
+             column header). Filled in by MainWindow.axaml.cs, since script
+             and extension columns come and go. -->
+        <MenuItem Header="Session List _Columns" x:Name="ColumnsMenu" />
       </MenuItem>
 
       <!-- _Documentation opens the bundled end-user-facing User Guide
@@ -765,8 +779,13 @@
            plain control's Binding markup is, so this subtree opts back into
            classic reflection bindings rather than fighting the project-wide
            AvaloniaUseCompiledBindingsByDefault default. -->
-      <DataGrid Grid.Row="0"
-                x:Name="SessionsDataGrid"
+      <!-- The request summary under the list, as in browsers' developer tools. -->
+      <DockPanel Grid.Row="0">
+      <TextBlock DockPanel.Dock="Bottom"
+                 Text="{Binding RequestSummary}"
+                 Foreground="{DynamicResource AppMutedTextBrush}"
+                 Margin="4,4,4,0" />
+      <DataGrid x:Name="SessionsDataGrid"
                 x:CompileBindings="False"
                 ItemsSource="{Binding FilteredSessions}"
                 SelectedItem="{Binding SelectedSessionRow, Mode=TwoWay}"
@@ -850,8 +869,19 @@
                the image looks (see ImageBloatAnalyzer). Rows where it's a
                large share of the file are tinted. -->
           <DataGridTextColumn Header="Image Bloat" Binding="{Binding ImageBloat}" Width="170" />
+          <!-- The waterfall, as in browsers' developer tools: each session's
+               phases (queueing, DNS, connection, TLS, sending, waiting,
+               download) on a shared time axis. Hover for the breakdown. -->
+          <DataGridTemplateColumn Header="Waterfall" Width="260" MinWidth="120" SortMemberPath="Session.StartedAt">
+            <DataGridTemplateColumn.CellTemplate>
+              <DataTemplate>
+                <controls:WaterfallBar Session="{Binding Session}" Margin="4,0" VerticalAlignment="Stretch" />
+              </DataTemplate>
+            </DataGridTemplateColumn.CellTemplate>
+          </DataGridTemplateColumn>
         </DataGrid.Columns>
       </DataGrid>
+      </DockPanel>
 
       <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" Background="{DynamicResource AppBorderBrush}" />
 
@@ -927,6 +957,68 @@
                      FontFamily="Cascadia Mono,Consolas,monospace"
                      VerticalAlignment="Stretch" />
           </DockPanel>
+        </TabItem>
+        <!-- The selected session's phases, like the Timing tab in browsers'
+             developer tools. -->
+        <TabItem Header="Timing">
+          <ScrollViewer Margin="0,6,0,0">
+            <StackPanel Spacing="8">
+              <TextBlock Text="{Binding TimingHeader}" TextWrapping="Wrap" />
+              <ItemsControl ItemsSource="{Binding TimingPhases}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:TimingPhaseRow">
+                    <Grid ColumnDefinitions="220,*,90" Margin="0,2">
+                      <TextBlock Grid.Column="0" Text="{Binding Label}" VerticalAlignment="Center" />
+                      <controls:PhaseBar Grid.Column="1"
+                                         StartFraction="{Binding StartFraction}"
+                                         LengthFraction="{Binding LengthFraction}"
+                                         Fill="{Binding Brush}"
+                                         Height="12"
+                                         VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="2" Text="{Binding Duration}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+        <!-- Totals and breakdowns for the sessions the filter shows: by
+             type, status and host, the slowest requests, and easy wins. -->
+        <TabItem Header="Statistics" IsSelected="{Binding IsStatisticsTabSelected, Mode=TwoWay}">
+          <ScrollViewer Margin="0,6,0,0">
+            <StackPanel Spacing="10">
+              <StackPanel Orientation="Horizontal" Spacing="10">
+                <Button Content="Refresh" Command="{Binding RefreshStatisticsCommand}" />
+                <TextBlock Text="{Binding StatisticsSummary}" TextWrapping="Wrap" VerticalAlignment="Center" />
+              </StackPanel>
+              <ItemsControl ItemsSource="{Binding StatisticsSections}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:StatisticsSection">
+                    <StackPanel Spacing="2" Margin="0,0,0,8">
+                      <TextBlock Text="{Binding Title}" FontWeight="Bold" Foreground="{DynamicResource AppAccentBrush}" />
+                      <ItemsControl ItemsSource="{Binding Rows}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:StatisticsRow">
+                            <Grid ColumnDefinitions="*,160,200" Margin="0,1">
+                              <TextBlock Grid.Column="0" Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Name}" VerticalAlignment="Center" />
+                              <controls:PhaseBar Grid.Column="1"
+                                                 LengthFraction="{Binding Fraction}"
+                                                 Fill="{x:Static vm:MainWindowViewModel.StatisticsBar}"
+                                                 Height="10"
+                                                 Margin="8,0"
+                                                 VerticalAlignment="Center" />
+                              <TextBlock Grid.Column="2" Text="{Binding Detail}" VerticalAlignment="Center" />
+                            </Grid>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </ScrollViewer>
         </TabItem>
       </TabControl>
     </Grid>

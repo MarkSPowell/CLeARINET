@@ -74,6 +74,10 @@ public sealed class InterceptingProxyListener
     private CancellationTokenSource? _cts;
     private UpstreamProxy? _gateway;
     private ProxyAutoConfig? _autoConfig;
+
+    // Numbers the connections CLeARINET opens to servers and upstream
+    // proxies, so the waterfall can show which requests shared one.
+    private static int s_connectionCounter;
     private NetworkCredential? _proxyCredential;
 
     public InterceptingProxyListener(
@@ -475,6 +479,8 @@ public sealed class InterceptingProxyListener
         string? upstreamKey = null;
         var sendAbsoluteForm = false;
         UpstreamProxy? upstreamRoute = null;
+        var upstreamConnectionId = 0;
+        SessionTimingRecorder? currentTiming = null;
         var pendingRequest = firstRequest;
 
         // Opens the upstream connection the first time a request on this
@@ -494,6 +500,13 @@ public sealed class InterceptingProxyListener
                 upstreamClient = null;
             }
 
+            if (upstreamTls is not null && currentTiming is not null)
+            {
+                currentTiming.ConnectionReused = true;
+                currentTiming.ConnectionId = upstreamConnectionId;
+                currentTiming.Proxy = upstreamRoute?.ToString();
+            }
+
             if (upstreamTls is null)
             {
                 // Directly, through the network's proxy, or as its PAC
@@ -502,6 +515,7 @@ public sealed class InterceptingProxyListener
                 upstreamClient?.Dispose(); // left over from a failed TLS handshake
                 upstreamClient = null;
                 var routes = await chooseRoutes(isTls, targetHost, targetPort, target, cancellationToken);
+                currentTiming?.ConnectStarted();
                 UpstreamProxy? route = null;
                 for (var i = 0; upstreamClient is null; i++)
                 {
@@ -517,6 +531,14 @@ public sealed class InterceptingProxyListener
                     }
                 }
 
+                currentTiming?.Connected();
+                upstreamConnectionId = Interlocked.Increment(ref s_connectionCounter);
+                if (currentTiming is not null)
+                {
+                    currentTiming.ConnectionId = upstreamConnectionId;
+                    currentTiming.Proxy = route?.ToString();
+                }
+
                 if (isTls)
                 {
                     var tls = new SslStream(upstreamClient!.GetStream(), leaveInnerStreamOpen: false);
@@ -525,6 +547,7 @@ public sealed class InterceptingProxyListener
                     // problem, not hide it, even though it's standing in
                     // the middle of the connection for the client's side.
                     await tls.AuthenticateAsClientAsync(targetHost);
+                    currentTiming?.TlsDone();
                     upstreamTls = tls;
                     sendAbsoluteForm = false;
                 }
@@ -556,15 +579,12 @@ public sealed class InterceptingProxyListener
             var client = new TcpClient();
             try
             {
-                if (route is null)
-                {
-                    await client.ConnectAsync(targetHost, targetPort, cancellationToken);
-                }
-                else
-                {
-                    await client.ConnectAsync(route.Host, route.Port, cancellationToken);
-                }
-
+                // The address is looked up first, on its own, so the
+                // waterfall can show DNS time apart from connecting.
+                var (host, port) = route is null ? (targetHost, targetPort) : (route.Host, route.Port);
+                var addresses = await Dns.GetHostAddressesAsync(host, cancellationToken);
+                currentTiming?.DnsDone();
+                await client.ConnectAsync(addresses, port, cancellationToken);
                 return client;
             }
             catch
@@ -655,7 +675,8 @@ public sealed class InterceptingProxyListener
             {
                 var failure = BadGateway(targetHost, targetPort, ex);
                 await HttpMessageWriter.WriteResponseAsync(clientTls, failure, cancellationToken);
-                var failed = sessionStore.Add(targetHost, startedAt, outgoing, failure, flags: null, scheme);
+                currentTiming?.Done();
+                var failed = sessionStore.Add(targetHost, startedAt, outgoing, failure, flags: null, scheme, currentTiming?.Build());
                 Console.WriteLine(
                     $"[{startedAt:HH:mm:ss}] #{failed.Id} 502 {outgoing.Method} {scheme}://{targetHost}{outgoing.Target} -- {ex.Message}");
                 return null;
@@ -666,7 +687,6 @@ public sealed class InterceptingProxyListener
         {
             while (true)
             {
-                var startedAt = DateTimeOffset.Now;
                 var requestPreamble = pendingRequest ?? await Http1MessageReader.ReadRequestPreambleAsync(clientTls, cancellationToken);
                 pendingRequest = null;
                 if (requestPreamble is null)
@@ -675,6 +695,12 @@ public sealed class InterceptingProxyListener
                     // the normal way a keep-alive HTTP/1.1 connection ends.
                     return;
                 }
+
+                // Timed from the request's arrival, not from when the
+                // connection started waiting for it (keep-alive idle time).
+                var startedAt = DateTimeOffset.Now;
+                var timing = new SessionTimingRecorder();
+                currentTiming = timing;
 
                 if (!isTls)
                 {
@@ -736,7 +762,7 @@ public sealed class InterceptingProxyListener
 
                     if (outcome.FinalActionKind == AutoResponderActionKind.Reset)
                     {
-                        RecordAutoRespondedSession(sessionStore, targetHost, scheme, startedAt, localRequest, "Connection Reset (AutoResponder *reset)");
+                        RecordAutoRespondedSession(sessionStore, targetHost, scheme, startedAt, localRequest, "Connection Reset (AutoResponder *reset)", timing.Build(answeredLocally: true));
                         // A graceful Dispose sends a normal FIN; a TCP RST
                         // needs the zero-second linger option set first --
                         // this is the one case that needs the raw
@@ -750,7 +776,7 @@ public sealed class InterceptingProxyListener
 
                     if (outcome.FinalActionKind == AutoResponderActionKind.Drop)
                     {
-                        RecordAutoRespondedSession(sessionStore, targetHost, scheme, startedAt, localRequest, "Connection Dropped (AutoResponder *drop)");
+                        RecordAutoRespondedSession(sessionStore, targetHost, scheme, startedAt, localRequest, "Connection Dropped (AutoResponder *drop)", timing.Build(answeredLocally: true));
                         // No response, no RST -- just stop. The outer
                         // `using` declarations in HandleClientAsync close
                         // this connection normally once this method returns.
@@ -759,7 +785,8 @@ public sealed class InterceptingProxyListener
 
                     var localResponse = await BuildMockResponseAsync(outcome, localRequest, proxyUrlClient, cancellationToken);
                     await HttpMessageWriter.WriteResponseAsync(clientTls, localResponse, cancellationToken);
-                    var localSession = sessionStore.Add(targetHost, startedAt, localRequest, localResponse, flags: null, scheme);
+                    timing.Done();
+                    var localSession = sessionStore.Add(targetHost, startedAt, localRequest, localResponse, flags: null, scheme, timing.Build(answeredLocally: true));
                     Console.WriteLine(
                         $"[{startedAt:HH:mm:ss}] #{localSession.Id} {localResponse.StatusCode} {localRequest.Method} {url} " +
                         $"(AutoResponder: {outcome.FinalActionKind})");
@@ -840,7 +867,9 @@ public sealed class InterceptingProxyListener
                         // A breakpoint here (Fiddler's "bpu"/bpm/break-on-all-requests,
                         // or AutoResponder's own *bpu) can hold this connection
                         // open and edit the request before it's forwarded.
+                        var requestPauseStart = SessionTimingRecorder.Now();
                         request = await breakpointManager.ApplyRequestBreakpointAsync(targetHost, request, cancellationToken);
+                        timing.AddPause(requestPauseStart, SessionTimingRecorder.Now());
                         RouteFrom(request);
                         var bufferedUpstream = await TryEnsureUpstreamAsync(request, startedAt);
                         if (bufferedUpstream is null)
@@ -848,7 +877,9 @@ public sealed class InterceptingProxyListener
                             return;
                         }
 
+                        timing.SendStarted();
                         await HttpMessageWriter.WriteRequestAsync(bufferedUpstream, ForUpstream(request), cancellationToken);
+                        timing.SendDone();
                     }
                 }
                 else
@@ -860,9 +891,11 @@ public sealed class InterceptingProxyListener
                         return;
                     }
 
+                    timing.SendStarted();
                     await HttpMessageWriter.WriteRequestPreambleAsync(upstream, ForUpstream(outgoingPreamble), cancellationToken);
                     var requestBody = await Http1MessageReader.RelayBodyAsync(
                         clientTls, upstream, outgoingPreamble.Headers, cancellationToken);
+                    timing.SendDone();
                     request = outgoingPreamble with { Body = requestBody };
                 }
 
@@ -877,7 +910,9 @@ public sealed class InterceptingProxyListener
                     await HttpMessageWriter.WriteResponseAsync(clientTls, localResponse, cancellationToken);
                     extensionSession.ResponseAfter(request, localResponse);
 
-                    var answeredSession = sessionStore.Add(targetHost, startedAt, request, localResponse, extensionSession.Flags, scheme);
+                    timing.Done();
+                    var answeredSession = sessionStore.Add(
+                        targetHost, startedAt, request, localResponse, extensionSession.Flags, scheme, timing.Build(answeredLocally: true));
                     Console.WriteLine(
                         $"[{startedAt:HH:mm:ss}] #{answeredSession.Id} {localResponse.StatusCode} {request.Method} {url} (answered by an extension)");
                     continue;
@@ -896,6 +931,7 @@ public sealed class InterceptingProxyListener
 
                 var isHeadRequest = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
                 var responsePreamble = await Http1MessageReader.ReadResponsePreambleAsync(upstreamStream, cancellationToken);
+                timing.FirstByte();
                 if (responsePreamble is { StatusCode: 407 } && !isTls && upstreamRoute is not null)
                 {
                     // The network's proxy wants a sign-in for plain HTTP.
@@ -951,8 +987,10 @@ public sealed class InterceptingProxyListener
                         response = extensionSession.ResponseBefore(request, response);
                     }
 
+                    var responsePauseStart = SessionTimingRecorder.Now();
                     response = await breakpointManager.ApplyResponseBreakpointAsync(
                         targetHost, request, response, cancellationToken);
+                    timing.AddPause(responsePauseStart, SessionTimingRecorder.Now());
                     await HttpMessageWriter.WriteResponseAsync(clientTls, response, cancellationToken);
                 }
                 else
@@ -976,7 +1014,8 @@ public sealed class InterceptingProxyListener
                 extensionHost?.RunResponseAfter(sessionStore.PeekNextId(), targetHost, request, response);
                 extensionSession?.ResponseAfter(request, response);
 
-                var session = sessionStore.Add(targetHost, startedAt, request, response, extensionSession?.Flags, scheme);
+                timing.Done();
+                var session = sessionStore.Add(targetHost, startedAt, request, response, extensionSession?.Flags, scheme, timing.Build());
                 Console.WriteLine(
                     $"[{startedAt:HH:mm:ss}] #{session.Id} {response.StatusCode} {request.Method} {scheme}://{targetHost}{request.Target} " +
                     $"({request.Body.Length} B req, {response.Body.Length} B resp)");
@@ -1026,10 +1065,11 @@ public sealed class InterceptingProxyListener
     /// grid from every genuine (even error) status code.
     /// </summary>
     private static void RecordAutoRespondedSession(
-        SessionStore sessionStore, string targetHost, string scheme, DateTimeOffset startedAt, CapturedRequest request, string reason)
+        SessionStore sessionStore, string targetHost, string scheme, DateTimeOffset startedAt, CapturedRequest request, string reason,
+        SessionTimings timings)
     {
         var response = new CapturedResponse("HTTP/1.1", 0, reason, [], []);
-        var session = sessionStore.Add(targetHost, startedAt, request, response, flags: null, scheme);
+        var session = sessionStore.Add(targetHost, startedAt, request, response, flags: null, scheme, timings);
         Console.WriteLine($"[{startedAt:HH:mm:ss}] #{session.Id} {request.Method} {scheme}://{targetHost}{request.Target} -- {reason}");
     }
 

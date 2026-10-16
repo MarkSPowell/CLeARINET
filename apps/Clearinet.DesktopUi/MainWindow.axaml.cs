@@ -9,6 +9,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Clearinet.DesktopUi.ViewModels;
+using Clearinet.ProxyCore.Preferences;
 
 namespace Clearinet.DesktopUi;
 
@@ -53,6 +54,21 @@ public partial class MainWindow : Window
     /// </summary>
     private readonly List<DataGridColumn> _scriptColumns = [];
 
+    /// <summary>
+    /// The column-chooser key of each script and extension column (see
+    /// MainWindowViewModel.Columns.cs). Built-in columns aren't listed:
+    /// their key is their header.
+    /// </summary>
+    private readonly Dictionary<DataGridColumn, string> _columnKeys = [];
+
+    /// <summary>The built-in columns as MainWindow.axaml declares them, for Reset Columns.</summary>
+    private readonly List<(DataGridColumn Column, DataGridLength Width)> _defaultColumns;
+
+    // The saved order and widths are applied once the view model is
+    // attached; saving before that would overwrite them with the defaults.
+    private bool _columnLayoutApplied;
+    private bool _applyingColumnLayout;
+
     private MainWindowViewModel? _viewModel;
 
     private bool _extensionTabsAdded;
@@ -80,7 +96,26 @@ public partial class MainWindow : Window
         // a live MainWindowViewModel to subscribe PropertyChanged against.
         DataContextChanged += (_, _) => AttachViewModel();
         PositionChanged += (_, _) => RememberNormalBounds();
-        Closing += (_, _) => SavePlacement();
+        Closing += (_, _) =>
+        {
+            SavePlacement();
+            SaveColumnLayout(); // widths aren't saved as they change
+        };
+
+        _defaultColumns = SessionsDataGrid.Columns.Select(c => (c, c.Width)).ToList();
+
+        // Right-clicking a column header offers the column chooser instead
+        // of the list's own context menu. Tunnel, so this runs before the
+        // grid's ContextMenu sees the request.
+        SessionsDataGrid.AddHandler(ContextRequestedEvent, SessionsDataGrid_ContextRequested, RoutingStrategies.Tunnel);
+        SessionsDataGrid.ColumnReordered += (_, _) =>
+        {
+            if (!_applyingColumnLayout)
+            {
+                SaveColumnLayout();
+                RefreshColumnsMenu();
+            }
+        };
     }
 
     /// <summary>
@@ -191,6 +226,8 @@ public partial class MainWindow : Window
             RefreshScriptColumns();
             AddExtensionTabs(_viewModel);
             AttachExtensionMenusAndColumns();
+            ApplyColumnLayout();
+            ApplyColumnVisibility();
         }
     }
 
@@ -276,7 +313,11 @@ public partial class MainWindow : Window
 
         var columns = SessionsDataGrid.Columns;
         var index = bound.DisplayOrder < 0 || bound.DisplayOrder > columns.Count ? columns.Count : bound.DisplayOrder;
+        SaveColumnLayout();
+        _columnKeys[column] = "flag:" + bound.FlagName;
         columns.Insert(index, column);
+        ApplyColumnLayout();
+        ApplyColumnVisibility();
     }
 
     /// <summary>
@@ -407,9 +448,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Remember where these columns were (and their widths) before
+        // they go, so the reloaded script's columns come back there.
+        SaveColumnLayout();
         foreach (var column in _scriptColumns)
         {
             SessionsDataGrid.Columns.Remove(column);
+            _columnKeys.Remove(column);
         }
 
         _scriptColumns.Clear();
@@ -423,9 +468,223 @@ public partial class MainWindow : Window
                 Width = descriptor.Width is { } width ? new DataGridLength(width) : DataGridLength.Auto,
             };
 
+            _columnKeys[column] = "script:" + descriptor.ColumnTitle;
             SessionsDataGrid.Columns.Add(column);
             _scriptColumns.Add(column);
         }
+
+        ApplyColumnLayout();
+        ApplyColumnVisibility();
+    }
+
+    /// <summary>
+    /// Puts the columns in their saved order and gives them their saved
+    /// widths. A column with no saved place (one the user has never seen
+    /// before) stays where it was added. The URL column keeps filling the
+    /// space that's left.
+    /// </summary>
+    private void ApplyColumnLayout()
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        _columnLayoutApplied = true;
+        var saved = _viewModel.LoadColumnLayout();
+        if (saved.Count == 0)
+        {
+            return;
+        }
+
+        _applyingColumnLayout = true;
+        try
+        {
+            var current = SessionsDataGrid.Columns.OrderBy(c => c.DisplayIndex).ToList();
+            var order = ColumnLayout.Arrange(
+                current.Select(c => ColumnKey(c) ?? string.Empty).ToList(),
+                saved.Select(e => e.Key).ToList());
+            for (var i = 0; i < order.Count; i++)
+            {
+                current[order[i]].DisplayIndex = i;
+            }
+
+            var widths = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in saved)
+            {
+                if (entry.Width is { } width)
+                {
+                    widths.TryAdd(entry.Key, width);
+                }
+            }
+
+            foreach (var column in current)
+            {
+                if (!column.Width.IsStar && ColumnKey(column) is { } key && widths.TryGetValue(key, out var width))
+                {
+                    column.Width = new DataGridLength(Math.Max(width, column.MinWidth));
+                }
+            }
+        }
+        finally
+        {
+            _applyingColumnLayout = false;
+        }
+    }
+
+    /// <summary>Remembers the columns' order and widths (only widths the user or the column set; not the URL column's fill).</summary>
+    private void SaveColumnLayout()
+    {
+        if (_viewModel is null || !_columnLayoutApplied)
+        {
+            return;
+        }
+
+        var current = SessionsDataGrid.Columns
+            .OrderBy(c => c.DisplayIndex)
+            .Select(c => (Column: c, Key: ColumnKey(c)))
+            .Where(c => !string.IsNullOrEmpty(c.Key))
+            .Select(c => new ColumnLayoutEntry(c.Key!, c.Column.Width.IsAbsolute ? c.Column.Width.Value : null))
+            .ToList();
+        _viewModel.SaveColumnLayout(current);
+    }
+
+    /// <summary>Every column shown, in the order and at the widths MainWindow.axaml gives them.</summary>
+    private void ResetColumns()
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        _viewModel.ShowAllColumns();
+        _viewModel.ClearColumnLayout();
+        _applyingColumnLayout = true;
+        try
+        {
+            for (var i = 0; i < _defaultColumns.Count; i++)
+            {
+                var (column, width) = _defaultColumns[i];
+                column.Width = width;
+                column.DisplayIndex = i;
+            }
+        }
+        finally
+        {
+            _applyingColumnLayout = false;
+        }
+
+        ApplyColumnVisibility();
+    }
+
+    /// <summary>The key a column is remembered by: see MainWindowViewModel.Columns.cs.</summary>
+    private string? ColumnKey(DataGridColumn column) =>
+        _columnKeys.TryGetValue(column, out var key) ? key : column.Header as string;
+
+    /// <summary>Shows or hides every column as the saved choice says, and refreshes Tools > Session List Columns.</summary>
+    private void ApplyColumnVisibility()
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        foreach (var column in SessionsDataGrid.Columns)
+        {
+            if (ColumnKey(column) is { } key)
+            {
+                column.IsVisible = _viewModel.IsColumnVisible(key);
+            }
+        }
+
+        RefreshColumnsMenu();
+    }
+
+    private void RefreshColumnsMenu()
+    {
+        ColumnsMenu.Items.Clear();
+        foreach (var item in BuildColumnMenuItems())
+        {
+            ColumnsMenu.Items.Add(item);
+        }
+    }
+
+    /// <summary>
+    /// One checkable entry per column, in the order they're shown, then
+    /// Show All Columns and Reset Columns. <c>#</c> and <c>URL</c> are listed but can't be
+    /// unchecked. Built fresh each time: the menu items for Tools and for
+    /// the header's context menu can't be shared.
+    /// </summary>
+    private List<Control> BuildColumnMenuItems()
+    {
+        var items = new List<Control>();
+        if (_viewModel is not { } viewModel)
+        {
+            return items;
+        }
+
+        foreach (var column in SessionsDataGrid.Columns.OrderBy(c => c.DisplayIndex))
+        {
+            if (ColumnKey(column) is not { } key)
+            {
+                continue;
+            }
+
+            var title = column.Header?.ToString() ?? key;
+            var item = new MenuItem
+            {
+                // A single underscore would be taken as an access key.
+                Header = title.Replace("_", "__", StringComparison.Ordinal),
+                ToggleType = MenuItemToggleType.CheckBox,
+                IsChecked = column.IsVisible,
+                IsEnabled = !MainWindowViewModel.IsColumnLocked(key),
+            };
+            var target = column;
+            item.Click += (_, _) => SetColumnVisible(target, key, !target.IsVisible);
+            items.Add(item);
+        }
+
+        items.Add(new Separator());
+        var showAll = new MenuItem { Header = "_Show All Columns" };
+        showAll.Click += (_, _) =>
+        {
+            viewModel.ShowAllColumns();
+            Dispatcher.UIThread.Post(ApplyColumnVisibility);
+        };
+        items.Add(showAll);
+
+        var reset = new MenuItem { Header = "_Reset Columns" };
+        ToolTip.SetTip(reset, "Shows every column, in the original order and widths.");
+        reset.Click += (_, _) => Dispatcher.UIThread.Post(ResetColumns);
+        items.Add(reset);
+        return items;
+    }
+
+    private void SetColumnVisible(DataGridColumn column, string key, bool visible)
+    {
+        if (_viewModel is null || MainWindowViewModel.IsColumnLocked(key))
+        {
+            return;
+        }
+
+        _viewModel.SetColumnVisible(key, visible);
+        column.IsVisible = visible;
+
+        // After the click, not during it: the menu being clicked is rebuilt.
+        Dispatcher.UIThread.Post(RefreshColumnsMenu);
+    }
+
+    /// <summary>Right-click on a column header: the column chooser.</summary>
+    private void SessionsDataGrid_ContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if ((e.Source as Visual)?.FindAncestorOfType<DataGridColumnHeader>(includeSelf: true) is not { } header)
+        {
+            return; // a row: the list's own context menu
+        }
+
+        e.Handled = true;
+        var menu = new ContextMenu { ItemsSource = BuildColumnMenuItems() };
+        menu.Open(header);
     }
 
     /// <summary>
@@ -577,5 +836,58 @@ public partial class MainWindow : Window
     {
         var about = new AboutWindow();
         _ = about.ShowDialog(this);
+    }
+
+    /// <summary>
+    /// Edit > Compare Sessions (Ctrl+W): the two selected sessions side by
+    /// side, in a window of their own.
+    /// </summary>
+    private void CompareSessionsMenuItem_Click(object? sender, RoutedEventArgs e)
+    {
+        var selected = SessionsDataGrid.SelectedItems.OfType<Models.SessionRow>().ToList();
+        if (selected.Count != 2)
+        {
+            _viewModel?.ShowStatus(selected.Count < 2
+                ? "To compare, select two sessions: click one, then Ctrl+click the other (Cmd+click on a Mac)."
+                : "Compare works on two sessions; select just two.");
+            return;
+        }
+
+        new CompareWindow(selected[0].Session, selected[1].Session).Show(this);
+    }
+
+    private TextWizardWindow? _textWizard;
+
+    /// <summary>
+    /// Tools > TextWizard (Ctrl+E). Text selected in an inspector (or any
+    /// text box) becomes the input.
+    /// </summary>
+    private void TextWizardMenuItem_Click(object? sender, RoutedEventArgs e)
+    {
+        var selectedText = FocusManager?.GetFocusedElement() switch
+        {
+            TextBox box => box.SelectedText,
+            SelectableTextBlock block => block.SelectedText,
+            _ => null,
+        };
+
+        if (_textWizard is null)
+        {
+            _textWizard = new TextWizardWindow(
+                _viewModel?.TextWizardTransform,
+                _viewModel?.TextWizardEncoding,
+                (transform, encoding) => _viewModel?.RememberTextWizardChoice(transform, encoding));
+            _textWizard.Closed += (_, _) => _textWizard = null;
+            _textWizard.Show(this);
+        }
+        else
+        {
+            _textWizard.Activate();
+        }
+
+        if (!string.IsNullOrEmpty(selectedText))
+        {
+            _textWizard.SetInput(selectedText);
+        }
     }
 }

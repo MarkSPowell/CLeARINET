@@ -96,6 +96,13 @@ public sealed record Session(
         Flags = this.Flags;
     }
 
+    /// <summary>
+    /// How long each phase of the exchange took (see
+    /// <see cref="SessionTimings"/>), or null when that isn't known (a
+    /// session imported from a file that doesn't record it).
+    /// </summary>
+    public SessionTimings? Timings { get; init; }
+
     /// <summary>The original six-value deconstruction, kept for the same reason.</summary>
     public void Deconstruct(out int Id, out string Host, out DateTimeOffset StartedAt, out CapturedRequest Request, out CapturedResponse Response, out SessionState State)
     {

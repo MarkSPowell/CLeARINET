@@ -18,8 +18,9 @@ namespace Clearinet.ProxyCore.Sessions;
 /// Content-Encoding it was sent with; <c>content.compression</c> records how
 /// many bytes that saved. A request body that isn't text is written as
 /// base64 with the same <c>encoding</c> field, which HAR only defines for
-/// responses; most tools accept it. CLeARINET doesn't record timings, so
-/// every entry's timings are zero.
+/// responses; most tools accept it. Timings come from
+/// <see cref="Session.Timings"/> (all zero when a session has none); see
+/// <see cref="Timings"/> for how they map.
 /// </summary>
 public static class HarWriter
 {
@@ -61,17 +62,58 @@ public static class HarWriter
         har.WriteTo(writer);
     }
 
+    /// <summary>
+    /// HAR's timings object. HAR counts the TLS handshake inside
+    /// <c>connect</c> as well as in <c>ssl</c>, where CLeARINET keeps them
+    /// apart, so <c>connect</c> here is the two added together. -1 means
+    /// "doesn't apply" in both. <c>_paused</c> (breakpoint time) is
+    /// CLeARINET's own; HAR allows extra fields that start with "_".
+    /// </summary>
+    internal static JsonObject Timings(SessionTimings? timings)
+    {
+        if (timings is null)
+        {
+            return new JsonObject { ["send"] = 0, ["wait"] = 0, ["receive"] = 0 };
+        }
+
+        var connect = timings.Connect < 0
+            ? SessionTimings.NotApplicable
+            : timings.Connect + Math.Max(0, timings.Ssl);
+        var json = new JsonObject
+        {
+            ["blocked"] = timings.Blocked,
+            ["dns"] = timings.Dns,
+            ["connect"] = connect,
+            ["ssl"] = timings.Ssl,
+            ["send"] = Math.Max(0, timings.Send),
+            ["wait"] = Math.Max(0, timings.Wait),
+            ["receive"] = Math.Max(0, timings.Receive),
+        };
+
+        if (timings.Paused > 0)
+        {
+            json["_paused"] = timings.Paused;
+        }
+
+        return json;
+    }
+
     private static JsonObject Entry(Session session)
     {
         var entry = new JsonObject
         {
             ["startedDateTime"] = session.StartedAt.ToString("o", CultureInfo.InvariantCulture),
-            ["time"] = 0,
+            ["time"] = session.Timings?.Total ?? 0,
             ["request"] = Request(session),
             ["response"] = Response(session.Response),
             ["cache"] = new JsonObject(),
-            ["timings"] = new JsonObject { ["send"] = 0, ["wait"] = 0, ["receive"] = 0 },
+            ["timings"] = Timings(session.Timings),
         };
+
+        if (session.Timings is { ConnectionId: > 0 } timings)
+        {
+            entry["connection"] = timings.ConnectionId.ToString(CultureInfo.InvariantCulture);
+        }
 
         if (session.Flags is { } flags && flags.TryGetValue("ui-comments", out var comment) && !string.IsNullOrEmpty(comment))
         {

@@ -23,16 +23,12 @@ namespace Clearinet.ProxyCore.Sessions;
 /// included too, matching what real Fiddler output carries for zip-package
 /// compatibility.
 ///
-/// One honest gap: the SessionTimers attributes are real Fiddler fields
-/// (DNS time, TCP connect time, handshake time, and so on), but this spike
-/// only has one timestamp per session -- when the request started -- not
-/// the per-phase timing Fiddler itself records. Every timer attribute is
-/// set to that one timestamp rather than omitted, so the element is at
-/// least well-formed, but the Timers tab in a real Fiddler Classic install
-/// may not show anything meaningful yet. That's a known, scoped gap, not
-/// an oversight -- per-phase timing is Phase 2 work once there's a session
-/// pipeline to hang it on. The exact date format Fiddler itself expects
-/// here is also unconfirmed (no real sample _m.xml was available to check
+/// The SessionTimers attributes are filled in from
+/// <see cref="Session.Timings"/>: each timestamp is the start plus the
+/// phases before it, and DNSTime/TCPConnectTime/HTTPSHandshakeTime are in
+/// whole milliseconds. A session with no timings gets its start time in
+/// every timestamp and zeros. The exact date format Fiddler itself expects
+/// here is unconfirmed (no real sample _m.xml was available to check
 /// against) -- ISO 8601 round-trip format is used as the most broadly
 /// parseable reasonable guess.
 /// </summary>
@@ -104,12 +100,22 @@ public static class SazWriter
         var entry = archive.CreateEntry($"raw/{session.Id}_m.xml", CompressionLevel.Optimal);
         using var writer = new StreamWriter(entry.Open(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
-        var timestamp = session.StartedAt.ToString("yyyy-MM-ddTHH:mm:ss.fffK", CultureInfo.InvariantCulture);
+        var t = session.Timings;
+        static double Ms(double phase) => Math.Max(0, phase);
+        var start = session.StartedAt;
+        var requestRead = start.AddMilliseconds(t is null ? 0 : Ms(t.Blocked));
+        var connected = requestRead.AddMilliseconds(t is null ? 0 : Ms(t.Dns) + Ms(t.Connect) + Ms(t.Ssl));
+        var sent = connected.AddMilliseconds(t is null ? 0 : Ms(t.Send));
+        var firstByte = sent.AddMilliseconds(t is null ? 0 : Ms(t.Wait));
+        var done = firstByte.AddMilliseconds(t is null ? 0 : Ms(t.Receive));
+        static string At(DateTimeOffset when) => when.ToString("yyyy-MM-ddTHH:mm:ss.fffK", CultureInfo.InvariantCulture);
+        static string Whole(double phase) => ((long)Math.Round(Math.Max(0, phase))).ToString(CultureInfo.InvariantCulture);
+
         writer.Write(
             $"""
             <?xml version="1.0" encoding="utf-8"?>
             <Session>
-              <SessionTimers ClientConnected="{timestamp}" ClientBeginRequest="{timestamp}" GotRequestHeaders="{timestamp}" ClientDoneRequest="{timestamp}" GatewayTime="0" DNSTime="0" TCPConnectTime="0" HTTPSHandshakeTime="0" ServerConnected="{timestamp}" FiddlerBeginRequest="{timestamp}" ServerGotRequest="{timestamp}" ServerBeginResponse="{timestamp}" GotResponseHeaders="{timestamp}" ServerDoneResponse="{timestamp}" ClientBeginResponse="{timestamp}" ClientDoneResponse="{timestamp}" />
+              <SessionTimers ClientConnected="{At(start)}" ClientBeginRequest="{At(start)}" GotRequestHeaders="{At(start)}" ClientDoneRequest="{At(requestRead)}" GatewayTime="0" DNSTime="{Whole(t?.Dns ?? 0)}" TCPConnectTime="{Whole(t?.Connect ?? 0)}" HTTPSHandshakeTime="{Whole(t?.Ssl ?? 0)}" ServerConnected="{At(connected)}" FiddlerBeginRequest="{At(connected)}" ServerGotRequest="{At(sent)}" ServerBeginResponse="{At(firstByte)}" GotResponseHeaders="{At(firstByte)}" ServerDoneResponse="{At(done)}" ClientBeginResponse="{At(firstByte)}" ClientDoneResponse="{At(done)}" />
               <SessionFlags />
             </Session>
             """);

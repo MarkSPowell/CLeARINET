@@ -55,7 +55,20 @@ public sealed class SessionStore
         CapturedRequest request,
         CapturedResponse response,
         IReadOnlyDictionary<string, string>? flags,
-        string scheme)
+        string scheme) =>
+        Add(host, startedAt, request, response, flags, scheme, timings: null);
+
+    /// <summary>
+    /// As above, with the exchange's <see cref="Session.Timings"/>.
+    /// </summary>
+    public Session Add(
+        string host,
+        DateTimeOffset startedAt,
+        CapturedRequest request,
+        CapturedResponse response,
+        IReadOnlyDictionary<string, string>? flags,
+        string scheme,
+        SessionTimings? timings)
     {
         Session session;
         lock (_gate)
@@ -63,7 +76,10 @@ public sealed class SessionStore
             session = new Session(
                 _nextId++, host, startedAt, request, response,
                 Flags: flags is { Count: > 0 } ? flags : null,
-                Scheme: scheme);
+                Scheme: scheme)
+            {
+                Timings = timings,
+            };
             _sessions.Add(session);
         }
 

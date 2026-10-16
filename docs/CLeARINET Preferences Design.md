@@ -64,6 +64,9 @@ in "Platform parity," below.
 | `clearinet.ui.window.left` / `.top` | int | unset | Window position, in screen pixels |
 | `clearinet.ui.window.width` / `.height` | int | unset | Window size, in the window's own units |
 | `clearinet.ui.window.maximized` | bool | `false` | Whether the window was maximized |
+| `clearinet.ui.sessionlist.hiddencolumns` | list | `""` | Session-list columns hidden with the column chooser, by header (`script:`Title and `flag:`Name for script and extension columns); `#` and `URL` can't be hidden |
+| `clearinet.ui.textwizard.transform` / `.encoding` | string | `""` | TextWizard's last conversion and character encoding, by name |
+| `clearinet.ui.sessionlist.columns` | list | `""` | Session-list column order and widths: one `width\|key` entry per column in display order (width empty for a column that sizes itself; the URL column's fill isn't saved). Entries for script or extension columns not loaded now are kept in place. Saved when a column is moved, when columns change, and on exit; Reset Columns clears it |
 
 The window comes back where it was only if its title bar would be on a
 connected screen; otherwise it opens centered, at its saved size. A

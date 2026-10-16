@@ -1,0 +1,47 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Clearinet.DesktopUi.TextWizardWindow"
+        Title="TextWizard"
+        Width="820"
+        Height="620"
+        MinWidth="480"
+        MinHeight="360"
+        WindowStartupLocation="CenterOwner"
+        Icon="avares://Clearinet.DesktopUi/Assets/clearinet.webp"
+        Background="{DynamicResource AppBackgroundBrush}">
+
+  <!-- TextWizard (Tools > TextWizard, Ctrl+E): type or paste text, pick a
+       conversion, and the result updates as you type. The conversions
+       themselves are TextTransforms in ProxyCore. -->
+  <Grid Margin="12" RowDefinitions="Auto,Auto,*,Auto,Auto,*">
+    <WrapPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
+      <TextBlock Text="Conversion" VerticalAlignment="Center" Margin="0,0,8,0" />
+      <ComboBox x:Name="TransformBox" MinWidth="230" SelectionChanged="SettingChanged" Margin="0,0,16,0" />
+      <TextBlock x:Name="EncodingLabel" Text="Characters as" VerticalAlignment="Center" Margin="0,0,8,0" />
+      <ComboBox x:Name="EncodingBox" MinWidth="170" SelectionChanged="SettingChanged" Margin="0,0,16,0"
+                ToolTip.Tip="How text becomes bytes, and bytes text, for the conversions where that matters." />
+      <Button Content="Use output as input" Click="UseOutputButton_Click"
+              ToolTip.Tip="Moves the output up to the input, to convert it again (for example, URL decode, then From Base64)." />
+    </WrapPanel>
+
+    <TextBlock Grid.Row="1" x:Name="DescriptionText" TextWrapping="Wrap"
+               Foreground="{DynamicResource AppMutedTextBrush}" Margin="0,0,0,8" />
+
+    <TextBox Grid.Row="2" x:Name="InputBox"
+             AcceptsReturn="True"
+             TextWrapping="Wrap"
+             FontFamily="Cascadia Mono,Consolas,monospace"
+             Watermark="Type or paste text to convert"
+             TextChanged="InputBox_TextChanged" />
+
+    <TextBlock Grid.Row="3" x:Name="NoteText" TextWrapping="Wrap" Margin="0,8,0,4"
+               Foreground="{DynamicResource AppMutedTextBrush}" />
+    <TextBlock Grid.Row="4" Text="Output" Margin="0,0,0,4" />
+
+    <TextBox Grid.Row="5" x:Name="OutputBox"
+             IsReadOnly="True"
+             AcceptsReturn="True"
+             TextWrapping="Wrap"
+             FontFamily="Cascadia Mono,Consolas,monospace" />
+  </Grid>
+</Window>

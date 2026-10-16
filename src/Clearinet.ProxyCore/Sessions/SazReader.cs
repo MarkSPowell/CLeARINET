@@ -113,9 +113,10 @@ public static class SazReader
         }
 
         var host = ExtractHost(request.Headers);
-        var startedAt = TryReadTimestamp(archive.GetEntry($"raw/{number}_m.xml")) ?? DateTimeOffset.Now;
+        var (timestamp, timings) = TryReadTimers(archive.GetEntry($"raw/{number}_m.xml"));
+        var startedAt = timestamp ?? DateTimeOffset.Now;
 
-        sessionStore.Add(host, startedAt, request, response, flags: null, scheme);
+        sessionStore.Add(host, startedAt, request, response, flags: null, scheme, timings);
     }
 
     private static List<int> FindSessionNumbers(ZipArchive archive)
@@ -178,26 +179,58 @@ public static class SazReader
     /// imports fine; it just gets "now" instead of when it was originally
     /// captured.
     /// </summary>
-    private static DateTimeOffset? TryReadTimestamp(ZipArchiveEntry? metadataEntry)
+    /// <remarks>
+    /// The phases are worked out from the timestamps the way
+    /// <see cref="SazWriter"/> writes them; timings come back null when
+    /// they're all the same moment (nothing was measured).
+    /// </remarks>
+    private static (DateTimeOffset? StartedAt, SessionTimings? Timings) TryReadTimers(ZipArchiveEntry? metadataEntry)
     {
         if (metadataEntry is null)
         {
-            return null;
+            return (null, null);
         }
 
         try
         {
             using var stream = metadataEntry.Open();
-            var doc = XDocument.Load(stream);
-            var text = doc.Root?.Element("SessionTimers")?.Attribute("ClientBeginRequest")?.Value;
-            return text is not null
-                && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
-                ? parsed
-                : null;
+            var timers = XDocument.Load(stream).Root?.Element("SessionTimers");
+            DateTimeOffset? At(string name) =>
+                timers?.Attribute(name)?.Value is { } text &&
+                DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+                    ? parsed
+                    : null;
+            double Whole(string name) =>
+                double.TryParse(timers?.Attribute(name)?.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var ms) ? ms : 0;
+
+            var start = At("ClientBeginRequest");
+            if (start is null || At("ServerConnected") is not { } connected || At("ServerGotRequest") is not { } sent ||
+                At("ServerBeginResponse") is not { } firstByte || (At("ClientDoneResponse") ?? At("ServerDoneResponse")) is not { } done ||
+                done <= start)
+            {
+                return (start, null);
+            }
+
+            var dns = Whole("DNSTime");
+            var connect = Whole("TCPConnectTime");
+            var ssl = Whole("HTTPSHandshakeTime");
+            var opened = dns + connect + ssl > 0;
+            var timings = new SessionTimings
+            {
+                Blocked = Math.Max(0, (connected - start.Value).TotalMilliseconds - (dns + connect + ssl)),
+                Dns = opened ? dns : SessionTimings.NotApplicable,
+                Connect = opened ? connect : SessionTimings.NotApplicable,
+                Ssl = opened && ssl > 0 ? ssl : SessionTimings.NotApplicable,
+                Send = Math.Max(0, (sent - connected).TotalMilliseconds),
+                Wait = Math.Max(0, (firstByte - sent).TotalMilliseconds),
+                Receive = Math.Max(0, (done - firstByte).TotalMilliseconds),
+                ConnectionReused = !opened,
+            };
+            return (start, timings);
         }
         catch
         {
-            return null;
+            return (null, null);
         }
     }
 }

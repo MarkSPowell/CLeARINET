@@ -80,6 +80,10 @@ tabs:
   recorded without bodies notes the response size the browser reported,
   which explains why the Resp column shows 0 B.
 
+Right-click a session for **Compare Sessions**, **Replay**, **Edit in
+Composer** and **Remove**, plus any actions a FiddlerScript adds.
+Right-clicking a session selects it, unless it's already selected.
+
 To remove sessions, use **Edit > Remove Selected Session** (or press
 **Delete** in the session list) or **Edit > Remove All Sessions**. Removed
 sessions are gone for good: they're no longer in the list or in what
@@ -95,6 +99,19 @@ row can have its own background or text colour, be bold, italic or struck
 through, or be hidden (it's still captured and saved). Extensions can add
 columns to the list, too.
 
+To choose which columns the list shows, **right-click any column header**
+(or use **Tools > Session List Columns**) and check or uncheck columns.
+Every column can be hidden except **#** and **URL**, including the
+Waterfall and Image Bloat columns and columns a script or extension added;
+**Show All Columns** brings them all back. Drag a header to move its
+column, or drag the edge between headers to resize it.
+
+CLeARINET remembers which columns are shown, their order and their widths
+for next time. A script's or extension's column keeps its place and width
+while that script or extension isn't loaded, and comes back there. (The URL
+column always fills the space that's left.) **Reset Columns** in the same
+menu shows every column again, in the original order and widths.
+
 ### Filtering
 
 The filter box above the grid accepts free text (matched against the URL and
@@ -107,6 +124,37 @@ headers, never body content) plus a small query grammar:
 
 Combine free text and query tokens in the same filter; every keystroke
 re-applies it live.
+
+### Timing, the waterfall and statistics
+
+CLeARINET times each phase of every exchange, and shows it the way
+browsers' developer tools do:
+
+- The **Waterfall** column in the session list draws each session on a
+  shared time axis, from the first session shown to the last one finishing.
+  Each bar is split into phases: **Queueing** (grey: reading the request,
+  scripts and extensions, breakpoints), **DNS lookup** (teal), **Initial
+  connection** (orange), **TLS handshake** (purple), **Request sent**
+  (blue-grey), **Waiting for server** (green: time to first byte) and
+  **Content download** (blue). A request that reused an open connection
+  has no DNS, connection or TLS phases. Hover over a bar for the numbers.
+- The line under the list sums up what's shown: how many requests, how much
+  was transferred, and when the last one finished.
+- The **Timing** tab shows the selected session's phases with their
+  durations, whether it used a new or reused connection (and through which
+  upstream proxy), and how long it sat at a breakpoint, if it did.
+- The **Statistics** tab sums up the sessions the filter shows: bytes sent
+  and received (and what compression saved), breakdowns by type, status and
+  host, the slowest requests, and easy wins such as text sent uncompressed,
+  image bloat, and responses with no caching headers.
+
+The times are measured at CLeARINET, so they don't include time the
+browser spent before sending a request, and anything the browser served
+from its own cache never reaches CLeARINET at all. Sessions imported from a
+file without timings have no bar.
+
+If you don't need timing, right-click a column header and uncheck
+**Waterfall** to hide that column.
 
 ### Finding sessions
 
@@ -124,13 +172,72 @@ and the status line. Press **Enter** to find, and **Escape** (or **Close**)
 to close the bar and clear the highlighting. Sessions captured after a
 Find aren't highlighted until you find again.
 
+### Comparing two sessions
+
+To see what changed between two exchanges, such as a request that works
+and one that doesn't, select both: click one, then **Ctrl+click** the
+other (**Cmd+click** on a Mac). Then choose **Edit > Compare Sessions**
+(**Ctrl+W**), or right-click either of them and choose **Compare
+Sessions**.
+
+A window opens with the older session on the left and the newer on the
+right. The **Request** and **Response** tabs each show the request or
+status line (with the full URL), the headers and the body, side by side.
+Lines that differ are yellow, with the part that differs highlighted; a
+line only on the left is red and a line only on the right is green. Each
+tab's title says how many places differ. **Next difference** (**F8**) and
+**Previous difference** (**Shift+F8**) jump between them.
+
+The options above the tabs change what's compared:
+
+- **Decompress bodies** (on): compares the content of compressed bodies,
+  not the compressed bytes.
+- **Format JSON and forms** (on): puts each JSON value, and each form
+  field, on its own line, so a single changed value shows on its own line
+  rather than as one long changed line.
+- **Ignore header order** (off): sorts the headers by name first, so the
+  same headers sent in another order don't count as different.
+
+Binary bodies, such as images, are compared as a hex dump, or by size and
+SHA-256 hash when they're over 64 KB. Two very different large bodies are
+shown as one changed block rather than lined up line by line. You can
+keep several Compare windows open while capturing.
+
+## TextWizard
+
+**Tools > TextWizard…** (**Ctrl+E**) encodes and decodes text. Type or
+paste into the top box, choose a conversion, and the output updates as you
+type. If text is selected in an inspector (or any text box) when you press
+Ctrl+E, it becomes the input.
+
+| Conversion | Does |
+|---|---|
+| To Base64 / From Base64 | Base64. Decoding also accepts the URL-safe kind (`-` and `_`), missing `=` padding and line breaks |
+| URL encode / URL decode | Percent-encoding. Decoding treats `+` as a space |
+| HTML encode / HTML decode | HTML entities such as `&lt;` and `&#39;` |
+| To hex / From hex | Bytes as hex. Decoding ignores spaces, commas, colons, dashes, `0x`, `\x` and `%` |
+| JavaScript escape / unescape | String escapes: `\n`, `\"`, `\uXXXX`, `\u{...}`, `\xHH` |
+| Decode JWT | A JSON Web Token's header and payload, with `iat`, `nbf` and `exp` as dates. The signature isn't checked |
+| Format JSON | JSON indented, one value per line |
+| Unix time ↔ date | A Unix time (seconds or milliseconds) as a UTC and local date, or a date as a Unix time |
+| Hashes | MD5, SHA-1, SHA-256 and SHA-512 |
+| Deflate to Base64 / Inflate from Base64 (SAML) | The compression SAML's redirect binding uses. Inflating also accepts a URL-encoded value copied from `SAMLRequest=`, and zlib or gzip data |
+
+**Characters as** chooses how text becomes bytes, and bytes text: UTF-8
+(the default), Latin-1 or UTF-16. It's greyed out for the conversions where
+it doesn't matter. When decoded bytes aren't text in that encoding (an
+image, or compressed data, say), the output is a hex dump and a note says
+so. **Use output as input** moves the result up to convert it again, for
+example URL decode, then From Base64. The window remembers the last
+conversion you used.
+
 ## The Tools menu
 
 Several panels are hidden by default to keep the main screen uncluttered.
-**Tools** in the menu bar is where you turn each one on or off — every
-entry there is a checkbox, and checking it shows the panel on the main
+**Tools** in the menu bar is where you turn each one on or off — those
+entries are checkboxes, and checking one shows the panel on the main
 screen (unchecking it hides it again without losing whatever you'd set up
-in it):
+in it). Tools also opens TextWizard and the column chooser:
 
 | Tools menu entry | Shows |
 |---|---|
@@ -142,6 +249,8 @@ in it):
 | Also Break On | A row of narrower breakpoint conditions (URL contains, method, status code) |
 | AutoResponder | The AutoResponder rules editor |
 | Connections | The upstream proxy setting and "Allow remote computers to connect" (see below) |
+| TextWizard… | Encodes and decodes text (see "TextWizard") |
+| Session List Columns | Which columns the session list shows (see "The session list") |
 
 Unchecking "Break on Requests"/"Break on Responses"/"Also Break On" only
 hides that control — it doesn't clear whatever rule you'd already set. If a
@@ -424,11 +533,12 @@ want to keep using.
   back into the session list, exactly as if they'd just been captured live.
 - **File > Export HAR…** saves every session as an HTTP Archive (`.har`),
   the format browsers' developer tools and many support teams use. Bodies
-  are saved decompressed, as text where they're text; CLeARINET doesn't
-  record timings, so those are zero.
+  are saved decompressed, as text where they're text, and each session's
+  timings are included (see "Timing, the waterfall and statistics").
 - **File > Import HAR…** adds sessions from a `.har` file, such as one
   exported from a browser's developer tools. HAR files keep bodies
   decompressed, so imported sessions don't have Content-Encoding headers.
+  The browser's own timings come in too, so the waterfall shows them.
 
 ## Settings that are remembered
 
@@ -441,6 +551,8 @@ and macOS:
 - The upstream proxy setting, the proxy sign-in user name (not the
   password) and whether remote computers may connect
 - The window's size and position, and whether it was maximized
+- The session list's columns: which are shown, their order and widths
+- TextWizard's last conversion and character encoding
 - The AutoResponder rules (in their own file, `autoresponder-rules.json`,
   next to `preferences.json`)
 - The session filter text

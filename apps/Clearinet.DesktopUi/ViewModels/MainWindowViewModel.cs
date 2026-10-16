@@ -666,6 +666,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             if (SetField(ref _selectedSessionRow, value))
             {
                 RefreshInspectors();
+                RefreshTiming();
                 RemoveSelectedSessionCommand?.RaiseCanExecuteChanged();
                 RaiseComposerCanExecuteChanged();
             }
@@ -846,6 +847,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // back out again.
         _preferences = preferences ?? CreateDefaultPreferences();
         LoadPreferences();
+        InitializeTimingViews();
 
         // Ported Fiddler-shaped extensions reach preferences and logging
         // through the compatibility layer's host hooks; they share the

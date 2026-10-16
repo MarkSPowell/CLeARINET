@@ -41,6 +41,25 @@ internal static class PreferenceKeys
     public const string WindowHeight = "clearinet.ui.window.height";
     public const string WindowMaximized = "clearinet.ui.window.maximized";
 
+    /// <summary>
+    /// Session-list columns the user hid, by key (see
+    /// MainWindowViewModel.Columns.cs): the header for built-in columns,
+    /// <c>script:</c>Title and <c>flag:</c>Name for script and extension
+    /// columns. Empty means every column is shown.
+    /// </summary>
+    public const string HiddenSessionColumns = "clearinet.ui.sessionlist.hiddencolumns";
+
+    /// <summary>
+    /// The session list's column order and widths, one <c>width|key</c>
+    /// entry per column in display order (see ColumnLayout). Unset means
+    /// the order and widths in MainWindow.axaml.
+    /// </summary>
+    public const string SessionColumnLayout = "clearinet.ui.sessionlist.columns";
+
+    /// <summary>TextWizard's last conversion and character encoding, by the names it shows.</summary>
+    public const string TextWizardTransform = "clearinet.ui.textwizard.transform";
+    public const string TextWizardEncoding = "clearinet.ui.textwizard.encoding";
+
     /// <summary>The Import/Export via Extension picker's last choice (see FormatChoice.Key), highlighted next time.</summary>
     public const string LastImportFormat = "clearinet.extensions.import.lastformat";
     public const string LastExportFormat = "clearinet.extensions.export.lastformat";

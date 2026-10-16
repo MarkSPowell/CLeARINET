@@ -28,6 +28,20 @@ here yet. Feedback and issues are welcome.
   on why), plus `method:`, `host:`, and `status:` query tokens (exact,
   class like `4xx`, comparison, and range forms). Edit > Find Sessions
   (Ctrl+F) searches bodies too, decompressed, and highlights matches.
+- Timing like browsers' developer tools: a waterfall column with each
+  session's phases (DNS, connection, TLS, waiting, download), a Timing tab
+  for the selected session, a request summary, and a Statistics tab
+  (totals, by type, status and host, slowest requests, easy wins). Timings
+  are kept in SAZ and HAR files, and read from browsers' HAR exports.
+- Compare Sessions (Ctrl+W): two sessions' requests and responses side by
+  side, with each difference highlighted, bodies decompressed and JSON
+  formatted so changes line up.
+- TextWizard (Ctrl+E): Base64, URL, HTML, hex and JavaScript encoding and
+  decoding, JWT decoding, JSON formatting, Unix times, hashes, and SAML's
+  deflate+Base64.
+- A column chooser: right-click a column header to show or hide session-list
+  columns (Waterfall, Image Bloat, script and extension columns...). Which
+  columns are shown, their order and their widths are remembered.
 - Request/response inspector tabs: Headers, Raw (decoded text, with
   automatic decompression), JSON (pretty-printed), WebForms (query string
   and form fields, including multipart uploads), ImageView (the picture,
