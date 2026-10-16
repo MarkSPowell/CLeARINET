@@ -47,11 +47,15 @@ permissions:
 #   ARTIFACT_SIGNING_ACCOUNT   the Artifact Signing account name
 #   ARTIFACT_SIGNING_PROFILE   the certificate profile name
 # plus these repository secrets for the Azure sign-in:
-#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID
 
 jobs:
   build-installer:
     runs-on: windows-latest
+    # The Azure sign-in for code signing trusts this environment by name
+    # (one federated credential covers tag releases and manual runs alike;
+    # Azure can't match a pattern such as "every v* tag").
+    environment: release
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -169,7 +173,9 @@ jobs:
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          # Signing only needs the sign-in itself, not access to a whole
+          # subscription (the app's one role is on the signing account).
+          allow-no-subscriptions: true
 
       # Everything the installer will put on disk -- the app itself, the
       # optional legacy extension host and the optional extensions -- is
