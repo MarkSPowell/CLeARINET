@@ -54,7 +54,14 @@ namespace Clearinet.ProxyCore.Proxy;
 /// </summary>
 public sealed class InterceptingProxyListener
 {
-    private static readonly HttpClient ProxyUrlHttpClient = new();
+    /// <summary>
+    /// For AutoResponder rules that answer with another URL's content. Goes
+    /// out the way CLeARINET's own connections do (see
+    /// <see cref="UpstreamWebProxy"/>): never through the system proxy,
+    /// which while capturing is CLeARINET itself, so the fetch isn't
+    /// captured as a session of its own.
+    /// </summary>
+    private readonly HttpClient _proxyUrlClient;
 
     private readonly LeafCertificateProvider _leafProvider;
     private readonly SessionStore _sessionStore;
@@ -82,6 +89,12 @@ public sealed class InterceptingProxyListener
     {
         _leafProvider = leafProvider;
         _sessionStore = sessionStore;
+        _proxyUrlClient = new HttpClient(new SocketsHttpHandler
+        {
+            Proxy = new UpstreamWebProxy(this),
+            UseProxy = true,
+            AutomaticDecompression = DecompressionMethods.None,
+        });
         // A fresh, untouched manager/rules set has nothing configured, so
         // BreakpointRules.AnyActive / AutoResponderRules.AnyActive are both
         // false and every call this listener makes into either is a single
@@ -242,6 +255,35 @@ public sealed class InterceptingProxyListener
         _listener.Stop();
     }
 
+    /// <summary>
+    /// The routes <see cref="ChooseRoutesAsync"/> picks, as an
+    /// <see cref="IWebProxy"/> for <see cref="HttpClient"/>: the first one
+    /// (the gateway, the PAC script's first choice, or direct). Credentials
+    /// are the proxy sign-in (<see cref="ProxyCredential"/>), or the
+    /// signed-in account.
+    /// </summary>
+    private sealed class UpstreamWebProxy(InterceptingProxyListener listener) : IWebProxy
+    {
+        public ICredentials? Credentials
+        {
+            get => (ICredentials?)listener.ProxyCredential ?? CredentialCache.DefaultCredentials;
+            set { }
+        }
+
+        public Uri? GetProxy(Uri destination) =>
+            Route(destination) is { } proxy ? new Uri($"http://{proxy}/") : destination;
+
+        public bool IsBypassed(Uri host) => Route(host) is null;
+
+        private UpstreamProxy? Route(Uri destination)
+        {
+            var isTls = string.Equals(destination.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+            var routes = listener.ChooseRoutesAsync(isTls, destination.IdnHost, destination.Port, destination.PathAndQuery, CancellationToken.None)
+                .GetAwaiter().GetResult();
+            return routes.Count > 0 ? routes[0] : null;
+        }
+    }
+
     private async Task AcceptLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -295,7 +337,7 @@ public sealed class InterceptingProxyListener
 
                 await PumpSessionsAsync(
                     isTls: false, string.Empty, PlainHttpRequest.DefaultPort, client, clientStream, first, _sessionStore,
-                    _breakpointManager, _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, Port,
+                    _breakpointManager, _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, _proxyUrlClient, Port,
                     () => _leafProvider.IssuerCertificateDer, cancellationToken);
                 return;
             }
@@ -320,7 +362,7 @@ public sealed class InterceptingProxyListener
             // PumpSessionsAsync's own remarks on why it has to be lazy.
             await PumpSessionsAsync(
                 isTls: true, targetHost, targetPort, client, clientTls, firstRequest: null, _sessionStore, _breakpointManager,
-                _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, Port,
+                _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, _proxyUrlClient, Port,
                 () => _leafProvider.IssuerCertificateDer, cancellationToken);
         }
         catch (BreakpointAbortedException ex)
@@ -417,6 +459,7 @@ public sealed class InterceptingProxyListener
         IExtensionSessionHost? sessionHost,
         Func<bool, string, int, string, CancellationToken, Task<IReadOnlyList<UpstreamProxy?>>> chooseRoutes,
         Func<NetworkCredential?> proxyCredential,
+        HttpClient proxyUrlClient,
         int ownPort,
         Func<byte[]> rootCertificateDer,
         CancellationToken cancellationToken)
@@ -714,7 +757,7 @@ public sealed class InterceptingProxyListener
                         return;
                     }
 
-                    var localResponse = await BuildMockResponseAsync(outcome, localRequest, cancellationToken);
+                    var localResponse = await BuildMockResponseAsync(outcome, localRequest, proxyUrlClient, cancellationToken);
                     await HttpMessageWriter.WriteResponseAsync(clientTls, localResponse, cancellationToken);
                     var localSession = sessionStore.Add(targetHost, startedAt, localRequest, localResponse, flags: null, scheme);
                     Console.WriteLine(
@@ -1063,10 +1106,10 @@ public sealed class InterceptingProxyListener
     }
 
     private static Task<CapturedResponse> BuildMockResponseAsync(
-        AutoResponderOutcome outcome, CapturedRequest request, CancellationToken cancellationToken) => outcome.FinalActionKind switch
+        AutoResponderOutcome outcome, CapturedRequest request, HttpClient proxyUrlClient, CancellationToken cancellationToken) => outcome.FinalActionKind switch
     {
         AutoResponderActionKind.ServeFile => BuildServeFileResponseAsync(outcome.Text!, cancellationToken),
-        AutoResponderActionKind.ProxyUrl => FetchAndBuildResponseAsync(outcome.Text!, cancellationToken),
+        AutoResponderActionKind.ProxyUrl => FetchAndBuildResponseAsync(proxyUrlClient, outcome.Text!, cancellationToken),
         AutoResponderActionKind.Redirect => Task.FromResult(BuildRedirectResponse(outcome.Text!)),
         AutoResponderActionKind.CorsPreflightAllow => Task.FromResult(BuildCorsPreflightResponse(request)),
         _ => throw new InvalidOperationException($"Unexpected AutoResponder final action: {outcome.FinalActionKind}."),
@@ -1115,11 +1158,11 @@ public sealed class InterceptingProxyListener
     /// included, deliberately not auto-decompressed here -- what's served
     /// back should be exactly what that other server sent) and all.
     /// </summary>
-    private static async Task<CapturedResponse> FetchAndBuildResponseAsync(string url, CancellationToken cancellationToken)
+    private static async Task<CapturedResponse> FetchAndBuildResponseAsync(HttpClient client, string url, CancellationToken cancellationToken)
     {
         try
         {
-            using var upstreamResponse = await ProxyUrlHttpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var upstreamResponse = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             var body = await upstreamResponse.Content.ReadAsByteArrayAsync(cancellationToken);
 
             var headers = new List<(string Name, string Value)>();

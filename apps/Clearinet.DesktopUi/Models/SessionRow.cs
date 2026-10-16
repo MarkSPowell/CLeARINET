@@ -59,6 +59,12 @@ public sealed class SessionRow
     /// </summary>
     public FlagLookup Flags { get; private init; } = FlagLookup.Empty;
 
+    /// <summary>
+    /// Whether the last Find (Edit &gt; Find Sessions) matched this session;
+    /// the session list highlights it. Changed only on the UI thread.
+    /// </summary>
+    public bool IsFindMatch { get; set; }
+
     /// <summary>How the session list draws this row, from its <c>ui-*</c> flags. See <see cref="SessionRowStyle"/>.</summary>
     public SessionRowStyle Style { get; private init; } = SessionRowStyle.Plain;
 

@@ -1,0 +1,1 @@
+dotnet run --project apps/Clearinet.DesktopUi

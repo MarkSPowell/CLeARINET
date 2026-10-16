@@ -131,6 +131,12 @@
         <MenuItem Header="Remove _Selected Session" Command="{Binding RemoveSelectedSessionCommand}" InputGesture="Delete" />
         <MenuItem Header="Remove _All Sessions" Command="{Binding RemoveAllSessionsCommand}" />
         <Separator />
+        <!-- Fiddler Classic's Find Sessions: highlights every session that
+             contains some text (URL, headers or decompressed bodies) and
+             selects the first; F3 goes to the next. See MainWindowViewModel.Find.cs. -->
+        <MenuItem Header="_Find Sessions…" Command="{Binding ShowFindCommand}" HotKey="Ctrl+F" InputGesture="Ctrl+F" />
+        <MenuItem Header="Find _Next" Command="{Binding FindNextCommand}" HotKey="F3" InputGesture="F3" />
+        <Separator />
         <!-- Replay sends the selected request again, unchanged (Fiddler
              Classic's Reissue; the R key does the same in the session
              list). Edit in Composer copies it to the Composer tab to change
@@ -713,6 +719,47 @@
       </StackPanel>
     </Border>
 
+    <!-- The Find bar (Edit > Find Sessions, Ctrl+F). Enter finds, F3 goes
+         to the next match, Escape closes it and clears the highlighting. -->
+    <Border DockPanel.Dock="Top"
+            IsVisible="{Binding IsFindBarVisible}"
+            Background="{DynamicResource AppPanelBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            Padding="10,6"
+            Margin="0,0,0,8">
+      <StackPanel Orientation="Horizontal" Spacing="10">
+        <TextBlock Text="Find:" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" />
+        <TextBox x:Name="FindTextBox"
+                 Text="{Binding FindText, Mode=TwoWay}"
+                 PlaceholderText="Text to find in URLs, headers and bodies"
+                 VerticalAlignment="Center"
+                 Width="280">
+          <TextBox.KeyBindings>
+            <KeyBinding Gesture="Enter" Command="{Binding FindCommand}" />
+            <KeyBinding Gesture="Escape" Command="{Binding CloseFindCommand}" />
+          </TextBox.KeyBindings>
+        </TextBox>
+        <ComboBox SelectedIndex="{Binding FindTargetIndex, Mode=TwoWay}" VerticalAlignment="Center">
+          <ComboBoxItem Content="Requests and responses" />
+          <ComboBoxItem Content="Requests only" />
+          <ComboBoxItem Content="Responses only" />
+        </ComboBox>
+        <ComboBox SelectedIndex="{Binding FindPartsIndex, Mode=TwoWay}" VerticalAlignment="Center">
+          <ComboBoxItem Content="Headers and bodies" />
+          <ComboBoxItem Content="Headers only" />
+          <ComboBoxItem Content="Bodies only" />
+        </ComboBox>
+        <CheckBox Content="Match case" IsChecked="{Binding FindMatchCase, Mode=TwoWay}" VerticalAlignment="Center" />
+        <CheckBox Content="Regular expression" IsChecked="{Binding FindUseRegex, Mode=TwoWay}" VerticalAlignment="Center" />
+        <Button Content="Find" Command="{Binding FindCommand}" VerticalAlignment="Center" />
+        <Button Content="Next" Command="{Binding FindNextCommand}" VerticalAlignment="Center" ToolTip.Tip="F3" />
+        <Button Content="Close" Command="{Binding CloseFindCommand}" VerticalAlignment="Center" ToolTip.Tip="Escape; also clears the highlighting" />
+        <TextBlock Text="{Binding FindStatus}" VerticalAlignment="Center" Foreground="{DynamicResource AppMutedTextBrush}" TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+
     <Grid RowDefinitions="2*,4,3*">
       <!-- DataGridTextColumn.Binding isn't compiled-binding aware the way a
            plain control's Binding markup is, so this subtree opts back into
@@ -759,6 +806,16 @@
           </Style>
           <Style Selector="DataGridRow.ui-strikeout DataGridCell TextBlock">
             <Setter Property="TextDecorations" Value="Strikethrough" />
+          </Style>
+          <!-- Find matches: yellow, like Fiddler Classic's Find, over any
+               colour a flag set. Selection still shows. -->
+          <Style Selector="DataGridRow.find-match DataGridCell">
+            <Setter Property="Background" Value="#FFF2A8" />
+            <Setter Property="Foreground" Value="Black" />
+          </Style>
+          <Style Selector="DataGridRow.find-match:selected DataGridCell">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
           </Style>
         </DataGrid.Styles>
         <!-- Phase C (Context-menu half): one entry per ContextAction the

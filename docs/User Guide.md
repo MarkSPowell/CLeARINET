@@ -108,6 +108,22 @@ headers, never body content) plus a small query grammar:
 Combine free text and query tokens in the same filter; every keystroke
 re-applies it live.
 
+### Finding sessions
+
+**Edit > Find Sessions** (**Ctrl+F**) looks for text anywhere in the
+captured sessions, including inside request and response bodies
+(decompressed, and read with their character set, as the Raw tab shows
+them). Unlike the filter, it doesn't hide anything: every matching session
+is highlighted in yellow and the first one is selected. **F3** (or
+**Next**) moves to the next match.
+
+In the Find bar you can choose to look in requests and responses or just
+one side, in headers and bodies or just one of them, match case, and use a
+regular expression. "Headers" includes the request line with the full URL,
+and the status line. Press **Enter** to find, and **Escape** (or **Close**)
+to close the bar and clear the highlighting. Sessions captured after a
+Find aren't highlighted until you find again.
+
 ## The Tools menu
 
 Several panels are hidden by default to keep the main screen uncluttered.

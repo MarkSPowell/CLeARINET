@@ -6,6 +6,8 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Clearinet.DesktopUi.ViewModels;
 
 namespace Clearinet.DesktopUi;
@@ -173,6 +175,8 @@ public partial class MainWindow : Window
         {
             _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
             _viewModel.ComposerShowRequested -= ShowComposerTab;
+            _viewModel.FindFocusRequested -= FocusFindBox;
+            _viewModel.FindResultsChanged -= RefreshFindHighlights;
         }
 
         _viewModel = DataContext as MainWindowViewModel;
@@ -181,6 +185,8 @@ public partial class MainWindow : Window
         {
             _viewModel.PropertyChanged += OnViewModelPropertyChanged;
             _viewModel.ComposerShowRequested += ShowComposerTab;
+            _viewModel.FindFocusRequested += FocusFindBox;
+            _viewModel.FindResultsChanged += RefreshFindHighlights;
             ApplyPlacement(_viewModel);
             RefreshScriptColumns();
             AddExtensionTabs(_viewModel);
@@ -316,6 +322,31 @@ public partial class MainWindow : Window
         {
             RefreshScriptColumns();
         }
+        else if (e.PropertyName == nameof(MainWindowViewModel.SelectedSessionRow) &&
+                 _viewModel?.SelectedSessionRow is { IsFindMatch: true } match)
+        {
+            // Find and Find Next select a match that may be scrolled out of view.
+            SessionsDataGrid.ScrollIntoView(match, null);
+        }
+    }
+
+    /// <summary>Ctrl+F: puts the cursor in the Find box, with its text selected so typing replaces it.</summary>
+    private void FocusFindBox() => Dispatcher.UIThread.Post(() =>
+    {
+        FindTextBox.Focus();
+        FindTextBox.SelectAll();
+    });
+
+    /// <summary>
+    /// Re-tags the rows on screen after a Find (rows scrolled into view
+    /// later get tagged by <see cref="SessionsDataGrid_LoadingRow"/>).
+    /// </summary>
+    private void RefreshFindHighlights()
+    {
+        foreach (var row in SessionsDataGrid.GetVisualDescendants().OfType<DataGridRow>())
+        {
+            row.Classes.Set("find-match", row.DataContext is Models.SessionRow { IsFindMatch: true });
+        }
     }
 
     private void ShowComposerTab() => DetailTabs.SelectedItem = ComposerTab;
@@ -354,6 +385,7 @@ public partial class MainWindow : Window
         e.Row.Classes.Set("ui-bold", style.Bold);
         e.Row.Classes.Set("ui-italic", style.Italic);
         e.Row.Classes.Set("ui-strikeout", style.Strikeout);
+        e.Row.Classes.Set("find-match", e.Row.DataContext is Models.SessionRow { IsFindMatch: true });
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Clearinet.ProxyCore.AutoResponder;
 using Clearinet.ProxyCore.Certificates;
 using Clearinet.ProxyCore.Http;
 using Clearinet.ProxyCore.Proxy;
@@ -214,6 +215,31 @@ public class ListenerConnectionsTests
             // The listener opens its server connection through the gateway.
             var head = await gateway.Received.Task.WaitAsync(timeout.Token);
             Assert.StartsWith("CONNECT example.test:443 HTTP/1.1\r\n", head);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task AnAutoResponderUrlIsFetchedTheWayCLeARINETsOwnConnectionsGo()
+    {
+        // Through the upstream proxy, not the system proxy (which, while
+        // capturing, is CLeARINET itself).
+        using var root = NewRoot();
+        await using var gateway = UpstreamProxyTests.FakeProxy.Start("HTTP/1.1 200 OK\r\nContent-Length: 7\r\n\r\nfetched");
+        var rules = new AutoResponderRules { IsEnabled = true };
+        rules.Rules.Add(new AutoResponderRule { MatchPattern = "original.test", Action = "http://elsewhere.test/mock.json" });
+        var store = new SessionStore();
+        var listener = InterceptingProxyListener.StartOnAvailablePort(0, new LeafCertificateProvider(root), store, autoResponderRules: rules);
+        listener.Gateway = new UpstreamProxy("127.0.0.1", gateway.Port);
+        try
+        {
+            var response = await SendPlainAsync(listener.Port, "GET http://original.test/ HTTP/1.1\r\nHost: original.test\r\n\r\n");
+
+            Assert.Equal("fetched", Encoding.ASCII.GetString(response.Body));
+            Assert.StartsWith("GET http://elsewhere.test/mock.json HTTP/1.1\r\n", await gateway.Received.Task.WaitAsync(TimeSpan.FromSeconds(30)));
         }
         finally
         {

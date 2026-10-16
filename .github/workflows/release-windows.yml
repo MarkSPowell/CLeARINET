@@ -213,31 +213,36 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
+      # With signing set up, Inno Setup signs the installer and the
+      # uninstaller it builds into it (the uninstaller can only be signed
+      # while Inno Setup builds it), through installer/sign-file.ps1. $f is
+      # Inno Setup's placeholder for the (quoted) file to sign; $q is a quote.
       - name: Build installer
         shell: pwsh
+        env:
+          ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+          ARTIFACT_SIGNING_ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+          ARTIFACT_SIGNING_PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
         run: |
+          $signing = @()
+          if ($env:ARTIFACT_SIGNING_ACCOUNT) {
+            Install-Module ArtifactSigning -RequiredVersion 0.1.8 -Repository PSGallery -Scope CurrentUser -Force
+            $script = Join-Path $env:GITHUB_WORKSPACE "installer\sign-file.ps1"
+            $signing = @(
+              "/DSignToolName=artifact",
+              "/Sartifact=pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `$q$script`$q -Path `$f"
+            )
+          }
+
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             "/DMyAppVersion=${{ steps.version.outputs.version }}" `
             "/DMyFileVersion=${{ steps.version.outputs.fileVersion }}" `
             "/DPublishDir=${{ github.workspace }}\publish\win-x64" `
             "/DLegacyHostDir=${{ github.workspace }}\publish\legacyhost" `
             "/DExtensionsDir=${{ github.workspace }}\publish\extensions" `
+            @signing `
             installer\CLeARINET.iss
-
-      - name: Sign the installer
-        if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
-        uses: azure/artifact-signing-action@v2
-        with:
-          endpoint: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
-          files-folder: ${{ github.workspace }}\installer\Output
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-          description: CLeARINET Setup
-          description-url: https://github.com/MarkSPowell/CLeARINET
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Fails the release if anything that should be signed isn't, so an
       # unsigned build can't go out by accident once signing is set up.

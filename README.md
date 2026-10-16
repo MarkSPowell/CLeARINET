@@ -26,7 +26,8 @@ here yet. Feedback and issues are welcome.
 - A session list with live filtering: free-text search across the URL
   and headers (never body content — see the filter grammar's own remarks
   on why), plus `method:`, `host:`, and `status:` query tokens (exact,
-  class like `4xx`, comparison, and range forms).
+  class like `4xx`, comparison, and range forms). Edit > Find Sessions
+  (Ctrl+F) searches bodies too, decompressed, and highlights matches.
 - Request/response inspector tabs: Headers, Raw (decoded text, with
   automatic decompression), JSON (pretty-printed), WebForms (query string
   and form fields, including multipart uploads), ImageView (the picture,

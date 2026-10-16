@@ -97,6 +97,16 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 
+; Code signing, release builds only: when the build passes /DSignToolName
+; (and defines that tool with /S on the ISCC command line), Inno Setup signs
+; the installer and the uninstaller it writes into it. The uninstaller can
+; only be signed here, while Inno Setup builds it. See
+; .github/workflows/release-windows.yml and installer/sign-file.ps1.
+#ifdef SignToolName
+SignTool={#SignToolName}
+SignedUninstaller=yes
+#endif
+
 ; The app ships no standalone .ico today (its window/taskbar icon is an
 ; embedded avares:// resource, clearinet.webp, read at runtime -- not a
 ; file on disk this script can point at, and not a format Inno Setup's
