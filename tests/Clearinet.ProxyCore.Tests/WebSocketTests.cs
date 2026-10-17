@@ -235,7 +235,7 @@ public class WebSocketTests
     }
 
     [Fact]
-    public void HarKeepsTheMessages()
+    public async Task HarKeepsTheMessages()
     {
         var log = new WebSocketLog(DateTimeOffset.Now);
         log.Add(WebSocketDirection.Sent, WebSocketMessageKind.Text, 5, Encoding.UTF8.GetBytes("hello"));
@@ -270,7 +270,7 @@ public class WebSocketTests
 
         har.Position = 0;
         var imported = new SessionStore();
-        HarReader.ImportAsync(har, imported).GetAwaiter().GetResult();
+        await HarReader.ImportAsync(har, imported);
         var back = Assert.Single(imported.Snapshot()).WebSocket;
         Assert.NotNull(back);
         Assert.False(back!.IsOpen);
