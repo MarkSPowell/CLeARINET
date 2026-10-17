@@ -667,6 +667,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 RefreshInspectors();
                 RefreshTiming();
+                RefreshWebSocket();
                 RemoveSelectedSessionCommand?.RaiseCanExecuteChanged();
                 RaiseComposerCanExecuteChanged();
             }

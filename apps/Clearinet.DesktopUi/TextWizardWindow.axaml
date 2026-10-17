@@ -31,7 +31,7 @@
              AcceptsReturn="True"
              TextWrapping="Wrap"
              FontFamily="Cascadia Mono,Consolas,monospace"
-             Watermark="Type or paste text to convert"
+             PlaceholderText="Type or paste text to convert"
              TextChanged="InputBox_TextChanged" />
 
     <TextBlock Grid.Row="3" x:Name="NoteText" TextWrapping="Wrap" Margin="0,8,0,4"

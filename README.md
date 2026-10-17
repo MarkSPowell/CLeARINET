@@ -33,6 +33,9 @@ here yet. Feedback and issues are welcome.
   for the selected session, a request summary, and a Statistics tab
   (totals, by type, status and host, slowest requests, easy wins). Timings
   are kept in SAZ and HAR files, and read from browsers' HAR exports.
+- A WebSocket tab showing each message sent and received on a WebSocket
+  connection, live, with compressed and fragmented messages put back
+  together; kept in HAR files.
 - Compare Sessions (Ctrl+W): two sessions' requests and responses side by
   side, with each difference highlighted, bodies decompressed and JSON
   formatted so changes line up.
@@ -268,6 +271,10 @@ way:
   proxied traffic; it's not part of the main app's own build, but the
   Windows installer can include it as an unchecked-by-default optional
   component.
+- **No client certificates (mutual TLS) yet.** When a server asks for
+  one, CLeARINET records that on the session (Timing and Notes tabs), but
+  doesn't send a certificate, so a server that requires one refuses the
+  connection.
 - **No headless/CLI mode.** Left out of this milestone by design, not by
   oversight.
 

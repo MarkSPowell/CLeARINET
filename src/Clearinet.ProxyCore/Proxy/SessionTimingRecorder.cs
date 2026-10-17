@@ -29,6 +29,9 @@ internal sealed class SessionTimingRecorder
 
     public string? Proxy { get; set; }
 
+    /// <summary>The TLS connection to the server this exchange uses, described when the timings are built.</summary>
+    public UpstreamTlsProbe? TlsProbe { get; set; }
+
     public static long Now() => Stopwatch.GetTimestamp();
 
     /// <summary>Starting to open a new connection to the server (or upstream proxy).</summary>
@@ -88,6 +91,7 @@ internal sealed class SessionTimingRecorder
             ConnectionId = ConnectionId,
             ConnectionReused = ConnectionReused,
             Proxy = Proxy,
+            Tls = TlsProbe?.Snapshot(),
         };
 
         if (_connectStart is { } connectStart)

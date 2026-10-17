@@ -837,25 +837,14 @@
             <Setter Property="Foreground" Value="{DynamicResource SystemControlForegroundBaseHighBrush}" />
           </Style>
         </DataGrid.Styles>
-        <!-- Phase C (Context-menu half): one entry per ContextAction the
-             currently-loaded script declares, operating on
-             SelectedSessionRow (see MainWindowViewModel.InvokeContextAction's
-             own remarks on the single-session scope cut this takes vs. real
-             Fiddler's own multi-select Session[]). Note this menu is set on
-             the grid as a whole, not per row: a right-click doesn't
-             necessarily move SelectedItem the way a left-click does, so
-             worth confirming against the real running app whether a
-             ContextAction ends up operating on the row actually clicked, or
-             on whatever was last left-selected; flagged here rather than
-             assumed. -->
+        <!-- The right-click menu: Compare Sessions, Replay, Edit in
+             Composer and Remove, then one entry per ContextAction the loaded
+             FiddlerScript declares. Filled in by MainWindow.axaml.cs each
+             time it opens (SessionsDataGrid_ContextRequested), which also
+             selects the row that was right-clicked if it isn't selected
+             already, so the actions apply to that row. -->
         <DataGrid.ContextMenu>
-          <ContextMenu ItemsSource="{Binding ContextActionEntries}">
-            <ContextMenu.ItemTemplate>
-              <DataTemplate x:DataType="vm:ActionMenuEntryViewModel">
-                <MenuItem Header="{Binding Header}" Command="{Binding InvokeCommand}" />
-              </DataTemplate>
-            </ContextMenu.ItemTemplate>
-          </ContextMenu>
+          <ContextMenu x:Name="SessionContextMenu" />
         </DataGrid.ContextMenu>
         <DataGrid.Columns>
           <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="50" />
@@ -982,6 +971,56 @@
               </ItemsControl>
             </StackPanel>
           </ScrollViewer>
+        </TabItem>
+        <!-- The selected WebSocket session's messages, live while it's
+             open, like the Messages view in browsers' developer tools: ↑
+             sent by the client, ↓ received. The selected message is shown
+             in full below (JSON indented, binary as hex). See
+             MainWindowViewModel.WebSocket.cs. -->
+        <TabItem Header="WebSocket">
+          <DockPanel Margin="0,6,0,0">
+            <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,6">
+              <TextBlock Text="{Binding WebSocketHeader}" TextWrapping="Wrap" />
+              <CheckBox Content="Hide pings and pongs" IsChecked="{Binding HideWebSocketControlMessages, Mode=TwoWay}" />
+            </StackPanel>
+            <Grid RowDefinitions="*,4,*">
+              <DataGrid Grid.Row="0"
+                        x:CompileBindings="False"
+                        ItemsSource="{Binding WebSocketMessages}"
+                        SelectedItem="{Binding SelectedWebSocketMessage, Mode=TwoWay}"
+                        AutoGenerateColumns="False"
+                        IsReadOnly="True"
+                        CanUserSortColumns="False"
+                        GridLinesVisibility="Horizontal"
+                        BorderThickness="1"
+                        BorderBrush="{DynamicResource AppBorderBrush}"
+                        Background="{DynamicResource AppPanelBrush}"
+                        HorizontalGridLinesBrush="{DynamicResource AppBorderBrush}">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Header="#" Binding="{Binding Number}" Width="50" />
+                  <DataGridTextColumn Header="" Binding="{Binding Direction}" Width="34" />
+                  <DataGridTextColumn Header="Time" Binding="{Binding Time}" Width="90" />
+                  <DataGridTextColumn Header="Type" Binding="{Binding Kind}" Width="80" />
+                  <DataGridTextColumn Header="Size" Binding="{Binding Size}" Width="110" />
+                  <DataGridTextColumn Header="Data" Binding="{Binding Preview}" Width="*" FontFamily="Cascadia Mono,Consolas,monospace" />
+                </DataGrid.Columns>
+              </DataGrid>
+              <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" Background="{DynamicResource AppBorderBrush}" />
+              <DockPanel Grid.Row="2" Margin="0,6,0,0">
+                <TextBlock DockPanel.Dock="Top"
+                           Text="{Binding WebSocketMessageNote}"
+                           Foreground="{DynamicResource AppMutedTextBrush}"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,4" />
+                <TextBox Text="{Binding WebSocketMessageText}"
+                         IsReadOnly="True"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         FontFamily="Cascadia Mono,Consolas,monospace"
+                         PlaceholderText="Select a message to see it in full." />
+              </DockPanel>
+            </Grid>
+          </DockPanel>
         </TabItem>
         <!-- Totals and breakdowns for the sessions the filter shows: by
              type, status and host, the slowest requests, and easy wins. -->

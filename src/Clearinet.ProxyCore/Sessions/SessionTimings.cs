@@ -57,6 +57,12 @@ public sealed record SessionTimings
     public string? Proxy { get; init; }
 
     /// <summary>
+    /// The TLS connection to the server, including whether it asked for a
+    /// client certificate; null for plain HTTP or when it isn't known.
+    /// </summary>
+    public ServerTlsInfo? Tls { get; init; }
+
+    /// <summary>
     /// True when CLeARINET answered the request itself (AutoResponder, an
     /// extension, its own page, or a 502 when the server couldn't be
     /// reached), so the server phases don't apply.

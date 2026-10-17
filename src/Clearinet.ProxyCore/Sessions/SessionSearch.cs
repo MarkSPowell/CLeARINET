@@ -103,7 +103,42 @@ public sealed class SessionSearch
             return true;
         }
 
-        return target != SessionSearchTarget.Requests && MatchesResponse(session.Response);
+        if (target != SessionSearchTarget.Requests && MatchesResponse(session.Response))
+        {
+            return true;
+        }
+
+        return MatchesWebSocket(session);
+    }
+
+    /// <summary>
+    /// A WebSocket's text messages count as bodies: sent ones on the request
+    /// side, received ones on the response side.
+    /// </summary>
+    private bool MatchesWebSocket(Session session)
+    {
+        if (session.WebSocket is not { } log || _options.Parts == SessionSearchParts.Headers)
+        {
+            return false;
+        }
+
+        foreach (var message in log.Messages)
+        {
+            if (message.Kind != WebSockets.WebSocketMessageKind.Text)
+            {
+                continue;
+            }
+
+            var side = message.Direction == WebSockets.WebSocketDirection.Sent
+                ? SessionSearchTarget.Requests
+                : SessionSearchTarget.Responses;
+            if ((_options.Target == SessionSearchTarget.RequestsAndResponses || _options.Target == side) && IsMatch(message.Text))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool MatchesRequest(Session session)

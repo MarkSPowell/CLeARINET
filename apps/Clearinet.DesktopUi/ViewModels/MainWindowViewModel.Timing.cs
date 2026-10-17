@@ -175,6 +175,31 @@ public sealed partial class MainWindowViewModel
                 (timings.Proxy is null ? " to the server." : $" through the proxy {timings.Proxy}."));
         }
 
+        if (timings.Tls is { } tls)
+        {
+            if (tls.Protocol is not null)
+            {
+                lines.Add($"{tls.Protocol}, {tls.CipherSuite}.");
+            }
+
+            if (tls.CertificateSubject is not null)
+            {
+                lines.Add(
+                    $"Server certificate: {tls.CertificateSubject}, issued by {tls.CertificateIssuer}" +
+                    (tls.CertificateNotAfter is { } notAfter
+                        ? $", valid until {notAfter.ToLocalTime().ToString("d", CultureInfo.CurrentCulture)}."
+                        : "."));
+            }
+
+            if (tls.ClientCertificateRequested)
+            {
+                lines.Add(
+                    "The server asked for a client certificate (mutual TLS)" +
+                    (tls.AcceptableIssuers.Count > 0 ? $", issued by: {tls.DescribeAcceptableIssuers()}." : ", from any issuer.") +
+                    " CLeARINET doesn't send one yet, so the server saw no certificate.");
+            }
+        }
+
         if (timings.Paused > 0)
         {
             lines.Add($"Paused at a breakpoint for {TimingPalette.Format(timings.Paused)} (included above).");

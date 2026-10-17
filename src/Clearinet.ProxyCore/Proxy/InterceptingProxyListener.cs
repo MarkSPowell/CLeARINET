@@ -11,6 +11,7 @@ using Clearinet.ProxyCore.Http;
 using Clearinet.ProxyCore.Proxy.AutoConfig;
 using Clearinet.ProxyCore.Scripting;
 using Clearinet.ProxyCore.Sessions;
+using Clearinet.ProxyCore.WebSockets;
 
 namespace Clearinet.ProxyCore.Proxy;
 
@@ -480,6 +481,7 @@ public sealed class InterceptingProxyListener
         var sendAbsoluteForm = false;
         UpstreamProxy? upstreamRoute = null;
         var upstreamConnectionId = 0;
+        UpstreamTlsProbe? upstreamTlsProbe = null;
         SessionTimingRecorder? currentTiming = null;
         var pendingRequest = firstRequest;
 
@@ -505,6 +507,7 @@ public sealed class InterceptingProxyListener
                 currentTiming.ConnectionReused = true;
                 currentTiming.ConnectionId = upstreamConnectionId;
                 currentTiming.Proxy = upstreamRoute?.ToString();
+                currentTiming.TlsProbe = upstreamTlsProbe;
             }
 
             if (upstreamTls is null)
@@ -514,6 +517,7 @@ public sealed class InterceptingProxyListener
                 // reached, as browsers do.
                 upstreamClient?.Dispose(); // left over from a failed TLS handshake
                 upstreamClient = null;
+                upstreamTlsProbe = null;
                 var routes = await chooseRoutes(isTls, targetHost, targetPort, target, cancellationToken);
                 currentTiming?.ConnectStarted();
                 UpstreamProxy? route = null;
@@ -542,11 +546,23 @@ public sealed class InterceptingProxyListener
                 if (isTls)
                 {
                     var tls = new SslStream(upstreamClient!.GetStream(), leaveInnerStreamOpen: false);
-                    // Deliberately using default certificate validation
-                    // here: this proxy should surface a real upstream cert
-                    // problem, not hide it, even though it's standing in
-                    // the middle of the connection for the client's side.
-                    await tls.AuthenticateAsClientAsync(targetHost);
+
+                    // The probe notices a server asking for a client
+                    // certificate (mutual TLS): that request comes to
+                    // CLeARINET, not the browser, so it's recorded on the
+                    // session instead. Default certificate validation,
+                    // deliberately: this proxy should surface a real
+                    // upstream cert problem, not hide it, even though it's
+                    // standing in the middle of the connection for the
+                    // client's side.
+                    upstreamTlsProbe = new UpstreamTlsProbe();
+                    upstreamTlsProbe.Attach(tls);
+                    if (currentTiming is not null)
+                    {
+                        currentTiming.TlsProbe = upstreamTlsProbe;
+                    }
+
+                    await tls.AuthenticateAsClientAsync(upstreamTlsProbe.CreateOptions(targetHost), cancellationToken);
                     currentTiming?.TlsDone();
                     upstreamTls = tls;
                     sendAbsoluteForm = false;
@@ -673,10 +689,19 @@ public sealed class InterceptingProxyListener
             }
             catch (Exception ex) when (ex is SocketException or IOException or AuthenticationException)
             {
-                var failure = BadGateway(targetHost, targetPort, ex);
+                var askedForCertificate = upstreamTlsProbe?.ClientCertificateRequested == true;
+                var failure = BadGateway(
+                    targetHost,
+                    targetPort,
+                    ex,
+                    askedForCertificate
+                        ? "The server asked for a client certificate (mutual TLS), and CLeARINET doesn't send one yet, so the server may have refused the connection for that reason."
+                        : null);
                 await HttpMessageWriter.WriteResponseAsync(clientTls, failure, cancellationToken);
                 currentTiming?.Done();
-                var failed = sessionStore.Add(targetHost, startedAt, outgoing, failure, flags: null, scheme, currentTiming?.Build());
+                var failedTimings = currentTiming?.Build();
+                var failed = sessionStore.Add(
+                    targetHost, startedAt, outgoing, failure, WithTlsFlags(null, failedTimings), scheme, failedTimings);
                 Console.WriteLine(
                     $"[{startedAt:HH:mm:ss}] #{failed.Id} 502 {outgoing.Method} {scheme}://{targetHost}{outgoing.Target} -- {ex.Message}");
                 return null;
@@ -1015,7 +1040,15 @@ public sealed class InterceptingProxyListener
                 extensionSession?.ResponseAfter(request, response);
 
                 timing.Done();
-                var session = sessionStore.Add(targetHost, startedAt, request, response, extensionSession?.Flags, scheme, timing.Build());
+                var timings = timing.Build();
+
+                // A WebSocket handshake: the session gets a log its messages
+                // are added to as they pass (see the 101 handling below).
+                var webSocket = response.StatusCode == 101 && IsWebSocketUpgrade(response.Headers)
+                    ? new WebSocketLog(DateTimeOffset.Now, ContentDecoder.FindHeader(response.Headers, "Sec-WebSocket-Extensions"))
+                    : null;
+                var session = sessionStore.Add(
+                    targetHost, startedAt, request, response, WithTlsFlags(extensionSession?.Flags, timings), scheme, timings, webSocket);
                 Console.WriteLine(
                     $"[{startedAt:HH:mm:ss}] #{session.Id} {response.StatusCode} {request.Method} {scheme}://{targetHost}{request.Target} " +
                     $"({request.Body.Length} B req, {response.Body.Length} B resp)");
@@ -1032,8 +1065,18 @@ public sealed class InterceptingProxyListener
                     // duplex, unparsed relay in both directions at once. Fall
                     // back to exactly that for the rest of this connection's
                     // life -- the same raw pump this spike used everywhere
-                    // before it understood HTTP/1.1 at all.
-                    await RelayRawBytesUntilClosedAsync(clientTls, upstreamStream, cancellationToken);
+                    // before it understood HTTP/1.1 at all. A WebSocket's
+                    // messages are read out of the bytes on the way through.
+                    if (webSocket is not null)
+                    {
+                        await WebSocketRelay.RelayAsync(
+                            clientTls, upstreamStream, webSocket, WebSocketCompression.FromHeader(webSocket.Extensions), cancellationToken);
+                    }
+                    else
+                    {
+                        await RelayRawBytesUntilClosedAsync(clientTls, upstreamStream, cancellationToken);
+                    }
+
                     return;
                 }
 
@@ -1076,10 +1119,30 @@ public sealed class InterceptingProxyListener
     private static string DescribeRoute(UpstreamProxy? route) =>
         route is null ? "a direct connection" : $"the proxy {route}";
 
-    /// <summary>The response sent when CLeARINET can't reach the server.</summary>
-    private static CapturedResponse BadGateway(string host, int port, Exception ex)
+    /// <summary>
+    /// <paramref name="flags"/> plus, when the server asked for a client
+    /// certificate, <see cref="ServerTlsInfo.ClientCertificateRequestedFlag"/>
+    /// (which the Notes tab shows).
+    /// </summary>
+    private static IReadOnlyDictionary<string, string>? WithTlsFlags(IReadOnlyDictionary<string, string>? flags, SessionTimings? timings)
     {
-        var body = Encoding.UTF8.GetBytes($"CLeARINET couldn't connect to {host}:{port}: {ex.Message}");
+        if (timings?.Tls is not { ClientCertificateRequested: true } tls)
+        {
+            return flags;
+        }
+
+        var combined = flags is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(flags, StringComparer.OrdinalIgnoreCase);
+        combined[ServerTlsInfo.ClientCertificateRequestedFlag] = tls.DescribeAcceptableIssuers();
+        return combined;
+    }
+
+    /// <summary>The response sent when CLeARINET can't reach the server, with an optional explanation.</summary>
+    private static CapturedResponse BadGateway(string host, int port, Exception ex, string? explanation = null)
+    {
+        var body = Encoding.UTF8.GetBytes(
+            $"CLeARINET couldn't connect to {host}:{port}: {ex.Message}" + (explanation is null ? string.Empty : $"\r\n\r\n{explanation}"));
         return new CapturedResponse(
             "HTTP/1.1",
             502,
@@ -1270,6 +1333,10 @@ public sealed class InterceptingProxyListener
 
         return null;
     }
+
+    /// <summary>Whether a 101 response switched to WebSocket (Upgrade: websocket).</summary>
+    private static bool IsWebSocketUpgrade(IReadOnlyList<(string Name, string Value)> headers) =>
+        ContentDecoder.FindHeader(headers, "Upgrade")?.Split(',').Any(p => string.Equals(p.Trim(), "websocket", StringComparison.OrdinalIgnoreCase)) == true;
 
     private static async Task RelayRawBytesUntilClosedAsync(
         Stream clientTls, Stream upstreamTls, CancellationToken cancellationToken)

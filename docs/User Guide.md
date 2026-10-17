@@ -142,7 +142,9 @@ browsers' developer tools do:
   was transferred, and when the last one finished.
 - The **Timing** tab shows the selected session's phases with their
   durations, whether it used a new or reused connection (and through which
-  upstream proxy), and how long it sat at a breakpoint, if it did.
+  upstream proxy), and how long it sat at a breakpoint, if it did. For
+  HTTPS it also shows the TLS version and cipher suite CLeARINET agreed
+  with the server, and the server's certificate.
 - The **Statistics** tab sums up the sessions the filter shows: bytes sent
   and received (and what compression saved), breakdowns by type, status and
   host, the slowest requests, and easy wins such as text sent uncompressed,
@@ -155,6 +157,15 @@ file without timings have no bar.
 
 If you don't need timing, right-click a column header and uncheck
 **Waterfall** to hide that column.
+
+**Servers that ask for a client certificate (mutual TLS).** CLeARINET makes
+its own connection to the server, so when a server asks for a client
+certificate, it asks CLeARINET, and the browser never sees the request (or
+shows its certificate prompt). CLeARINET records it instead: the Timing tab
+says the server asked, and which certificate authorities it accepts, and the
+session gets a **Notes** tab with the `x-client-certificate-requested` note.
+CLeARINET doesn't send a client certificate yet, so a server that requires
+one refuses the connection; the 502 page then says that's the likely reason.
 
 ### Finding sessions
 
@@ -202,6 +213,34 @@ Binary bodies, such as images, are compared as a hex dump, or by size and
 SHA-256 hash when they're over 64 KB. Two very different large bodies are
 shown as one changed block rather than lined up line by line. You can
 keep several Compare windows open while capturing.
+
+### WebSocket messages
+
+Apps that keep a connection open for live updates, such as chat, dashboards
+and development servers, often use WebSockets. A WebSocket connection shows
+in the session list as the request that opened it, with status **101**.
+Select it and open the **WebSocket** tab to see its messages, as browsers'
+developer tools do:
+
+- **↑** is a message the client sent, and **↓** one it received. Each row
+  shows when it was sent (seconds after the connection opened), its type
+  (text, binary, close, ping or pong), its size and the start of its data.
+- Select a message to see it in full below the list: JSON is indented,
+  and binary data is shown as hex unless it's really text.
+- The list keeps growing while the connection is open, and the heading
+  says whether it's still open and how many messages have gone each way.
+- **Hide pings and pongs** hides the keep-alive messages some connections
+  send constantly.
+
+Compressed messages (permessage-deflate) are decompressed, and messages
+sent in several pieces are put back together. The Size column shows a
+compressed message's size as sent, then as decompressed. CLeARINET keeps up
+to 1 MB of each message and 64 MB per connection; beyond that it counts
+messages but doesn't keep their content. **Find** searches text messages
+too: sent messages count as the request, received ones as the response.
+
+WebSocket messages are saved in HAR files (and read from the HAR files
+browsers export), but not in SAZ files yet.
 
 ## TextWizard
 

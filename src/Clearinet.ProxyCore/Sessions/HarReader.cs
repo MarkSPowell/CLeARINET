@@ -51,7 +51,7 @@ public static class HarReader
             try
             {
                 var (host, startedAt, request, response, flags, scheme) = ReadEntry(entry);
-                sessionStore.Add(host, startedAt, request, response, flags, scheme, ReadTimings(entry));
+                sessionStore.Add(host, startedAt, request, response, flags, scheme, ReadTimings(entry), ReadWebSocket(entry, startedAt));
                 imported++;
             }
             catch (Exception ex) when (ex is InvalidDataException or FormatException or InvalidOperationException or KeyNotFoundException or UriFormatException)
@@ -155,6 +155,66 @@ public static class HarReader
         };
 
         return result.Total > 0 ? result : null;
+    }
+
+    /// <summary>
+    /// A WebSocket's messages, as browsers' developer tools export them
+    /// (<c>_webSocketMessages</c>: <c>type</c> "send" or "receive",
+    /// <c>time</c> in Unix seconds, <c>opcode</c>, and <c>data</c>, base64
+    /// for binary). Null when the entry has none.
+    /// </summary>
+    internal static WebSockets.WebSocketLog? ReadWebSocket(JsonElement entry, DateTimeOffset startedAt)
+    {
+        if (!entry.TryGetProperty("_webSocketMessages", out var messages) || messages.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var log = new WebSockets.WebSocketLog(startedAt);
+        var last = startedAt;
+        foreach (var message in messages.EnumerateArray())
+        {
+            if (message.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var direction = StringValue(message, "type") == "send"
+                ? WebSockets.WebSocketDirection.Sent
+                : WebSockets.WebSocketDirection.Received;
+            var opcode = message.TryGetProperty("opcode", out var op) && op.TryGetInt32(out var code) ? code : 1;
+            if (opcode is not (1 or 2 or 8 or 9 or 10))
+            {
+                continue;
+            }
+
+            var data = StringValue(message, "data");
+            byte[] payload;
+            if (opcode == 2)
+            {
+                try
+                {
+                    payload = Convert.FromBase64String(data);
+                }
+                catch (FormatException)
+                {
+                    payload = Encoding.UTF8.GetBytes(data);
+                }
+            }
+            else
+            {
+                payload = Encoding.UTF8.GetBytes(data);
+            }
+
+            var time = message.TryGetProperty("time", out var t) && t.TryGetDouble(out var seconds) && seconds > 0
+                ? DateTimeOffset.FromUnixTimeMilliseconds((long)Math.Round(seconds * 1000)).ToOffset(startedAt.Offset)
+                : last;
+            last = time;
+            log.Add(direction, (WebSockets.WebSocketMessageKind)opcode, payload.Length, payload, time: time);
+        }
+
+        log.Close(last);
+        return log;
     }
 
     private static JsonElement Required(JsonElement parent, string name) =>

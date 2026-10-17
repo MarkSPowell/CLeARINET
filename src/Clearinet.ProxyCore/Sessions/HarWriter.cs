@@ -98,6 +98,36 @@ public static class HarWriter
         return json;
     }
 
+    /// <summary>
+    /// A WebSocket's messages the way browsers' developer tools export them:
+    /// <c>type</c> ("send" or "receive"), <c>time</c> (Unix seconds),
+    /// <c>opcode</c>, and <c>data</c> (text, or base64 for binary). Text and
+    /// binary messages only, as browsers write.
+    /// </summary>
+    internal static JsonArray WebSocketMessages(WebSockets.WebSocketLog log)
+    {
+        var array = new JsonArray();
+        foreach (var message in log.Messages)
+        {
+            if (message.Kind is not (WebSockets.WebSocketMessageKind.Text or WebSockets.WebSocketMessageKind.Binary))
+            {
+                continue;
+            }
+
+            array.Add(new JsonObject
+            {
+                ["type"] = message.Direction == WebSockets.WebSocketDirection.Sent ? "send" : "receive",
+                ["time"] = message.Time.ToUnixTimeMilliseconds() / 1000.0,
+                ["opcode"] = (int)message.Kind,
+                ["data"] = message.Kind == WebSockets.WebSocketMessageKind.Binary
+                    ? Convert.ToBase64String(message.Payload)
+                    : message.Text,
+            });
+        }
+
+        return array;
+    }
+
     private static JsonObject Entry(Session session)
     {
         var entry = new JsonObject
@@ -118,6 +148,12 @@ public static class HarWriter
         if (session.Flags is { } flags && flags.TryGetValue("ui-comments", out var comment) && !string.IsNullOrEmpty(comment))
         {
             entry["comment"] = comment;
+        }
+
+        if (session.WebSocket is { } webSocket)
+        {
+            entry["_resourceType"] = "websocket";
+            entry["_webSocketMessages"] = WebSocketMessages(webSocket);
         }
 
         return entry;

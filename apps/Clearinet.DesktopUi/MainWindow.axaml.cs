@@ -674,17 +674,65 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(RefreshColumnsMenu);
     }
 
-    /// <summary>Right-click on a column header: the column chooser.</summary>
+    /// <summary>
+    /// Right-click on a column header: the column chooser. On a row: selects
+    /// it (unless it's already part of the selection, so a right-click on one
+    /// of two selected sessions keeps both), then fills the list's own
+    /// context menu, which opens once this returns.
+    /// </summary>
     private void SessionsDataGrid_ContextRequested(object? sender, ContextRequestedEventArgs e)
     {
-        if ((e.Source as Visual)?.FindAncestorOfType<DataGridColumnHeader>(includeSelf: true) is not { } header)
+        var source = e.Source as Visual;
+        if (source?.FindAncestorOfType<DataGridColumnHeader>(includeSelf: true) is { } header)
         {
-            return; // a row: the list's own context menu
+            e.Handled = true;
+            var menu = new ContextMenu { ItemsSource = BuildColumnMenuItems() };
+            menu.Open(header);
+            return;
         }
 
-        e.Handled = true;
-        var menu = new ContextMenu { ItemsSource = BuildColumnMenuItems() };
-        menu.Open(header);
+        if (source?.FindAncestorOfType<DataGridRow>(includeSelf: true) is { DataContext: Models.SessionRow clicked } &&
+            !SessionsDataGrid.SelectedItems.Contains(clicked))
+        {
+            SessionsDataGrid.SelectedItem = clicked;
+        }
+
+        SessionContextMenu.ItemsSource = BuildSessionMenuItems();
+    }
+
+    /// <summary>The session list's right-click menu, for the current selection.</summary>
+    private List<Control> BuildSessionMenuItems()
+    {
+        var items = new List<Control>();
+        if (_viewModel is not { } viewModel)
+        {
+            return items;
+        }
+
+        var compare = new MenuItem
+        {
+            Header = "Co_mpare Sessions",
+            InputGesture = new KeyGesture(Key.W, KeyModifiers.Control),
+            IsEnabled = SessionsDataGrid.SelectedItems.Count == 2,
+        };
+        ToolTip.SetTip(compare, "Select two sessions (Ctrl+click the second) to compare them side by side.");
+        compare.Click += (_, _) => CompareSelectedSessions();
+        items.Add(compare);
+
+        items.Add(new MenuItem { Header = "_Replay", Command = viewModel.ReplaySelectedSessionCommand, InputGesture = new KeyGesture(Key.R) });
+        items.Add(new MenuItem { Header = "Edit in _Composer", Command = viewModel.EditInComposerCommand });
+        items.Add(new MenuItem { Header = "Re_move", Command = viewModel.RemoveSelectedSessionCommand, InputGesture = new KeyGesture(Key.Delete) });
+
+        if (viewModel.ContextActionEntries.Count > 0)
+        {
+            items.Add(new Separator());
+            foreach (var entry in viewModel.ContextActionEntries)
+            {
+                items.Add(new MenuItem { Header = entry.Header, Command = entry.InvokeCommand });
+            }
+        }
+
+        return items;
     }
 
     /// <summary>
@@ -842,7 +890,9 @@ public partial class MainWindow : Window
     /// Edit > Compare Sessions (Ctrl+W): the two selected sessions side by
     /// side, in a window of their own.
     /// </summary>
-    private void CompareSessionsMenuItem_Click(object? sender, RoutedEventArgs e)
+    private void CompareSessionsMenuItem_Click(object? sender, RoutedEventArgs e) => CompareSelectedSessions();
+
+    private void CompareSelectedSessions()
     {
         var selected = SessionsDataGrid.SelectedItems.OfType<Models.SessionRow>().ToList();
         if (selected.Count != 2)

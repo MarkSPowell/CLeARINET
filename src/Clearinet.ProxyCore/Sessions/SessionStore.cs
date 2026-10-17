@@ -68,7 +68,23 @@ public sealed class SessionStore
         CapturedResponse response,
         IReadOnlyDictionary<string, string>? flags,
         string scheme,
-        SessionTimings? timings)
+        SessionTimings? timings) =>
+        Add(host, startedAt, request, response, flags, scheme, timings, webSocket: null);
+
+    /// <summary>
+    /// As above, for a request that opened a WebSocket connection: its
+    /// messages are added to <paramref name="webSocket"/> as they pass (see
+    /// <see cref="Session.WebSocket"/>).
+    /// </summary>
+    public Session Add(
+        string host,
+        DateTimeOffset startedAt,
+        CapturedRequest request,
+        CapturedResponse response,
+        IReadOnlyDictionary<string, string>? flags,
+        string scheme,
+        SessionTimings? timings,
+        WebSockets.WebSocketLog? webSocket)
     {
         Session session;
         lock (_gate)
@@ -79,6 +95,7 @@ public sealed class SessionStore
                 Scheme: scheme)
             {
                 Timings = timings,
+                WebSocket = webSocket,
             };
             _sessions.Add(session);
         }

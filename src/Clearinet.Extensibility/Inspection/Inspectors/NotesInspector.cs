@@ -32,6 +32,7 @@ public sealed class NotesInspector : IInspector
         ["x-netlog-original-content-length"] = "the Content-Length the server sent, before the importer corrected it for the decoded body",
         ["x-processinfo"] = "the program that made the request",
         ["x-transport"] = "the protocol the browser used",
+        ["x-client-certificate-requested"] = "the server asked for a client certificate (mutual TLS) from these issuers; CLeARINET doesn't send one yet",
         ["ui-comments"] = "a comment attached by the importer or an extension",
         ["ui-backcolor"] = "the row colour the importer or an extension asked for",
         ["ui-color"] = "the text colour the importer or an extension asked for",

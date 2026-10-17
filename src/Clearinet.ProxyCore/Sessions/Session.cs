@@ -103,6 +103,12 @@ public sealed record Session(
     /// </summary>
     public SessionTimings? Timings { get; init; }
 
+    /// <summary>
+    /// For a request that opened a WebSocket connection (status 101), the
+    /// messages sent each way, added as they pass; otherwise null.
+    /// </summary>
+    public WebSockets.WebSocketLog? WebSocket { get; init; }
+
     /// <summary>The original six-value deconstruction, kept for the same reason.</summary>
     public void Deconstruct(out int Id, out string Host, out DateTimeOffset StartedAt, out CapturedRequest Request, out CapturedResponse Response, out SessionState State)
     {
