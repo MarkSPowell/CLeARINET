@@ -369,8 +369,58 @@ Both send through CLeARINET itself, so capture has to be running. What they
 send shows up as a new session, and goes through the AutoResponder,
 breakpoints, FiddlerScript and extensions just like traffic from a browser.
 The Host header is set from the URL, and Content-Length from the body. The
-URL can be `http://` or `https://` (a path with no URL is sent as HTTPS),
-and the body is sent as text.
+URL can be `http://` or `https://` (a path with no URL is sent as HTTPS).
+Replay sends the captured request byte for byte, whatever its body.
+
+**Bodies that aren't text.** Under the request, **Body** says where the
+body comes from:
+
+- **In the request text** (the default): typed after the blank line, and
+  sent as UTF-8 text.
+- **Hex (exact bytes)**: typed as hex in the box that appears, such as
+  `89 50 4E 47 0D 0A`. Spaces and line breaks don't matter. Use it for
+  images, protobuf, compressed or other binary bodies.
+- **From a file**: a file you choose with **Browse…**, read when you click
+  Execute. Set the Content-Type header yourself.
+
+With Hex or a file, leave nothing after the blank line in the request text.
+**Edit in Composer** on a session whose body isn't text puts the body in
+the hex box for you, so it goes out exactly as captured.
+
+## QuickExec
+
+The box under the session list is **QuickExec**, Fiddler Classic's command
+line. Click it or press **Alt+Q** (**Edit > QuickExec**), type a command and
+press **Enter**. **Up** and **Down** bring back earlier commands, and
+**Escape** clears the box. What a command did shows on the status line.
+
+| Command | Does |
+|---|---|
+| `?text` | Selects sessions whose URL contains the text |
+| `@host` | Selects sessions whose host contains the text |
+| `=404` | Selects sessions with that status code |
+| `=POST` | Selects sessions with that method |
+| `>40k`, `<1k` | Selects sessions whose response body is larger or smaller (bytes, `k` or `mb`) |
+| `select type` | Selects sessions whose response Content-Type contains the text (`select image`) |
+| `allbut type` (or `keeponly`) | Removes every session whose Content-Type doesn't contain the text |
+| `cls` (or `clear`) | Removes all sessions |
+| `tail 100` | Keeps only the newest 100 sessions |
+| `bpu text` | Pauses requests whose URL contains the text (`bpu` on its own stops) |
+| `bpafter text` | Pauses responses to requests whose URL contains the text |
+| `bps 404` | Pauses responses with that status code |
+| `bpm POST` (or `bpv`) | Pauses requests with that method |
+| `go` | Lets every paused session continue |
+| `start`, `stop` | Starts or stops capturing |
+| `help` | Lists the commands and opens this guide |
+
+Selection commands select among the sessions the filter shows, so you can
+then compare, replay or remove them. The breakpoint commands set the same
+conditions as **Tools > Also Break On**, and show that row.
+
+Any other command goes to the loaded FiddlerScript's `OnExecAction`
+function (with the command split into words; "quoted text" stays one word),
+then to extensions that handle commands (`IHandleExecAction`). The first to
+return true has handled it.
 
 ## Connections: upstream proxy and other devices
 

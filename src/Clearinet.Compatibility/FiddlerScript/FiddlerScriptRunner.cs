@@ -279,6 +279,28 @@ public sealed class FiddlerScriptRunner : IFiddlerScriptRunner
         }
     }
 
+    /// <summary>
+    /// See <see cref="FiddlerScriptHost.InvokeOnExecAction"/>. A script error
+    /// is logged and counts as not handled.
+    /// </summary>
+    public bool InvokeOnExecAction(IReadOnlyList<string> words)
+    {
+        if (_host is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return _host.InvokeOnExecAction(words);
+        }
+        catch (FiddlerScriptException ex)
+        {
+            _log($"[FiddlerScript] OnExecAction error: {ex.Message}");
+            return false;
+        }
+    }
+
     /// <summary>See <see cref="FiddlerScriptHost.InvokeToolsAction"/>.</summary>
     public void InvokeToolsAction(string methodName)
     {

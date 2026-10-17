@@ -108,6 +108,9 @@ public partial class MainWindow : Window
         // of the list's own context menu. Tunnel, so this runs before the
         // grid's ContextMenu sees the request.
         SessionsDataGrid.AddHandler(ContextRequestedEvent, SessionsDataGrid_ContextRequested, RoutingStrategies.Tunnel);
+
+        // Tunnel, so Up and Down reach the history before the text box uses them.
+        QuickExecBox.AddHandler(KeyDownEvent, QuickExecBox_KeyDown, RoutingStrategies.Tunnel);
         SessionsDataGrid.ColumnReordered += (_, _) =>
         {
             if (!_applyingColumnLayout)
@@ -212,6 +215,7 @@ public partial class MainWindow : Window
             _viewModel.ComposerShowRequested -= ShowComposerTab;
             _viewModel.FindFocusRequested -= FocusFindBox;
             _viewModel.FindResultsChanged -= RefreshFindHighlights;
+            _viewModel.QuickExecSelectionRequested -= SelectQuickExecMatches;
         }
 
         _viewModel = DataContext as MainWindowViewModel;
@@ -222,6 +226,7 @@ public partial class MainWindow : Window
             _viewModel.ComposerShowRequested += ShowComposerTab;
             _viewModel.FindFocusRequested += FocusFindBox;
             _viewModel.FindResultsChanged += RefreshFindHighlights;
+            _viewModel.QuickExecSelectionRequested += SelectQuickExecMatches;
             ApplyPlacement(_viewModel);
             RefreshScriptColumns();
             AddExtensionTabs(_viewModel);
@@ -391,6 +396,71 @@ public partial class MainWindow : Window
     }
 
     private void ShowComposerTab() => DetailTabs.SelectedItem = ComposerTab;
+
+    /// <summary>The Composer's Browse button: a file to send as the request body.</summary>
+    private async void BrowseComposerBodyFile_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "File to send as the request body",
+            AllowMultiple = false,
+        });
+
+        if (files.Count > 0)
+        {
+            _viewModel.ComposerBodyFile = files[0].Path.LocalPath;
+        }
+    }
+
+    /// <summary>Edit > QuickExec (Alt+Q): puts the cursor in the QuickExec box.</summary>
+    private void QuickExecMenuItem_Click(object? sender, RoutedEventArgs e) => Dispatcher.UIThread.Post(() => QuickExecBox.Focus());
+
+    /// <summary>Up and Down go through earlier commands; Escape clears the box.</summary>
+    private void QuickExecBox_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        switch (e.Key)
+        {
+            case Key.Up:
+                _viewModel.BrowseQuickExecHistory(-1);
+                break;
+            case Key.Down:
+                _viewModel.BrowseQuickExecHistory(1);
+                break;
+            case Key.Escape:
+                _viewModel.QuickExecText = string.Empty;
+                break;
+            default:
+                return;
+        }
+
+        QuickExecBox.CaretIndex = QuickExecBox.Text?.Length ?? 0;
+        e.Handled = true;
+    }
+
+    /// <summary>Selects the sessions a QuickExec command picked, and scrolls to the first.</summary>
+    private void SelectQuickExecMatches(IReadOnlyList<Models.SessionRow> rows)
+    {
+        SessionsDataGrid.SelectedItems.Clear();
+        foreach (var row in rows)
+        {
+            SessionsDataGrid.SelectedItems.Add(row);
+        }
+
+        if (rows.Count > 0)
+        {
+            SessionsDataGrid.ScrollIntoView(rows[0], null);
+        }
+    }
 
     /// <summary>The Delete key removes the selected session, as Edit > Remove Selected Session does; R replays it, as Edit > Replay Selected Session does.</summary>
     private void SessionsDataGrid_KeyDown(object? sender, KeyEventArgs e)

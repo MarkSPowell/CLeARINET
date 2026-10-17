@@ -36,6 +36,10 @@ here yet. Feedback and issues are welcome.
 - A WebSocket tab showing each message sent and received on a WebSocket
   connection, live, with compressed and fragmented messages put back
   together; kept in HAR files.
+- QuickExec, Fiddler's command box under the session list (Alt+Q):
+  `?text`, `@host`, `=404`, `>40k`, `select`, `allbut`, `cls`, `tail`, the
+  `bpu`/`bpafter`/`bps`/`bpm` breakpoints and `go`; other commands go to
+  FiddlerScript's `OnExecAction` and extensions.
 - Compare Sessions (Ctrl+W): two sessions' requests and responses side by
   side, with each difference highlighted, bodies decompressed and JSON
   formatted so changes line up.
@@ -250,8 +254,6 @@ way:
   but changed only through the app's own controls. Breakpoints and the
   AutoResponder's on/off switch deliberately always start off. See the
   Preferences Design doc.
-- **The Composer and Replay send bodies as text.** A binary request body
-  can't be composed or replayed exactly yet.
 - **No built-in Chromium NetLog import.** NetLog import works through
   Eric Lawrence's ported NetLog importer extension (see above), an
   optional extension in the installers. No explicit HTTP/2 or TLS 1.3

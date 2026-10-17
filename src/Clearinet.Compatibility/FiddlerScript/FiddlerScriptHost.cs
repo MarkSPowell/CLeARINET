@@ -43,6 +43,7 @@ public sealed class FiddlerScriptHost
     private const string AssignGlobalName = "__clearinet_assign";
     private const string ContextActionSessionsGlobalName = "__clearinet_context_sessions";
     private const string UiColumnSessionGlobalName = "__clearinet_uicolumn_session";
+    private const string ExecActionParamsGlobalName = "__clearinet_exec_params";
 
     private readonly Engine _engine;
 
@@ -156,6 +157,31 @@ public sealed class FiddlerScriptHost
         }
     }
 
+    /// <summary>
+    /// Fiddler's <c>OnExecAction(sParams: String[]): Boolean</c>: a QuickExec
+    /// command, split into words, offered to the script. True when the script
+    /// handled it (returned true); false when it didn't, or has no
+    /// <c>OnExecAction</c>.
+    /// </summary>
+    public bool InvokeOnExecAction(IReadOnlyList<string> words)
+    {
+        if (!HasHandler("OnExecAction"))
+        {
+            return false;
+        }
+
+        _engine.SetValue(ExecActionParamsGlobalName, words.ToArray());
+        try
+        {
+            var result = _engine.Evaluate($"Handlers.OnExecAction({ExecActionParamsGlobalName});");
+            return result.IsBoolean() && result.AsBoolean();
+        }
+        catch (Exception ex)
+        {
+            throw new FiddlerScriptException($"Script error in OnExecAction: {ex.Message}", ex);
+        }
+    }
+
     /// <summary>Calls a <see cref="ToolsActionDescriptor"/>'s method with no arguments at all -- real Fiddler's own Tools-menu commands don't operate on a selection.</summary>
     public void InvokeToolsAction(string methodName)
     {
@@ -266,7 +292,7 @@ public sealed class FiddlerScriptHost
     }
 
     /// <summary>
-    /// Every call site here passes one of this class's own three constant
+    /// Every call site here passes one of this class's own constant
     /// handler names, never anything a script or another caller supplies --
     /// this exists purely as a defense-in-depth assertion against that
     /// invariant quietly breaking later (e.g. a future overload accepting
@@ -275,7 +301,7 @@ public sealed class FiddlerScriptHost
     /// </summary>
     private static string Guard(string handlerName)
     {
-        if (handlerName is not ("OnBeforeRequest" or "OnBeforeResponse" or "OnPeekAtResponseHeaders"))
+        if (handlerName is not ("OnBeforeRequest" or "OnBeforeResponse" or "OnPeekAtResponseHeaders" or "OnExecAction"))
         {
             throw new ArgumentException($"Unrecognized FiddlerScript handler name: {handlerName}", nameof(handlerName));
         }

@@ -148,8 +148,18 @@ public static class TextTransforms
             ? string.Join(' ', Enumerable.Range(0, hex.Length / 2).Select(i => hex.Substring(i * 2, 2)))
             : string.Empty);
 
-    public static TextTransformResult FromHex(string text, Encoding encoding)
+    public static TextTransformResult FromHex(string text, Encoding encoding) =>
+        TryParseHex(text, out var bytes, out var error) ? BytesToText(bytes, encoding) : TextTransformResult.Error(error);
+
+    /// <summary>
+    /// Hex digits to bytes. Spaces, line breaks, commas, colons, dashes,
+    /// semicolons, and <c>0x</c>, <c>\x</c> or <c>%</c> before a byte are
+    /// ignored; anything else is an error.
+    /// </summary>
+    public static bool TryParseHex(string text, out byte[] bytes, out string error)
     {
+        bytes = [];
+        error = string.Empty;
         var digits = new StringBuilder(text.Length);
         for (var i = 0; i < text.Length; i++)
         {
@@ -171,16 +181,37 @@ public static class TextTransforms
             }
             else if (!(char.IsWhiteSpace(c) || c is ',' or ':' or '-' or '%' or ';'))
             {
-                return TextTransformResult.Error($"\"{c}\" isn't a hex digit.");
+                error = $"\"{c}\" isn't a hex digit.";
+                return false;
             }
         }
 
         if (digits.Length % 2 != 0)
         {
-            return TextTransformResult.Error("There's an odd number of hex digits, so the last byte is incomplete.");
+            error = "There's an odd number of hex digits, so the last byte is incomplete.";
+            return false;
         }
 
-        return BytesToText(Convert.FromHexString(digits.ToString()), encoding);
+        bytes = Convert.FromHexString(digits.ToString());
+        return true;
+    }
+
+    /// <summary>Bytes as hex, <paramref name="perLine"/> to a line ("48 65 6C 6C 6F"), the form <see cref="TryParseHex"/> reads back.</summary>
+    public static string FormatHex(byte[] bytes, int perLine = 16)
+    {
+        var hex = Convert.ToHexString(bytes);
+        var text = new StringBuilder(bytes.Length * 3);
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            if (i > 0)
+            {
+                text.Append(i % perLine == 0 ? '\n' : ' ');
+            }
+
+            text.Append(hex, i * 2, 2);
+        }
+
+        return text.ToString();
     }
 
     public static string JavaScriptEscape(string text)

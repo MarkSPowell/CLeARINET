@@ -21,6 +21,40 @@ public class FiddlerScriptHostTests
         new(method, target, "HTTP/1.1", [("Host", "api.example.com")], []);
 
     [Fact]
+    public void OnExecAction_GetsTheCommandsWordsAndSaysWhetherItHandledThem()
+    {
+        const string script = """
+            class Handlers {
+                static function OnExecAction(sParams: String[]): Boolean {
+                    switch (sParams[0]) {
+                        case "greet":
+                            return sParams[1] == "hello world";
+                        default:
+                            return false;
+                    }
+                }
+            }
+            """;
+        var host = new FiddlerScriptHost(script);
+
+        Assert.True(host.InvokeOnExecAction(["greet", "hello world"]));
+        Assert.False(host.InvokeOnExecAction(["greet", "bye"]));
+        Assert.False(host.InvokeOnExecAction(["unknown"]));
+    }
+
+    [Fact]
+    public void OnExecAction_WithoutTheHandlerIsNotHandled()
+    {
+        const string script = """
+            class Handlers {
+                static function OnBeforeRequest(oSession: Session) { }
+            }
+            """;
+
+        Assert.False(new FiddlerScriptHost(script).InvokeOnExecAction(["anything"]));
+    }
+
+    [Fact]
     public void OnBeforeRequest_CanAddARequestHeader()
     {
         const string script = """

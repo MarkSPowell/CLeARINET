@@ -36,6 +36,19 @@ public static class HttpMessageText
     public static string Format(CapturedRequest request) =>
         Encoding.UTF8.GetString(HttpMessageWriter.BuildRequestBytes(request));
 
+    /// <summary>
+    /// The request line and headers only (ending with the blank line), as
+    /// <see cref="Format(CapturedRequest)"/> would show them: Content-Length
+    /// is the body's real length. For showing a request whose body isn't
+    /// text, so the body can be edited some other way.
+    /// </summary>
+    public static string FormatHead(CapturedRequest request)
+    {
+        var bytes = HttpMessageWriter.BuildRequestBytes(request);
+        var end = bytes.AsSpan().IndexOf("\r\n\r\n"u8);
+        return Encoding.UTF8.GetString(bytes, 0, end < 0 ? bytes.Length : end + 4);
+    }
+
     public static string Format(CapturedResponse response) =>
         Encoding.UTF8.GetString(HttpMessageWriter.BuildResponseBytes(response));
 

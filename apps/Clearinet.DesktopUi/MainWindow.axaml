@@ -137,6 +137,7 @@
              selects the first; F3 goes to the next. See MainWindowViewModel.Find.cs. -->
         <MenuItem Header="_Find Sessions…" Command="{Binding ShowFindCommand}" HotKey="Ctrl+F" InputGesture="Ctrl+F" />
         <MenuItem Header="Find _Next" Command="{Binding FindNextCommand}" HotKey="F3" InputGesture="F3" />
+        <MenuItem Header="_QuickExec" Click="QuickExecMenuItem_Click" HotKey="Alt+Q" InputGesture="Alt+Q" />
         <Separator />
         <!-- Replay sends the selected request again, unchanged (Fiddler
              Classic's Reissue; the R key does the same in the session
@@ -781,6 +782,19 @@
            AvaloniaUseCompiledBindingsByDefault default. -->
       <!-- The request summary under the list, as in browsers' developer tools. -->
       <DockPanel Grid.Row="0">
+      <!-- QuickExec, as in Fiddler Classic: commands such as ?text, @host,
+           =404, >40k, select, allbut, cls, bpu, go (Alt+Q to get here, Up
+           and Down for earlier commands). See MainWindowViewModel.QuickExec.cs. -->
+      <TextBox x:Name="QuickExecBox"
+               DockPanel.Dock="Bottom"
+               Text="{Binding QuickExecText, Mode=TwoWay}"
+               PlaceholderText="QuickExec (Alt+Q): ?text  @host  =404  >40k  select image  cls  bpu text  go  help"
+               FontFamily="Cascadia Mono,Consolas,monospace"
+               Margin="0,4,0,0">
+        <TextBox.KeyBindings>
+          <KeyBinding Gesture="Enter" Command="{Binding RunQuickExecCommand}" />
+        </TextBox.KeyBindings>
+      </TextBox>
       <TextBlock DockPanel.Dock="Bottom"
                  Text="{Binding RequestSummary}"
                  Foreground="{DynamicResource AppMutedTextBrush}"
@@ -938,6 +952,32 @@
                          VerticalAlignment="Center"
                          TextWrapping="Wrap"
                          Foreground="{DynamicResource AppMutedTextBrush}" />
+            </StackPanel>
+            <!-- Where the body comes from: typed in the request text, hex
+                 (for bytes that aren't text, so they're sent exactly), or a
+                 file. Edit in Composer picks hex for a body that isn't text. -->
+            <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,6,0,0">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Body" VerticalAlignment="Center" />
+                <ComboBox SelectedIndex="{Binding ComposerBodySourceIndex, Mode=TwoWay}" MinWidth="200">
+                  <ComboBoxItem Content="In the request text" />
+                  <ComboBoxItem Content="Hex (exact bytes)" />
+                  <ComboBoxItem Content="From a file" />
+                </ComboBox>
+              </StackPanel>
+              <TextBox Text="{Binding ComposerHexBody, Mode=TwoWay}"
+                       IsVisible="{Binding IsComposerHexBody}"
+                       AcceptsReturn="True"
+                       TextWrapping="Wrap"
+                       Height="150"
+                       FontFamily="Cascadia Mono,Consolas,monospace"
+                       PlaceholderText="Hex bytes, such as 89 50 4E 47 0D 0A 1A 0A. Spaces and line breaks are ignored." />
+              <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding IsComposerFileBody}">
+                <TextBox Grid.Column="0"
+                         Text="{Binding ComposerBodyFile, Mode=TwoWay}"
+                         PlaceholderText="The file to send as the body, read when you click Execute" />
+                <Button Grid.Column="1" Content="Browse…" Click="BrowseComposerBodyFile_Click" Margin="8,0,0,0" />
+              </Grid>
             </StackPanel>
             <TextBox Text="{Binding ComposerText, Mode=TwoWay}"
                      AcceptsReturn="True"
