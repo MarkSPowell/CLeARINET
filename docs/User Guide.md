@@ -15,10 +15,14 @@ this computer:
 - **Settings carry over.** The first time VioLens runs, it copies
   CLeARINET's settings, AutoResponder rules and FiddlerScript preferences
   into its own folder, and the extensions in `Documents\CLeARINET\Extensions`
-  into `Documents\VioLens\Extensions`. The old folders are left as they
-  were, each with a note saying where things went; delete them once you're
+  into `Documents\VioLens\Extensions`. The originals are left where they
+  were, with a note listing what was copied; delete those files once you're
   happy. If CLeARINET was closed without putting your proxy settings back,
   VioLens puts them back.
+- **Only CLeARINET's own files.** Another app with a similar name keeps its
+  files in folders called `Clearinet`, which Windows and macOS treat as the
+  same folders. VioLens only copies, and the installer only removes, the
+  files CLeARINET itself created, so anything else there is left alone.
 - **A new root certificate.** VioLens asks you to trust its own
   `DO_NOT_TRUST_ViolensRoot` certificate, then removes CLeARINET's
   `DO_NOT_TRUST_ClearinetRoot` (on Windows, the system asks you to confirm
@@ -26,7 +30,7 @@ this computer:
   certificate need the new one: visit `http://violens/` through the proxy
   to download it, and remove the old one from the device.
 - **The installer replaces CLeARINET.** On Windows, installing VioLens
-  removes CLeARINET's program folder and shortcuts. On macOS, VioLens is a
+  removes the program files and shortcuts CLeARINET installed. On macOS, VioLens is a
   separate app: drag CLeARINET from Applications to the Bin once VioLens
   is working.
 
