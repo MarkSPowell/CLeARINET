@@ -7,7 +7,7 @@
         CanResize="False"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Icon="avares://Violens.DesktopUi/Assets/violens.webp"
+        Icon="avares://Violens.DesktopUi/Assets/violens-icon.png"
         Background="{DynamicResource AppBackgroundBrush}">
 
   <!-- No bindings, no DataContext, same reasoning as AboutWindow.axaml:

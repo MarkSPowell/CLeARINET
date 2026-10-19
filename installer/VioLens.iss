@@ -111,13 +111,10 @@ SignTool={#SignToolName}
 SignedUninstaller=yes
 #endif
 
-; The app ships no standalone .ico today (its window/taskbar icon is an
-; embedded avares:// resource, violens.webp, read at runtime -- not a
-; file on disk this script can point at, and not a format Inno Setup's
-; SetupIconFile accepts). Falls back to Inno Setup's own default wizard
-; icon and the published .exe's own icon resource for the Start Menu/
-; uninstaller entries below; a real VioLens-branded .ico is a follow-up,
-; not something this pass adds.
+; The setup program uses the app's own icon. The uninstall entry and the
+; shortcuts use the icon built into the installed .exe (the same file, set
+; as ApplicationIcon in Violens.DesktopUi.csproj).
+SetupIconFile=..\apps\Violens.DesktopUi\Assets\violens.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 ArchitecturesAllowed=x64compatible

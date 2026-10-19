@@ -9,14 +9,14 @@
         WindowStartupLocation="CenterScreen"
         ShowInTaskbar="False"
         Background="#0B0E1A"
-        Icon="avares://Violens.DesktopUi/Assets/violens.webp">
+        Icon="avares://Violens.DesktopUi/Assets/violens-icon.png">
 
-  <!-- violens.webp is the whole splash design in one image, logo,
-       wordmark, tagline and even its own "Initializing..." progress bar
-       are already baked into the artwork at its native 768x429, so this
-       window is just an undecorated frame for it while MainWindow spins
-       up behind the scenes. See App.axaml.cs for how long it stays up and
-       when MainWindow takes over. -->
+  <!-- violens.webp is the whole splash design in one image (emblem,
+       wordmark and tagline), drawn at twice this window's 768x429 so it
+       stays sharp on high-DPI screens. This window is just an undecorated
+       frame for it while MainWindow spins up behind the scenes. See
+       App.axaml.cs for how long it stays up and when MainWindow takes
+       over. -->
   <Image Source="avares://Violens.DesktopUi/Assets/violens.webp"
          Stretch="Uniform" />
 </Window>

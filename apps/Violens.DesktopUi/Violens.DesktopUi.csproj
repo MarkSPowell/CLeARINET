@@ -7,6 +7,10 @@
     <Nullable>enable</Nullable>
     <RootNamespace>Violens.DesktopUi</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- The .exe's own icon (Explorer, the taskbar before the window
+         opens, Start menu shortcuts). The windows set theirs from
+         Assets/violens-icon.png. -->
+    <ApplicationIcon>Assets\violens.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- Overridden on the command line by .github/workflows/release-windows.yml
          (-p:Version=... , stamped from the pushed git tag) for a real
@@ -45,7 +49,8 @@
     <ProjectReference Include="..\..\src\Violens.Compatibility\Violens.Compatibility.csproj" />
   </ItemGroup>
 
-  <!-- violens.webp (the splash-screen artwork and app icon) lives here,
+  <!-- The artwork (violens.webp for the splash screen, violens-icon.png
+       for window icons, violens.ico for the .exe) lives here,
        not the repo root, so it ships inside the app the same way any other
        avares:// resource does. -->
   <ItemGroup>

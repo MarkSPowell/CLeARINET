@@ -9,7 +9,7 @@
         MinHeight="260"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Icon="avares://Violens.DesktopUi/Assets/violens.webp"
+        Icon="avares://Violens.DesktopUi/Assets/violens-icon.png"
         Background="{DynamicResource AppBackgroundBrush}">
 
   <!-- File > Import/Export via Extension's format picker, shown only when

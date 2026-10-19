@@ -10,7 +10,7 @@
         Title="VioLens"
         Width="1100"
         Height="720"
-        Icon="avares://Violens.DesktopUi/Assets/violens.webp"
+        Icon="avares://Violens.DesktopUi/Assets/violens-icon.png"
         Background="{DynamicResource AppBackgroundBrush}">
 
   <!-- One DataTemplate per InspectorContent subtype (the contract's closed

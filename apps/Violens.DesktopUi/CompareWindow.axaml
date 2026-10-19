@@ -8,7 +8,7 @@
         MinWidth="600"
         MinHeight="300"
         WindowStartupLocation="CenterOwner"
-        Icon="avares://Violens.DesktopUi/Assets/violens.webp"
+        Icon="avares://Violens.DesktopUi/Assets/violens-icon.png"
         Background="{DynamicResource AppBackgroundBrush}">
 
   <!-- Compare Sessions (Edit > Compare Sessions, Ctrl+W): two sessions'

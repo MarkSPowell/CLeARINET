@@ -7,7 +7,7 @@
         MinWidth="480"
         MinHeight="360"
         WindowStartupLocation="CenterOwner"
-        Icon="avares://Violens.DesktopUi/Assets/violens.webp"
+        Icon="avares://Violens.DesktopUi/Assets/violens-icon.png"
         Background="{DynamicResource AppBackgroundBrush}">
 
   <!-- TextWizard (Tools > TextWizard, Ctrl+E): type or paste text, pick a
