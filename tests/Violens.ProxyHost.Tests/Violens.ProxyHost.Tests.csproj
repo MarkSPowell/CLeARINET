@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Violens.ProxyHost.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The host (an exe) runs in-process here, on its own thread, talking to
+         the client over a real named pipe. -->
+    <ProjectReference Include="..\..\src\Violens.ProxyHost\Violens.ProxyHost.csproj" />
+    <ProjectReference Include="..\..\src\Violens.ProxyHost.Client\Violens.ProxyHost.Client.csproj" />
+  </ItemGroup>
+
+</Project>

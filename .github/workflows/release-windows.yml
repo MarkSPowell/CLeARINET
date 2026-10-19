@@ -167,6 +167,23 @@ jobs:
         shell: pwsh
         run: ./installer/build-extensions.ps1 -OutputDir publish/extensions
 
+      # The proxy host, for apps on .NET Framework that use the engine
+      # through Violens.ProxyHost.Client (see docs/Embedding ProxyCore.md).
+      # Self-contained and single-file, so the app's users don't need .NET
+      # 10 installed. Not part of the installer: it's attached to the
+      # release as its own zip below, and signed with everything else here.
+      - name: Publish the proxy host
+        run: >-
+          dotnet publish src/Violens.ProxyHost/Violens.ProxyHost.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:InformationalVersion=${{ steps.version.outputs.version }}
+          --output publish/proxyhost
+
       - name: Sign in to Azure for code signing
         if: vars.ARTIFACT_SIGNING_ACCOUNT != ''
         uses: azure/login@v3
@@ -285,6 +302,24 @@ jobs:
           --configuration Release
           -p:Version=${{ steps.version.outputs.version }}
           --output packages
+
+      - name: Pack Violens.ProxyHost.Client
+        run: >-
+          dotnet pack src/Violens.ProxyHost.Client/Violens.ProxyHost.Client.csproj
+          --configuration Release
+          -p:Version=${{ steps.version.outputs.version }}
+          --output packages
+
+      - name: Zip the proxy host
+        shell: pwsh
+        run: Compress-Archive -Path publish/proxyhost/* -DestinationPath "packages/Violens.ProxyHost-${{ steps.version.outputs.version }}-win-x64.zip"
+
+      - name: Attach the proxy host to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packages/Violens.ProxyHost-*-win-x64.zip
+          fail_on_unmatched_files: true
 
       - name: Upload the package as a build artifact
         uses: actions/upload-artifact@v7

@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The .NET Framework (and any other .NET) side of the proxy host: an app
+    references this, and it runs Violens.ProxyHost -- a separate .NET 10
+    process hosting Violens.ProxyCore -- and talks to it over a named pipe.
+    See docs/Embedding ProxyCore.md, "Apps on .NET Framework".
+
+    netstandard2.0, so .NET Framework 4.6.2 and later can use it, with no
+    package dependencies. That rules out records, init-only setters and
+    newer APIs here: the language version is the latest, but the library
+    surface is .NET Standard 2.0's.
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Violens.ProxyHost.Client</RootNamespace>
+
+    <PackageId>Violens.ProxyHost.Client</PackageId>
+    <Authors>VioLens contributors</Authors>
+    <Description>Use VioLens's proxy engine from a .NET Framework app: runs the Violens.ProxyHost process and talks to it over a named pipe. Captured sessions, Fiddler-style request and response hooks, breakpoints, SAZ files.</Description>
+    <PackageTags>proxy;http;https;debugging;fiddler;saz;netframework</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://violens.dev</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/MarkSPowell/VioLens</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The host shares the protocol code in this assembly. -->
+    <InternalsVisibleTo Include="Violens.ProxyHost" />
+    <InternalsVisibleTo Include="Violens.ProxyHost.Tests" />
+  </ItemGroup>
+
+</Project>

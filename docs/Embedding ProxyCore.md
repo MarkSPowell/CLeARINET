@@ -50,8 +50,9 @@ recorded, permessage-deflate included). HTTP/2 isn't supported yet.
 
 - **.NET 10.** ProxyCore uses TLS and compression features that .NET
   Framework lacks. Windows Forms and WPF both run on .NET 10, so a desktop
-  app can move across; see [Apps on .NET Framework](#apps-on-net-framework)
-  if yours can't yet.
+  app can move across. An app that stays on .NET Framework uses the engine
+  through a separate host process instead: see
+  [Apps on .NET Framework](#apps-on-net-framework).
 - **Windows or macOS** for the parts that touch the operating system
   (trusting the root certificate, setting the system proxy). Capturing
   traffic sent straight to the proxy works on Linux too.
@@ -415,22 +416,93 @@ written to SAZ files yet.
 
 ## Apps on .NET Framework
 
-ProxyCore needs .NET 10, so a .NET Framework app can't load it directly. The
-options:
+ProxyCore needs .NET 10, so a .NET Framework app can't load it directly.
+Instead, it can run the engine in a process of its own: **Violens.ProxyHost**,
+a small .NET 10 program, hosts ProxyCore, and your app talks to it through
+**Violens.ProxyHost.Client**, a library for .NET Standard 2.0 (so .NET
+Framework 4.6.2 and later) with no other dependencies.
 
-1. **Move the app to .NET 10.** Windows Forms and WPF are fully supported.
-   What usually holds a Fiddler-style app back is the rest: JScript.NET (for
-   FiddlerScript) doesn't exist on .NET 10, runtime compilation through
-   CodeDOM isn't supported, and extensions built for .NET Framework may not
-   load. VioLens handles those by translating FiddlerScript to run on a
-   JavaScript engine (`Violens.Compatibility`) and running old extensions in
-   a separate .NET Framework process.
-2. **Run the engine in its own process.** A small .NET 10 program hosts
-   ProxyCore, and your app talks to it over a named pipe: sessions one way,
-   rules and breakpoint decisions the other. Your app can stay on .NET
-   Framework, at the cost of designing that protocol. VioLens's legacy
-   extension host does the same thing in the other direction, and is a
-   working example of the pattern.
+| Part | What it is | Where to get it |
+|---|---|---|
+| `Violens.ProxyHost.Client` | The library your app references | NuGet |
+| `Violens.ProxyHost.exe` | The host, self-contained (no .NET 10 install needed) | `Violens.ProxyHost-<version>-win-x64.zip` on each release; ship it in a folder beside your app |
+
+```csharp
+using Violens.ProxyHost.Client;
+
+// Starts the host and connects to it over a private named pipe.
+var proxy = await ProxyHostClient.LaunchAsync(
+    Path.Combine(Application.StartupPath, @"ProxyHost\Violens.ProxyHost.exe"));
+
+proxy.SessionCaptured += (s, e) => BeginInvoke(new Action(() => AddRow(e.Session)));
+proxy.Log += (s, e) => Debug.WriteLine(e);
+
+// Like OnBeforeRequest in CustomRules.js.
+proxy.OnBeforeRequest = ctx =>
+{
+    ctx.Request.SetHeader("X-Debugged-By", "Contoso");
+    if (ctx.Host == "example.com" && ctx.Request.Target.StartsWith("/hello"))
+    {
+        ctx.Flags["ui-comments"] = "Answered locally";
+        ctx.RespondWith(ProxyResponse.Text(200, "OK", "Hello from the proxy"));
+    }
+};
+
+var started = await proxy.StartAsync(
+    new AppIdentity("Contoso Web Debugger"),
+    new StartOptions { UseSystemProxy = true, HookRequests = true });
+
+// ... later
+await proxy.StopAsync();
+proxy.Dispose();   // the host puts the system proxy back and exits
+```
+
+What it covers:
+
+- **Capturing.** `StartAsync` takes the same identity settings as
+  `ProxyHostIdentity` (`AppIdentity`) and creates and trusts the root
+  certificate (the Windows prompt appears from the host process). It can
+  become the system proxy, going through the user's own proxy.
+- **Sessions.** `SessionCaptured` brings each finished request and response,
+  bodies included (turn them off with `StartOptions.IncludeBodies` to save
+  memory), with its full URL and flags.
+- **Hooks.** `OnBeforeRequest` and `OnBeforeResponse` see each request and
+  response, change them in place (`SetHeader`, `RemoveHeader`,
+  `SetBodyText`), set flags, or answer the request locally (`RespondWith`).
+  Turn them on with `StartOptions.HookRequests` and `HookResponses`.
+- **Breakpoints.** `SetBreakpointsAsync` sets the same rules as QuickExec's
+  `bpu`, `bpafter`, `bps` and `bpm`. `BreakpointHit` gives the paused
+  message's raw text; call `Resume(editedText)` or `Abort()` when the user is
+  done.
+- **Files.** `SaveSazAsync`, `LoadSazAsync` and `ClearSessionsAsync`.
+- **The certificate.** `StartResult.RootCertificate` for showing or
+  exporting it; `UninstallRootCertificateAsync` to remove it.
+
+Things to know:
+
+- **Hooks cross a process boundary.** Each one is a round trip over the pipe,
+  quick on one machine but not free: turn hooks on only while there are
+  rules to run. A hook that doesn't answer within `StartOptions.HookTimeout`
+  (10 seconds by default) is skipped, the message goes on unchanged, and the
+  host logs why.
+- **Threads.** Events arrive on the client's own reader thread, in order:
+  hand them to the UI thread with `BeginInvoke`, never `Invoke`. Hooks run on
+  thread-pool threads, several at once; don't make them wait for the UI.
+- **Lifetime.** The host stops capturing, puts the system proxy back and
+  exits when you dispose the client, when the pipe breaks, or when your
+  process ends, even if it crashes. If the host itself crashes while it's
+  the system proxy, the next `StartAsync` restores the user's settings.
+- **Only your app can talk to it.** `LaunchAsync` gives the host a random
+  pipe name and a one-time token, and refuses a pipe that answers without
+  that token.
+
+Moving the app itself to .NET 10 is the other route. Windows Forms and WPF
+are fully supported there; what usually holds a Fiddler-style app back is
+the rest: JScript.NET (for FiddlerScript) doesn't exist on .NET 10, runtime
+compilation through CodeDOM isn't supported, and extensions built for .NET
+Framework may not load. VioLens handles those by translating FiddlerScript to
+run on a JavaScript engine (`Violens.Compatibility`) and running old
+extensions in a separate .NET Framework process.
 
 ## Versions and compatibility
 

@@ -42,11 +42,14 @@ namespace Violens.ProxyCore.Sessions;
 /// </summary>
 public static class SazReader
 {
-    public static Task<SazImportResult> ImportAsync(
+    public static async Task<SazImportResult> ImportAsync(
         string path, SessionStore sessionStore, CancellationToken cancellationToken = default)
     {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
-        return ImportAsync(stream, sessionStore, cancellationToken);
+        // Awaited, so the file stays open until the import has finished
+        // reading it (returning the task straight away closed it as soon
+        // as the import first had to wait for the disk).
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
+        return await ImportAsync(stream, sessionStore, cancellationToken);
     }
 
     public static async Task<SazImportResult> ImportAsync(

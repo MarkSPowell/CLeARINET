@@ -205,6 +205,11 @@ ever leaves the device on its own.
   registration on both Windows and macOS, and the preferences store. Its
   public types are what other apps build on, so anything else is
   `internal` (VioLens's own assemblies are listed in its `AssemblyInfo.cs`).
+- `src/Violens.ProxyHost` and `src/Violens.ProxyHost.Client` — the engine
+  for apps on .NET Framework: a small .NET 10 program that hosts
+  ProxyCore, and a .NET Standard 2.0 library an app uses to run it and
+  talk to it over a named pipe (sessions, hooks, breakpoints, SAZ). See
+  the Embedding ProxyCore guide's "Apps on .NET Framework".
 - `src/Violens.AppCore` — VioLens's own app logic that isn't part of the
   engine: Compare, TextWizard's conversions, QuickExec, the session-list
   column layout, and the carry-over from the app's former name.

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A small .NET 10 program that runs Violens.ProxyCore for an app that
+    can't load it directly (a .NET Framework app), and talks to that app
+    over a named pipe. The app side is Violens.ProxyHost.Client. Started by
+    ProxyHostClient.LaunchAsync, never by a person: it exits when the pipe
+    closes or the app that started it ends.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Violens.ProxyHost</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Violens.ProxyHost.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Violens.ProxyCore\Violens.ProxyCore.csproj" />
+    <ProjectReference Include="..\Violens.ProxyHost.Client\Violens.ProxyHost.Client.csproj" />
+  </ItemGroup>
+
+</Project>
