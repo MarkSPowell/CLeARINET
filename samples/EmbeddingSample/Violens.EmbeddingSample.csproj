@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The code from docs/Embedding ProxyCore.md, as a console app that builds
+    with the rest of the solution, so the guide can't drift from the real
+    API. It references ProxyCore the way an outside app would (only its
+    public types: ProxyCore's InternalsVisibleTo list doesn't include it).
+    An outside app would use the NuGet package instead:
+      <PackageReference Include="Violens.ProxyCore" Version="..." />
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Contoso.WebDebugger</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Violens.ProxyCore\Violens.ProxyCore.csproj" />
+  </ItemGroup>
+
+</Project>

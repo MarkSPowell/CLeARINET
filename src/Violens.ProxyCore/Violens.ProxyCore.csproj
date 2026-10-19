@@ -7,6 +7,34 @@
     <RootNamespace>Violens.ProxyCore</RootNamespace>
   </PropertyGroup>
 
+  <!--
+    Published to NuGet as Violens.ProxyCore, built from the same source and
+    with the same version as each VioLens release (the release workflow
+    passes -p:Version). See docs/Embedding ProxyCore.md.
+  -->
+  <PropertyGroup>
+    <PackageId>Violens.ProxyCore</PackageId>
+    <Authors>VioLens contributors</Authors>
+    <Description>The HTTP(S) debugging proxy engine behind VioLens: capture, decrypt, inspect, change and replay web traffic from your own .NET app. Root certificate handling, system proxy, upstream proxies and PAC, breakpoints, AutoResponder, per-request hooks, SAZ and HAR.</Description>
+    <PackageTags>proxy;http;https;debugging;fiddler;saz;har;mitm</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://violens.dev</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/MarkSPowell/VioLens</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Missing or broken XML comments are reported, but don't fail the build. -->
+    <NoWarn>$(NoWarn);CS1570;CS1572;CS1573;CS1574;CS1580;CS1584;CS1587;CS1591;CS1658;CS1711;CS1712;CS1723;CS1734</NoWarn>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
   <!-- Violens.ProxyCore.SystemProxy.WinInetSystemProxy uses the Windows
        registry APIs (Microsoft.Win32.Registry). No PackageReference needed
        for that as of net10.0: they're part of the base shared framework

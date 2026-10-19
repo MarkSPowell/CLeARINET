@@ -39,7 +39,7 @@ namespace Violens.ProxyCore.Sessions;
 /// </list>
 /// An empty or whitespace-only query matches every session.
 /// </summary>
-public sealed class SessionQuery
+internal sealed class SessionQuery
 {
     /// <summary>The parsed form of an empty query -- matches everything, and is what <see cref="Parse"/> returns for one.</summary>
     public static readonly SessionQuery MatchAll = new([]);

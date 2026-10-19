@@ -1,6 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
-using Violens.ProxyCore.Text;
+using Violens.AppCore.Text;
 
 namespace Violens.DesktopUi;
 

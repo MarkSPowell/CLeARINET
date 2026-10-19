@@ -12,7 +12,7 @@
 
   <!-- TextWizard (Tools > TextWizard, Ctrl+E): type or paste text, pick a
        conversion, and the result updates as you type. The conversions
-       themselves are TextTransforms in ProxyCore. -->
+       themselves are TextTransforms in Violens.AppCore. -->
   <Grid Margin="12" RowDefinitions="Auto,Auto,*,Auto,Auto,*">
     <WrapPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
       <TextBlock Text="Conversion" VerticalAlignment="Center" Margin="0,0,8,0" />

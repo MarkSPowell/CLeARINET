@@ -3,7 +3,7 @@ using System.Text;
 using Violens.ProxyCore.Http;
 using Violens.ProxyCore.Sessions;
 
-namespace Violens.ProxyCore.QuickExec;
+namespace Violens.AppCore.QuickExec;
 
 /// <summary>What a QuickExec command does.</summary>
 public enum QuickExecKind

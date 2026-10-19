@@ -6,9 +6,9 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Violens.ProxyCore.Compare;
+using Violens.AppCore.Compare;
 
-namespace Violens.ProxyCore.Text;
+namespace Violens.AppCore.Text;
 
 /// <summary>
 /// What a transform produced. <see cref="Note"/> explains something about

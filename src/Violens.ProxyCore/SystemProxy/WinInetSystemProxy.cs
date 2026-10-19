@@ -31,16 +31,16 @@ namespace Violens.ProxyCore.SystemProxy;
 /// after itself, so it restores from it before this run touches the
 /// registry at all.
 /// </summary>
-public static class WinInetSystemProxy
+internal static class WinInetSystemProxy
 {
     private const string InternetSettingsKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
     private const int InternetOptionSettingsChanged = 39;
     private const int InternetOptionRefresh = 37;
 
-    private static string BackupFilePath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "VioLens",
-        "system-proxy-backup.json");
+    // In the host app's data folder (see ProxyHostIdentity), read each time
+    // so ProxyEngine.Configure can come before or after this class is first used.
+    private static string BackupFilePath =>
+        Path.Combine(ProxyEngine.Identity.ResolveDataFolder(), "system-proxy-backup.json");
 
     /// <summary>
     /// Points the system proxy at <c>127.0.0.1:port</c>. A no-op on
@@ -188,8 +188,8 @@ public static class WinInetSystemProxy
                     {
                         // The manual settings above are restored either way;
                         // say what couldn't be, rather than fail Stop.
-                        Console.WriteLine(
-                            $"[proxy] Couldn't turn automatic proxy settings back on ({ex.Message}); " +
+                        ProxyEngine.Log("system-proxy",
+                            $"Couldn't turn automatic proxy settings back on ({ex.Message}); " +
                             "check Settings > Network & internet > Proxy.");
                     }
                 }

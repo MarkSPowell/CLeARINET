@@ -85,7 +85,7 @@ repo's convention solidifies, is future work, not done here.
   `ToRequest()`/`ToResponse()` project the working state back into fresh
   immutable records — now actually called, by `FiddlerScriptRunner` below,
   once per handler invocation.
-- **`Violens.ProxyCore.Scripting.IFiddlerScriptRunner`** (in
+- **`Violens.ProxyCore.Scripting.IScriptRunner`** (in
   `Violens.ProxyCore`, not `Violens.Compatibility` — see its own
   remarks for why) and **`FiddlerScriptRunner`** (the implementation, here
   in `Violens.Compatibility.FiddlerScript`) — Phase A2, now built; see
@@ -140,7 +140,7 @@ that happens on your machine/CI, the same as every other feature so far.
 (which lives in `ProxyCore`) can't reference `FiddlerScriptHost`/`Exchange`
 (which live in `Compatibility`) directly without a circular project
 reference. Solved with interface inversion, the same pattern this codebase
-already leans on elsewhere: `Violens.ProxyCore.Scripting.IFiddlerScriptRunner`
+already leans on elsewhere: `Violens.ProxyCore.Scripting.IScriptRunner`
 is a narrow interface defined *in* `ProxyCore` (no Jint dependency at all),
 implemented by `Violens.Compatibility.FiddlerScript.FiddlerScriptRunner`.
 A composition root — today, `MainWindowViewModel`, the same place
@@ -202,7 +202,7 @@ logged, and the connection falls back to the unedited request/response
 rather than taking the connection down. **Not thread-safe** (neither is the
 underlying `FiddlerScriptHost`/Jint `Engine`): `InterceptingProxyListener`
 pumps one connection per `Task` with no serialization of its own around a
-shared `IFiddlerScriptRunner`, so a reload racing a concurrent
+shared `IScriptRunner`, so a reload racing a concurrent
 `RunOnBeforeRequest`/`RunOnBeforeResponse` call on another connection is a
 real, accepted gap in this pass, not silently ignored — in practice this
 mirrors how a live AutoResponder rule edit already races the very next

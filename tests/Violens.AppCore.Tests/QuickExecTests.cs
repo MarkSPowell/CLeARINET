@@ -1,11 +1,11 @@
 using System.Text;
 using Violens.ProxyCore.Http;
-using Violens.ProxyCore.QuickExec;
+using Violens.AppCore.QuickExec;
 using Violens.ProxyCore.Sessions;
-using Violens.ProxyCore.Text;
+using Violens.AppCore.Text;
 using Xunit;
 
-namespace Violens.ProxyCore.Tests;
+namespace Violens.AppCore.Tests;
 
 /// <summary>QuickExec commands (<see cref="QuickExecParser"/>), and the Composer's exact-bytes body helpers.</summary>
 public class QuickExecTests

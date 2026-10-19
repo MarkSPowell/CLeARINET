@@ -14,7 +14,7 @@ namespace Violens.ProxyCore.Proxy;
 /// extensions see the same thing either way. <see cref="ForUpstream"/> turns
 /// that back into what goes on the wire.
 /// </summary>
-public static class PlainHttpRequest
+internal static class PlainHttpRequest
 {
     public const int DefaultPort = 80;
 

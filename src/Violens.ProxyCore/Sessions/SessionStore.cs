@@ -169,7 +169,7 @@ public sealed class SessionStore
     /// <see cref="Add"/> will receive. Exists for FiddlerScript/extension
     /// code that wants to read <c>oSession.id</c> from inside
     /// <c>OnBeforeRequest</c>/<c>OnBeforeResponse</c> -- see
-    /// <c>Violens.ProxyCore.Scripting.IFiddlerScriptRunner</c> -- before
+    /// <c>Violens.ProxyCore.Scripting.IScriptRunner</c> -- before
     /// the session that exchange belongs to has actually been recorded here;
     /// <see cref="Add"/> only assigns a real id once both the request and
     /// the response are known, which for a request-side hook is still in the

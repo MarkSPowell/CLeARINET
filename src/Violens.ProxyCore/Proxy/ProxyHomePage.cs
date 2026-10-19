@@ -5,19 +5,20 @@ using Violens.ProxyCore.Http;
 namespace Violens.ProxyCore.Proxy;
 
 /// <summary>
-/// The page VioLens's listener serves about itself -- the equivalent of
+/// The page the listener serves about itself -- the equivalent of
 /// Fiddler Classic's "echo service" page -- so a phone or another computer
 /// using VioLens as its proxy can download and install the root
 /// certificate: browse to <c>http://violens/</c> (with the proxy set) or
-/// <c>http://&lt;this computer's address&gt;:&lt;port&gt;/</c>.
+/// <c>http://&lt;this computer's address&gt;:&lt;port&gt;/</c>. The host
+/// name, file name and wording come from <see cref="ProxyEngine.Identity"/>.
 /// </summary>
-public static class ProxyHomePage
+internal static class ProxyHomePage
 {
-    /// <summary>The host name that always means "VioLens itself" when requested through the proxy.</summary>
-    public const string HostName = "violens";
+    /// <summary>The host name that always means "the proxy itself" when requested through it.</summary>
+    public static string HostName => ProxyEngine.Identity.ProxyHostName;
 
     /// <summary>Where the root certificate is served (DER-encoded).</summary>
-    public const string CertificatePath = "/ViolensRoot.cer";
+    public static string CertificatePath => "/" + ProxyEngine.Identity.RootCertificateFileName;
 
     /// <summary>
     /// True when a plain-HTTP request's target is addressed to VioLens
@@ -47,9 +48,10 @@ public static class ProxyHomePage
                (uri.Port == ownPort && LocalNetwork.IsThisMachine(uri.Host));
     }
 
-    /// <summary>The response for a request to VioLens itself: the certificate, or the page that links to it.</summary>
+    /// <summary>The response for a request to the proxy itself: the certificate, or the page that links to it.</summary>
     public static CapturedResponse Build(string target, byte[] rootCertificateDer)
     {
+        var identity = ProxyEngine.Identity;
         var path = PathOf(target);
         if (string.Equals(path, CertificatePath, StringComparison.OrdinalIgnoreCase))
         {
@@ -59,7 +61,7 @@ public static class ProxyHomePage
                 "OK",
                 [
                     ("Content-Type", "application/x-x509-ca-cert"),
-                    ("Content-Disposition", "attachment; filename=\"ViolensRoot.cer\""),
+                    ("Content-Disposition", $"attachment; filename=\"{identity.RootCertificateFileName}\""),
                     ("Content-Length", rootCertificateDer.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)),
                     ("Cache-Control", "no-store"),
                     ("Connection", "close"),
@@ -69,10 +71,10 @@ public static class ProxyHomePage
 
         if (path is not ("/" or ""))
         {
-            return Text(404, "Not Found", $"VioLens has nothing at {path}. The root certificate is at {CertificatePath}.");
+            return Text(404, "Not Found", $"{identity.ProductName} has nothing at {path}. The root certificate is at {CertificatePath}.");
         }
 
-        var html = Encoding.UTF8.GetBytes(HomePageHtml);
+        var html = Encoding.UTF8.GetBytes(HomePageHtml(WebUtility.HtmlEncode(identity.ProductName), CertificatePath));
         return new CapturedResponse(
             "HTTP/1.1",
             200,
@@ -87,15 +89,15 @@ public static class ProxyHomePage
     }
 
     /// <summary>
-    /// The answer to a request VioLens can't forward: one sent without a
+    /// The answer to a request the proxy can't forward: one sent without a
     /// CONNECT tunnel whose URL isn't http:// (an ftp:// URL, say).
     /// </summary>
     public static CapturedResponse NotForwarded(string method, string target) =>
         Text(
             501,
             "Not Implemented",
-            $"VioLens forwards http:// and https:// requests only, so it didn't forward this one ({method} {target}). " +
-            $"To install VioLens's certificate on this device, browse to http://{HostName}/ with the proxy set.");
+            $"{ProxyEngine.Identity.ProductName} forwards http:// and https:// requests only, so it didn't forward this one ({method} {target}). " +
+            $"To install its certificate on this device, browse to http://{HostName}/ with the proxy set.");
 
     private static CapturedResponse Text(int status, string reason, string message)
     {
@@ -124,14 +126,14 @@ public static class ProxyHomePage
         return query < 0 ? path : path[..query];
     }
 
-    private static readonly string HomePageHtml =
-        """
+    private static string HomePageHtml(string name, string certificatePath) =>
+        $$"""
         <!doctype html>
         <html lang="en">
         <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>VioLens</title>
+        <title>{{name}}</title>
         <style>
           body { font-family: system-ui, sans-serif; max-width: 40em; margin: 2em auto; padding: 0 1em; line-height: 1.5; }
           a.button { display: inline-block; padding: .6em 1.2em; background: #2f6fdf; color: #fff; border-radius: .4em; text-decoration: none; }
@@ -139,15 +141,15 @@ public static class ProxyHomePage
         </style>
         </head>
         <body>
-        <h1>VioLens</h1>
-        <p>This device is using VioLens as its proxy. To let VioLens show this device's HTTPS traffic,
-        install and trust VioLens's root certificate.</p>
-        <p><a class="button" href="/ViolensRoot.cer">Download the VioLens root certificate</a></p>
+        <h1>{{name}}</h1>
+        <p>This device is using {{name}} as its proxy. To let {{name}} show this device's HTTPS traffic,
+        install and trust {{name}}'s root certificate.</p>
+        <p><a class="button" href="{{certificatePath}}">Download the {{name}} root certificate</a></p>
         <h2>iPhone and iPad</h2>
         <ol>
           <li>Open this page in Safari and tap the link above, then <b>Allow</b>.</li>
-          <li>Settings &gt; General &gt; VPN &amp; Device Management: tap the VioLens profile and <b>Install</b>.</li>
-          <li>Settings &gt; General &gt; About &gt; Certificate Trust Settings: turn on full trust for the VioLens certificate.</li>
+          <li>Settings &gt; General &gt; VPN &amp; Device Management: tap the {{name}} profile and <b>Install</b>.</li>
+          <li>Settings &gt; General &gt; About &gt; Certificate Trust Settings: turn on full trust for the {{name}} certificate.</li>
         </ol>
         <h2>Android</h2>
         <ol>
@@ -156,7 +158,7 @@ public static class ProxyHomePage
           <li>Many apps only trust certificates that came with the system, so their traffic may still fail. Browsers generally work.</li>
         </ol>
         <p class="warn">Anyone with this certificate's private key could read this device's HTTPS traffic. The key stays on the
-        computer running VioLens. Remove the certificate from this device when you've finished.</p>
+        computer running {{name}}. Remove the certificate from this device when you've finished.</p>
         </body>
         </html>
         """;

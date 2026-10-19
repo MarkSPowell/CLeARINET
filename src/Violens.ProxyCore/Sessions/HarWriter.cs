@@ -51,8 +51,8 @@ public static class HarWriter
                 ["version"] = "1.2",
                 ["creator"] = new JsonObject
                 {
-                    ["name"] = "VioLens",
-                    ["version"] = ViolensVersion.Current.ToString(),
+                    ["name"] = ProxyEngine.Identity.ProductName,
+                    ["version"] = ProxyEngine.Identity.ProductVersion,
                 },
                 ["entries"] = entries,
             },

@@ -46,7 +46,7 @@ public sealed record WebSocketCompression(bool ClientNoContextTakeover, bool Ser
 /// It never throws and never holds up the traffic: if the bytes stop
 /// making sense as frames, it reports that on the log and ignores the rest.
 /// </summary>
-public sealed class WebSocketFrameReader : IDisposable
+internal sealed class WebSocketFrameReader : IDisposable
 {
     /// <summary>The most of one message's content kept; the rest is counted but not kept.</summary>
     public const int MaxStoredMessageBytes = 1024 * 1024;

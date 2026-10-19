@@ -1,7 +1,7 @@
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Violens.ProxyCore.Http;
-using Violens.ProxyCore.Text;
+using Violens.AppCore.Text;
 using Violens.ProxyCore.Proxy;
 using Violens.ProxyCore.Sessions;
 

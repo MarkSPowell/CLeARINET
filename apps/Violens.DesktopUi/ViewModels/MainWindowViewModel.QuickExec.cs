@@ -1,5 +1,5 @@
 using Violens.DesktopUi.Models;
-using Violens.ProxyCore.QuickExec;
+using Violens.AppCore.QuickExec;
 
 namespace Violens.DesktopUi.ViewModels;
 

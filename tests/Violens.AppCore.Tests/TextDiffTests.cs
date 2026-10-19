@@ -1,7 +1,7 @@
-using Violens.ProxyCore.Compare;
+using Violens.AppCore.Compare;
 using Xunit;
 
-namespace Violens.ProxyCore.Tests;
+namespace Violens.AppCore.Tests;
 
 /// <summary>The line comparison behind Compare Sessions (<see cref="TextDiff"/>).</summary>
 public class TextDiffTests

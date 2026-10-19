@@ -1,4 +1,4 @@
-namespace Violens.ProxyCore.Compare;
+namespace Violens.AppCore.Compare;
 
 /// <summary>How a row of a side-by-side comparison differs.</summary>
 public enum DiffKind

@@ -30,7 +30,7 @@ namespace Violens.ProxyCore.Http;
 /// the body bytes that follow are about to be relayed with that exact same
 /// original framing, not rebuilt.
 /// </summary>
-public static class HttpMessageWriter
+internal static class HttpMessageWriter
 {
     public static void WriteRequest(Stream destination, CapturedRequest request) =>
         destination.Write(BuildRequestBytes(request));

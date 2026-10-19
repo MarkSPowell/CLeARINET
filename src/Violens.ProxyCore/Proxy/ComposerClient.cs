@@ -54,7 +54,7 @@ public static class ComposerClient
         if (!string.Equals(parsed.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(parsed.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
         {
-            error = $"VioLens only sends HTTP and HTTPS requests, and this one is {parsed.Scheme}://.";
+            error = $"{ProxyEngine.Identity.ProductName} only sends HTTP and HTTPS requests, and this one is {parsed.Scheme}://.";
             return false;
         }
 
@@ -121,7 +121,7 @@ public static class ComposerClient
         }
 
         using var root = X509CertificateLoader.LoadCertificate(rootCertificateDer);
-        await UpstreamProxy.EstablishTunnelAsync(stream, url.Host, url.Port, "VioLens's own listener", cancellationToken);
+        await UpstreamProxy.EstablishTunnelAsync(stream, url.Host, url.Port, "the proxy's own listener", cancellationToken);
 
         using var tls = new SslStream(stream, leaveInnerStreamOpen: false);
         await tls.AuthenticateAsClientAsync(

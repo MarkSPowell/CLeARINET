@@ -2,9 +2,9 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;
 using Avalonia.Threading;
-using Violens.ProxyCore.Compare;
+using Violens.AppCore.Compare;
 using Violens.ProxyCore.Sessions;
-using Violens.ProxyCore.Text;
+using Violens.AppCore.Text;
 using Violens.ProxyCore.WebSockets;
 
 namespace Violens.DesktopUi.ViewModels;

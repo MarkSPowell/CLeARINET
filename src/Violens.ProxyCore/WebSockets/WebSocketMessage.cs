@@ -184,7 +184,7 @@ public sealed class WebSocketLog
         {
             if (_storedBytes + payload.Length > MaxStoredBytes && payload.Length > 0)
             {
-                note ??= "Not kept: this connection's messages reached the size VioLens keeps.";
+                note ??= "Not kept: this connection's messages reached the size kept for each connection.";
                 payload = [];
                 truncated = true;
             }

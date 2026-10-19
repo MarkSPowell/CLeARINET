@@ -17,7 +17,7 @@ namespace Violens.ProxyCore.Certificates;
 /// <c>X509Store(StoreName.Root, ...)</c> calls already were -- see that
 /// class's own remarks for the per-platform dispatch.
 /// </summary>
-public static class MacOSCertificateTrust
+internal static class MacOSCertificateTrust
 {
     /// <summary>
     /// Exports <paramref name="rootCertificate"/> to a temporary

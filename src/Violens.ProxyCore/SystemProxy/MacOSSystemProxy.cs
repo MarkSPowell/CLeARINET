@@ -23,12 +23,12 @@ namespace Violens.ProxyCore.SystemProxy;
 /// <see cref="SystemProxyController"/> for the facade that makes that a
 /// single, platform-agnostic call site.
 /// </summary>
-public static class MacOSSystemProxy
+internal static class MacOSSystemProxy
 {
-    private static string BackupFilePath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "VioLens",
-        "system-proxy-backup-macos.json");
+    // In the host app's data folder (see ProxyHostIdentity), read each time
+    // so ProxyEngine.Configure can come before or after this class is first used.
+    private static string BackupFilePath =>
+        Path.Combine(ProxyEngine.Identity.ResolveDataFolder(), "system-proxy-backup-macos.json");
 
     /// <summary>
     /// Points every enabled network service's HTTP and HTTPS proxy at
@@ -423,7 +423,7 @@ public static class MacOSSystemProxy
         }
         catch (SystemProxyCommandException ex)
         {
-            Console.WriteLine($"[proxy] {ex.Message}");
+            ProxyEngine.Log("system-proxy", ex.Message);
             return null;
         }
     }

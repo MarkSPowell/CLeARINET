@@ -14,7 +14,7 @@ namespace Violens.ProxyCore.Proxy.AutoConfig;
 /// machine's domain and each parent domain (stopping before the top two
 /// labels, so it never asks a public domain such as <c>wpad.co.uk</c>).
 /// </summary>
-public static class WpadDiscovery
+internal static class WpadDiscovery
 {
     /// <summary>The script's URL, or null when the network doesn't offer one.</summary>
     public static async Task<string?> FindScriptUrlAsync(CancellationToken cancellationToken)

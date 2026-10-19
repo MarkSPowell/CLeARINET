@@ -5,7 +5,7 @@ using System.Net.Sockets;
 namespace Violens.ProxyCore.Proxy;
 
 /// <summary>This machine's own network addresses, for telling another device where to find VioLens.</summary>
-public static class LocalNetwork
+internal static class LocalNetwork
 {
     /// <summary>
     /// The IPv4 addresses of network interfaces that are up, excluding

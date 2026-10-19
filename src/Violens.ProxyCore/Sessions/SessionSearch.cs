@@ -5,7 +5,7 @@ using Violens.ProxyCore.Http;
 namespace Violens.ProxyCore.Sessions;
 
 /// <summary>Which side of each exchange Find looks at.</summary>
-public enum SessionSearchTarget
+internal enum SessionSearchTarget
 {
     RequestsAndResponses,
     Requests,
@@ -13,7 +13,7 @@ public enum SessionSearchTarget
 }
 
 /// <summary>Which parts of a message Find looks at.</summary>
-public enum SessionSearchParts
+internal enum SessionSearchParts
 {
     HeadersAndBodies,
     Headers,
@@ -21,7 +21,7 @@ public enum SessionSearchParts
 }
 
 /// <summary>What to find, as set in the Find bar.</summary>
-public sealed record SessionSearchOptions(
+internal sealed record SessionSearchOptions(
     string Text,
     SessionSearchTarget Target = SessionSearchTarget.RequestsAndResponses,
     SessionSearchParts Parts = SessionSearchParts.HeadersAndBodies,
@@ -38,7 +38,7 @@ public sealed record SessionSearchOptions(
 /// "Headers" includes the request line (method and full URL) or the
 /// status line.
 /// </summary>
-public sealed class SessionSearch
+internal sealed class SessionSearch
 {
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
 

@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace Violens.ProxyCore.Preferences;
+namespace Violens.AppCore.Preferences;
 
 /// <summary>One remembered column: its key and, if it was given one, its width.</summary>
 public sealed record ColumnLayoutEntry(string Key, double? Width);

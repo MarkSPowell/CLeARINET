@@ -1,7 +1,8 @@
+using Violens.AppCore.Migration;
 using Violens.ProxyCore.Preferences;
 using Xunit;
 
-namespace Violens.ProxyCore.Tests;
+namespace Violens.AppCore.Tests;
 
 /// <summary>
 /// The first-run carry-over from CLeARINET (the app's former name), against
@@ -163,6 +164,7 @@ public sealed class FormerNameMigrationTests : IDisposable
     [Fact]
     public void CopiesExtensionsFromDocuments()
     {
+        WriteOld("autoresponder-rules.json", "[]");
         var oldExtensions = Path.Combine(Documents, "CLeARINET", "Extensions");
         Directory.CreateDirectory(Path.Combine(oldExtensions, "licenses"));
         File.WriteAllText(Path.Combine(oldExtensions, "Mine.dll"), "dll");
@@ -171,7 +173,7 @@ public sealed class FormerNameMigrationTests : IDisposable
 
         var result = FormerNameMigration.Run(AppData, Documents);
 
-        Assert.Equal("Extensions", Assert.Single(result.CopiedDocumentsFolders));
+        Assert.Equal("Extensions" + Path.DirectorySeparatorChar, Assert.Single(result.CopiedDocumentsFolders));
         Assert.True(File.Exists(Path.Combine(Documents, "VioLens", "Extensions", "Mine.dll")));
         Assert.True(File.Exists(Path.Combine(Documents, "VioLens", "Extensions", "licenses", "Mine-LICENSE.txt")));
         Assert.False(File.Exists(Path.Combine(Documents, "VioLens", "capture.saz")));
@@ -182,6 +184,7 @@ public sealed class FormerNameMigrationTests : IDisposable
     public void LeavesAnUnreadablePreferencesFileAsItIs()
     {
         WriteOld("preferences.json", "{ not json");
+        WriteOld("autoresponder-rules.json", "[]");
 
         var log = new List<string>();
         var result = FormerNameMigration.Run(AppData, Documents, log.Add);
@@ -213,5 +216,73 @@ public sealed class FormerNameMigrationTests : IDisposable
 
         using var store = new PreferenceStore(Path.Combine(NewAppData, "preferences.json"));
         Assert.Equal("1", store["violens.proxy.port"]);
+    }
+
+    /// <summary>
+    /// Another project with a similar name keeps folders called Clearinet,
+    /// which Windows and macOS treat as the same as CLeARINET. Its files are
+    /// never copied, noted or counted as a former install.
+    /// </summary>
+    [Fact]
+    public void AnotherAppsFolderOfTheSameNameIsLeftAlone()
+    {
+        WriteOld("preferences.json", """{ "settings": { "clearinet.config.browsers": "msedge.exe" } }""");
+        WriteOld("CustomRules.js", "// someone else's");
+        var otherExtensions = Path.Combine(Documents, "CLeARINET", "Extensions");
+        Directory.CreateDirectory(otherExtensions);
+        File.WriteAllText(Path.Combine(otherExtensions, "Theirs.dll"), "dll");
+
+        var result = FormerNameMigration.Run(AppData, Documents);
+
+        Assert.False(result.FoundFormerInstall);
+        Assert.False(result.DidAnything);
+        Assert.False(Directory.Exists(NewAppData));
+        Assert.False(Directory.Exists(Path.Combine(Documents, "VioLens")));
+        Assert.False(File.Exists(Path.Combine(OldAppData, FormerNameMigration.NoteFileName)));
+        Assert.False(File.Exists(Path.Combine(Documents, "CLeARINET", FormerNameMigration.NoteFileName)));
+    }
+
+    [Fact]
+    public void CopiesOnlyCLeARINETsOwnFiles()
+    {
+        WriteOld("preferences.json", OldPreferences);
+        WriteOld("CustomRules.js", "// another app's file in the same folder");
+
+        var result = FormerNameMigration.Run(AppData, Documents);
+
+        Assert.True(result.CopiedAppData);
+        Assert.True(File.Exists(Path.Combine(NewAppData, "preferences.json")));
+        Assert.False(File.Exists(Path.Combine(NewAppData, "CustomRules.js")));
+
+        var note = File.ReadAllText(Path.Combine(OldAppData, FormerNameMigration.NoteFileName));
+        Assert.Contains("preferences.json", note);
+        Assert.DoesNotContain("CustomRules.js", note);
+    }
+
+    [Fact]
+    public void AFormerInstallIsStillRecognisedOnLaterRuns()
+    {
+        WriteOld("preferences.json", OldPreferences);
+        Assert.True(FormerNameMigration.Run(AppData, Documents).FoundFormerInstall);
+
+        var second = FormerNameMigration.Run(AppData, Documents);
+
+        Assert.True(second.FoundFormerInstall);
+        Assert.False(second.DidAnything);
+    }
+
+    [Theory]
+    [InlineData("autoresponder-rules.json", "[]", true)]
+    [InlineData("fiddlerscript-prefs.json", "{}", true)]
+    [InlineData("system-proxy-backup.json", "{}", true)]
+    [InlineData("preferences.json", """{ "formatVersion": 1, "preferences": { "clearinet.proxy.port": "8888" } }""", true)]
+    [InlineData("preferences.json", """{ "formatVersion": 1, "preferences": { "other.setting": "1" } }""", false)]
+    [InlineData("preferences.json", "not json", false)]
+    [InlineData("readme.txt", "hello", false)]
+    public void RecognisesCLeARINETsFiles(string name, string content, bool expected)
+    {
+        WriteOld(name, content);
+
+        Assert.Equal(expected, FormerNameMigration.LooksLikeFormerInstall(OldAppData));
     }
 }

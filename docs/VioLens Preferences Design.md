@@ -175,8 +175,10 @@ A hand-edited file with a typo must not stop the app from starting.
 
 ### Location
 
-One directory for per-user app data, resolved once through
-`ViolensPaths.AppDataFolder`:
+One directory for per-user app data: the host app's data folder,
+`ProxyEngine.Identity.ResolveDataFolder()` (see the Embedding ProxyCore
+guide). For VioLens that's its product name under the local app-data
+folder:
 
 ```csharp
 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VioLens")
@@ -187,12 +189,11 @@ Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicatio
 | Windows | `%LOCALAPPDATA%\VioLens\` (typically `C:\Users\<you>\AppData\Local\VioLens\`) |
 | macOS | `~/Library/Application Support/VioLens/` |
 
-This is the same expression `WinInetSystemProxy`, `MacOSSystemProxy` and
-`FiddlerScriptPreferenceStore` already use. New code resolves it through
-`ViolensPaths`, so the next contributor can't pick a different folder by
-accident. The three existing call sites can move over in a small
-follow-up. They're left alone here because two of them are crash-recovery
-code for the system proxy, which shouldn't change in the same pass. The macOS
+Everything that keeps per-user files resolves it the same way: the
+preference store, the AutoResponder rules, FiddlerScript's preferences and
+the system-proxy crash-recovery backups on both platforms. An app that
+embeds ProxyCore gets its own folder instead, so it never shares VioLens's
+files. The macOS
 mapping depends on .NET 8's change to `GetFolderPath` on Unix. Before
 .NET 8, `LocalApplicationData` returned `~/.local/share` on macOS. VioLens
 targets .NET 10, so `~/Library/Application Support` is guaranteed. A unit

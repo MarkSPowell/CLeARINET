@@ -101,5 +101,5 @@ public sealed class SystemPacHost : IPacHost
         return addresses;
     }
 
-    public void Log(string message) => Console.WriteLine($"[pac] {message}");
+    public void Log(string message) => ProxyEngine.Log("pac", message);
 }

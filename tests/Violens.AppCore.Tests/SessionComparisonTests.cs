@@ -1,11 +1,11 @@
 using System.IO.Compression;
 using System.Text;
-using Violens.ProxyCore.Compare;
+using Violens.AppCore.Compare;
 using Violens.ProxyCore.Http;
 using Violens.ProxyCore.Sessions;
 using Xunit;
 
-namespace Violens.ProxyCore.Tests;
+namespace Violens.AppCore.Tests;
 
 /// <summary>Compare Sessions (<see cref="SessionComparison"/>).</summary>
 public class SessionComparisonTests

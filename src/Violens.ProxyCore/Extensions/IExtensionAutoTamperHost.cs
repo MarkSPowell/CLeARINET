@@ -6,7 +6,7 @@ namespace Violens.ProxyCore.Extensions;
 /// The narrow surface <c>InterceptingProxyListener</c> needs to run every
 /// loaded .NET extension's <c>IAutoTamper</c> hooks against a real
 /// request/response pair -- the same interface-inversion reasoning as
-/// <c>Violens.ProxyCore.Scripting.IFiddlerScriptRunner</c> (see that
+/// <c>Violens.ProxyCore.Scripting.IScriptRunner</c> (see that
 /// interface's own remarks): <c>Violens.Compatibility</c> already
 /// references <c>Violens.ProxyCore</c>, so a type living in
 /// <c>ProxyCore</c> can't reference the real
@@ -16,7 +16,7 @@ namespace Violens.ProxyCore.Extensions;
 /// (<c>Violens.Compatibility.Extensions.LoadedExtensionSet</c>) and hands
 /// it to the listener as this interface.
 ///
-/// Unlike <c>IFiddlerScriptRunner</c> (one script, one engine), any number
+/// Unlike <c>IScriptRunner</c> (one script, one engine), any number
 /// of extensions can be loaded at once, each independently implementing
 /// <c>IAutoTamper</c> -- so every method here runs *every* loaded
 /// extension's hook in discovery order, each seeing the previous one's
@@ -32,14 +32,14 @@ namespace Violens.ProxyCore.Extensions;
 /// failing to answer -- see that section for why building that is a
 /// separate feature, not part of this wiring), and the *Before hooks share
 /// the exact same buffer-forcing fork and before/breakpoint ordering
-/// <c>IFiddlerScriptRunner</c> already established in Phase A2 -- FiddlerScript's
+/// <c>IScriptRunner</c> already established in Phase A2 -- FiddlerScript's
 /// own <c>OnBeforeRequest</c>/<c>OnBeforeResponse</c> run first, then loaded
 /// extensions' <c>AutoTamperRequestBefore</c>/<c>AutoTamperResponseBefore</c>,
 /// an assumed (not confirmed against real Fiddler) ordering.
 /// </summary>
 public interface IExtensionAutoTamperHost
 {
-    /// <summary>Whether ANY loaded extension implements <c>IAutoTamper</c> -- gates the same body-buffering fork <see cref="Scripting.IFiddlerScriptRunner.HasOnBeforeRequest"/> does.</summary>
+    /// <summary>Whether ANY loaded extension implements <c>IAutoTamper</c> -- gates the same body-buffering fork <see cref="Scripting.IScriptRunner.HasOnBeforeRequest"/> does.</summary>
     bool HasAnyRequestBeforeHandlers { get; }
 
     /// <summary>Same as <see cref="HasAnyRequestBeforeHandlers"/>, for <c>AutoTamperResponseBefore</c>.</summary>

@@ -7,7 +7,7 @@ namespace Violens.ProxyCore.WebSockets;
 /// <see cref="WebSocketLog"/>. Reading never changes or delays what's sent:
 /// each chunk is forwarded first, then read.
 /// </summary>
-public static class WebSocketRelay
+internal static class WebSocketRelay
 {
     /// <summary>
     /// After one side closes, how long the other has to finish before the

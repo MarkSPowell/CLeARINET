@@ -89,7 +89,7 @@ public sealed class ExtensionHost
     /// load for any more interesting reason.
     /// </summary>
     public static string DefaultExtensionsFolder =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "VioLens", "Extensions");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), Violens.ProxyCore.ProxyEngine.Identity.ProductName, "Extensions");
 
     /// <summary>
     /// The <c>Extensions</c> folder next to the app itself, where the Windows

@@ -15,16 +15,25 @@ namespace Violens.ProxyCore.Certificates;
 public sealed class CertificateAuthority
 {
     /// <summary>
-    /// Common-name prefix every VioLens root uses, so a stale or foreign
-    /// copy is recognizable in a trust store at a glance. Named after
+    /// The common-name prefix VioLens's own root uses (the default
+    /// <see cref="ProxyHostIdentity.RootCertificateName"/>), so a stale or
+    /// foreign copy is recognizable in a trust store at a glance. Named after
     /// Fiddler Classic's own long-standing convention
-    /// (<c>DO_NOT_TRUST_FiddlerRoot</c>).
+    /// (<c>DO_NOT_TRUST_FiddlerRoot</c>). An app with its own
+    /// <see cref="ProxyHostIdentity"/> gets its own name instead; see
+    /// <see cref="RootCertificateName"/>.
     /// </summary>
     public const string SubjectPrefix = "DO_NOT_TRUST_ViolensRoot";
 
     private static readonly TimeSpan RootValidity = TimeSpan.FromDays(365 * 5);
 
     public X509Certificate2 RootCertificate { get; }
+
+    /// <summary>
+    /// The root's common-name prefix: <see cref="ProxyEngine.Identity"/>'s
+    /// <see cref="ProxyHostIdentity.RootCertificateName"/> when this was created.
+    /// </summary>
+    public string RootCertificateName { get; }
 
     /// <param name="installToTrustStore">
     /// When true (the default), ensures the root is present in the current
@@ -35,114 +44,31 @@ public sealed class CertificateAuthority
     /// </param>
     public CertificateAuthority(bool installToTrustStore = true)
     {
-        RootCertificate = LoadOrCreateRoot();
+        RootCertificateName = ProxyEngine.Identity.RootCertificateName;
+        RootCertificate = LoadOrCreateRoot(RootCertificateName);
 
         if (installToTrustStore)
         {
             EnsureTrusted(RootCertificate);
-
-            // Only once the new root is trusted, so a declined prompt for
-            // the new one never leaves the user with neither.
-            RemoveFormerRoots(log: message => Console.WriteLine($"[Certificates] {message}"));
         }
     }
-
-    /// <summary>
-    /// The common-name prefix of the roots the project made under its
-    /// former name, CLeARINET. See <see cref="RemoveFormerRoots"/>.
-    /// </summary>
-    public const string FormerSubjectPrefix = "DO_NOT_TRUST_ClearinetRoot";
-
-    /// <summary>
-    /// Removes any root CLeARINET made, from the trusted-root store and the
-    /// personal store, so a renamed install doesn't leave a trusted root
-    /// behind that nothing uses (or can remove). On Windows each removal
-    /// from the trusted-root store shows the system's own confirmation; a
-    /// "No" is respected, logged, and asked again next time. Never throws.
-    /// </summary>
-    /// <returns>How many old roots were removed from the trust store.</returns>
-    public static int RemoveFormerRoots(Action<string>? log = null)
-    {
-        var removed = 0;
-        try
-        {
-            if (OperatingSystem.IsWindows())
-            {
-                using var rootStore = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
-                rootStore.Open(OpenFlags.ReadWrite);
-                foreach (var old in FindFormer(rootStore))
-                {
-                    try
-                    {
-                        rootStore.Remove(old);
-                        removed++;
-                    }
-                    catch (CryptographicException ex)
-                    {
-                        log?.Invoke($"The old CLeARINET root ({old.Thumbprint}) is still trusted: {ex.Message}");
-                    }
-                }
-            }
-
-            using var myStore = new X509Store(StoreName.My, StoreLocation.CurrentUser);
-            myStore.Open(OpenFlags.ReadWrite);
-            foreach (var old in FindFormer(myStore))
-            {
-                try
-                {
-                    if (OperatingSystem.IsMacOS())
-                    {
-                        // Deleting it from the keychain takes its trust
-                        // setting with it.
-                        MacOSCertificateTrust.Uninstall(old);
-                        removed++;
-                    }
-                    else if (OperatingSystem.IsWindows())
-                    {
-                        // Still trusted means the user said No above; keep
-                        // the key so a later "Yes" leaves nothing behind.
-                        using var rootStore = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
-                        rootStore.Open(OpenFlags.ReadOnly);
-                        if (rootStore.Certificates.Find(X509FindType.FindByThumbprint, old.Thumbprint, validOnly: false).Count > 0)
-                        {
-                            continue;
-                        }
-
-                        myStore.Remove(old);
-                    }
-                }
-                catch (Exception ex) when (ex is CryptographicException or CertificateTrustException)
-                {
-                    log?.Invoke($"Couldn't remove the old CLeARINET root ({old.Thumbprint}): {ex.Message}");
-                }
-            }
-        }
-        catch (Exception ex) when (ex is CryptographicException or PlatformNotSupportedException)
-        {
-            log?.Invoke($"Couldn't check for old CLeARINET roots: {ex.Message}");
-        }
-
-        if (removed > 0)
-        {
-            log?.Invoke($"Removed {removed} root certificate(s) left by CLeARINET.");
-        }
-
-        return removed;
-    }
-
-    private static List<X509Certificate2> FindFormer(X509Store store) =>
-        store.Certificates
-            .Find(X509FindType.FindBySubjectName, FormerSubjectPrefix, validOnly: false)
-            .Cast<X509Certificate2>()
-            .ToList();
 
     /// <summary>
     /// Generates a fresh, self-signed VioLens root certificate. This is
     /// pure certificate math with no store or OS interaction, which is why
     /// it's the part of this class that's actually unit-testable.
     /// </summary>
-    public static X509Certificate2 GenerateRoot(DateTimeOffset notBefore, DateTimeOffset notAfter)
+    public static X509Certificate2 GenerateRoot(DateTimeOffset notBefore, DateTimeOffset notAfter) =>
+        GenerateRoot(notBefore, notAfter, ProxyEngine.Identity.RootCertificateName);
+
+    /// <summary>
+    /// The same, with the common name starting <paramref name="rootCertificateName"/>
+    /// rather than the configured identity's.
+    /// </summary>
+    public static X509Certificate2 GenerateRoot(DateTimeOffset notBefore, DateTimeOffset notAfter, string rootCertificateName)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(rootCertificateName);
+
         // Built with X500DistinguishedNameBuilder rather than the
         // string-parsing X500DistinguishedName constructor: the common
         // name below contains a comma, which the string form treats as an
@@ -150,7 +76,7 @@ public sealed class CertificateAuthority
         // attribute value, no escaping needed.
         var subjectBuilder = new X500DistinguishedNameBuilder();
         subjectBuilder.AddCommonName(
-            $"{SubjectPrefix} ({Environment.MachineName}, generated {DateTime.UtcNow:yyyy-MM-dd})");
+            $"{rootCertificateName} ({Environment.MachineName}, generated {DateTime.UtcNow:yyyy-MM-dd})");
         var subject = subjectBuilder.Build();
 
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -174,13 +100,13 @@ public sealed class CertificateAuthority
         return request.CreateSelfSigned(notBefore, notAfter);
     }
 
-    private static X509Certificate2 LoadOrCreateRoot()
+    private static X509Certificate2 LoadOrCreateRoot(string rootCertificateName)
     {
         using var store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
         store.Open(OpenFlags.ReadWrite);
 
         var existing = store.Certificates
-            .Find(X509FindType.FindBySubjectName, SubjectPrefix, validOnly: false)
+            .Find(X509FindType.FindBySubjectName, rootCertificateName, validOnly: false)
             .Cast<X509Certificate2>()
             .Where(c => c.NotAfter > DateTime.UtcNow && c.HasPrivateKey)
             .OrderByDescending(c => c.NotBefore)
@@ -194,7 +120,7 @@ public sealed class CertificateAuthority
         var notBefore = DateTimeOffset.UtcNow.AddDays(-1);
         var notAfter = notBefore.Add(RootValidity);
 
-        using var generated = GenerateRoot(notBefore, notAfter);
+        using var generated = GenerateRoot(notBefore, notAfter, rootCertificateName);
         return PersistNonExportable(store, generated);
     }
 
@@ -255,7 +181,7 @@ public sealed class CertificateAuthority
         else
         {
             throw new PlatformNotSupportedException(
-                "VioLens's certificate trust-store installation is only implemented for Windows and macOS " +
+                "Certificate trust-store installation is only implemented for Windows and macOS " +
                 "-- see the Interception Certificate Design doc's 'Platform status' section.");
         }
     }
@@ -306,7 +232,7 @@ public sealed class CertificateAuthority
         else
         {
             throw new PlatformNotSupportedException(
-                "VioLens's certificate trust-store removal is only implemented for Windows and macOS " +
+                "Certificate trust-store removal is only implemented for Windows and macOS " +
                 "-- see the Interception Certificate Design doc's 'Platform status' section.");
         }
 

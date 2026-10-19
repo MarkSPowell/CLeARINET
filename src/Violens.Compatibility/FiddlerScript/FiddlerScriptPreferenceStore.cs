@@ -33,7 +33,7 @@ public sealed class FiddlerScriptPreferenceStore
     private readonly Dictionary<string, string> _values;
 
     /// <param name="filePath">
-    /// Overrides the default <c>%LocalAppData%\VioLens\fiddlerscript-prefs.json</c>
+    /// Overrides the default <c>fiddlerscript-prefs.json</c> in the host app's data folder (<c>%LocalAppData%\VioLens</c> for VioLens)
     /// path -- exists purely so tests can point this at a temp file instead
     /// of touching a real machine's app-data folder; a production caller is
     /// expected to leave this at its default.
@@ -41,8 +41,7 @@ public sealed class FiddlerScriptPreferenceStore
     public FiddlerScriptPreferenceStore(string? filePath = null)
     {
         _filePath = filePath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "VioLens",
+            Violens.ProxyCore.ProxyEngine.Identity.ResolveDataFolder(),
             "fiddlerscript-prefs.json");
 
         _values = LoadFromDisk();

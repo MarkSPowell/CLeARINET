@@ -11,7 +11,7 @@ namespace Violens.Compatibility.Tests;
 /// <see cref="IExtensionAutoTamperHost"/> surface specifically -- the same
 /// narrow contract <c>InterceptingProxyListener</c> actually calls -- the
 /// same reasoning <see cref="FiddlerScriptRunnerTests"/>' own remarks give
-/// for testing <c>FiddlerScriptRunner</c> through <c>IFiddlerScriptRunner</c>
+/// for testing <c>FiddlerScriptRunner</c> through <c>IScriptRunner</c>
 /// rather than <c>FiddlerScriptHost</c> directly.
 ///
 /// Every <see cref="IAutoTamper"/> here is a small, purpose-built fake
@@ -40,7 +40,7 @@ public class LoadedExtensionSetTests
         var request = SampleRequest();
         // Same instance back, not just an equal one -- confirms no Exchange
         // is even built for the common "nothing loaded" case, the same
-        // no-op-when-empty contract IFiddlerScriptRunner's own no-op test
+        // no-op-when-empty contract IScriptRunner's own no-op test
         // checks for.
         Assert.Same(request, host.RunRequestBefore(1, "api.example.com", request));
 
@@ -56,7 +56,7 @@ public class LoadedExtensionSetTests
     [Fact]
     public void AnyTamperLoaded_HasFlagsAreTrue_EvenOneThatOnlyDefinesOtherHooks()
     {
-        // Unlike IFiddlerScriptRunner's per-handler HasOnBeforeRequest/
+        // Unlike IScriptRunner's per-handler HasOnBeforeRequest/
         // HasOnBeforeResponse (a FiddlerScript file can define just one of
         // the two), a C# class implementing IAutoTamper must implement
         // every method on the interface -- so LoadedExtensionSet's flags

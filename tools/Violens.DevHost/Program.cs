@@ -7,6 +7,7 @@
 // "done" looks like.
 
 using System.Net.Sockets;
+using Violens.ProxyCore;
 using Violens.ProxyCore.Certificates;
 using Violens.ProxyCore.Proxy;
 using Violens.ProxyCore.Sessions;
@@ -21,6 +22,10 @@ if (!OperatingSystem.IsWindows())
     Console.WriteLine("is still a to-do -- see that doc's open-risks checklist.");
     return 1;
 }
+
+// VioLens's own identity (the default), with the engine's log -- including
+// one line per captured session -- on the console.
+ProxyEngine.Configure(ProxyHostIdentity.Default, log: entry => Console.WriteLine($"{entry.Time:HH:mm:ss} {entry}"));
 
 var authority = new CertificateAuthority();
 Console.WriteLine($"Root CA ready: {authority.RootCertificate.Subject}");

@@ -22,7 +22,7 @@ namespace Violens.ProxyCore.Proxy.AutoConfig;
 /// The script comes from the network, so it's treated as untrusted: no
 /// access to .NET types, and a time limit on every call.
 /// </summary>
-public sealed class PacScript
+internal sealed class PacScript
 {
     private static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(10);
 

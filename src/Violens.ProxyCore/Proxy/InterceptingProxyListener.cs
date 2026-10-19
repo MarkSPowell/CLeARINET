@@ -44,7 +44,7 @@ namespace Violens.ProxyCore.Proxy;
 /// writer against real traffic, which is the rest of Phase 1.
 ///
 /// FiddlerScript's own two hook points (<c>Handlers.OnBeforeRequest</c>/
-/// <c>OnBeforeResponse</c>, via an optional <see cref="IFiddlerScriptRunner"/>)
+/// <c>OnBeforeResponse</c>, via an optional <see cref="IScriptRunner"/>)
 /// are wired in on the same "buffer only when something will actually act on
 /// it" fork described above -- see <c>PumpSessionsAsync</c>'s own remarks for
 /// exactly where they run and what's deliberately still out of scope. Loaded
@@ -68,7 +68,7 @@ public sealed class InterceptingProxyListener
     private readonly SessionStore _sessionStore;
     private readonly BreakpointManager _breakpointManager;
     private readonly AutoResponderRules _autoResponderRules;
-    private readonly IFiddlerScriptRunner? _scriptRunner;
+    private readonly IScriptRunner? _scriptRunner;
     private readonly IExtensionAutoTamperHost? _extensionHost;
     private readonly IExtensionSessionHost? _sessionHost;
     private readonly TcpListener _listener;
@@ -87,7 +87,7 @@ public sealed class InterceptingProxyListener
         SessionStore sessionStore,
         BreakpointManager? breakpointManager = null,
         AutoResponderRules? autoResponderRules = null,
-        IFiddlerScriptRunner? scriptRunner = null,
+        IScriptRunner? scriptRunner = null,
         IExtensionAutoTamperHost? extensionHost = null,
         IExtensionSessionHost? sessionHost = null,
         bool allowRemoteClients = false)
@@ -225,7 +225,7 @@ public sealed class InterceptingProxyListener
         SessionStore sessionStore,
         BreakpointManager? breakpointManager = null,
         AutoResponderRules? autoResponderRules = null,
-        IFiddlerScriptRunner? scriptRunner = null,
+        IScriptRunner? scriptRunner = null,
         IExtensionAutoTamperHost? extensionHost = null,
         IExtensionSessionHost? sessionHost = null,
         bool allowRemoteClients = false)
@@ -372,11 +372,11 @@ public sealed class InterceptingProxyListener
         }
         catch (BreakpointAbortedException ex)
         {
-            Console.WriteLine($"[proxy] {ex.Message}");
+            ProxyEngine.Log("proxy", ex.Message);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[proxy] Connection ended: {DescribeException(ex)}");
+            ProxyEngine.Log("proxy", $"Connection ended: {DescribeException(ex)}");
         }
     }
 
@@ -385,7 +385,7 @@ public sealed class InterceptingProxyListener
     {
         await Http1MessageReader.ReadBodyAsync(clientStream, request.Headers, cancellationToken);
         await HttpMessageWriter.WriteResponseAsync(clientStream, answer, cancellationToken);
-        Console.WriteLine($"[proxy] {request.Method} {request.Target} -> {answer.StatusCode} (answered by VioLens)");
+        ProxyEngine.Log("proxy", $"{request.Method} {request.Target} -> {answer.StatusCode} (answered by {ProxyEngine.Identity.ProductName})");
     }
 
     private static string DescribeException(Exception ex)
@@ -427,8 +427,8 @@ public sealed class InterceptingProxyListener
     /// FiddlerScript Compatibility Design doc. On that forward path, each
     /// hook forces the same body-buffering a matching breakpoint or
     /// AutoResponder force-flag already forces (see
-    /// <see cref="IFiddlerScriptRunner.HasOnBeforeRequest"/>/
-    /// <see cref="IFiddlerScriptRunner.HasOnBeforeResponse"/>), and runs
+    /// <see cref="IScriptRunner.HasOnBeforeRequest"/>/
+    /// <see cref="IScriptRunner.HasOnBeforeResponse"/>), and runs
     /// *before* the corresponding breakpoint check -- the same order real
     /// Fiddler uses (a script can set <c>oSession["x-breakrequest"]</c> to
     /// arm a pause from inside <c>OnBeforeRequest</c> itself), even though
@@ -459,7 +459,7 @@ public sealed class InterceptingProxyListener
         SessionStore sessionStore,
         BreakpointManager breakpointManager,
         AutoResponderRules autoResponderRules,
-        IFiddlerScriptRunner? scriptRunner,
+        IScriptRunner? scriptRunner,
         IExtensionAutoTamperHost? extensionHost,
         IExtensionSessionHost? sessionHost,
         Func<bool, string, int, string, CancellationToken, Task<IReadOnlyList<UpstreamProxy?>>> chooseRoutes,
@@ -530,8 +530,8 @@ public sealed class InterceptingProxyListener
                     }
                     catch (SocketException ex) when (i + 1 < routes.Count)
                     {
-                        Console.WriteLine(
-                            $"[proxy] {targetHost}: couldn't reach {DescribeRoute(route)} ({ex.Message}); trying {DescribeRoute(routes[i + 1])}.");
+                        ProxyEngine.Log("proxy",
+                            $"{targetHost}: couldn't reach {DescribeRoute(route)} ({ex.Message}); trying {DescribeRoute(routes[i + 1])}.");
                     }
                 }
 
@@ -626,7 +626,7 @@ public sealed class InterceptingProxyListener
                 var authorization = authenticator.Respond(reply.Headers);
                 if (authorization is null)
                 {
-                    Console.WriteLine($"[proxy] {proxy}: {UpstreamProxy.SignInFailedMessage(authenticator, credential)}");
+                    ProxyEngine.Log("proxy", $"{proxy}: {UpstreamProxy.SignInFailedMessage(authenticator, credential)}");
                     return reply;
                 }
 
@@ -695,15 +695,15 @@ public sealed class InterceptingProxyListener
                     targetPort,
                     ex,
                     askedForCertificate
-                        ? "The server asked for a client certificate (mutual TLS), and VioLens doesn't send one yet, so the server may have refused the connection for that reason."
+                        ? $"The server asked for a client certificate (mutual TLS), and {ProxyEngine.Identity.ProductName} doesn't send one yet, so the server may have refused the connection for that reason."
                         : null);
                 await HttpMessageWriter.WriteResponseAsync(clientTls, failure, cancellationToken);
                 currentTiming?.Done();
                 var failedTimings = currentTiming?.Build();
                 var failed = sessionStore.Add(
                     targetHost, startedAt, outgoing, failure, WithTlsFlags(null, failedTimings), scheme, failedTimings);
-                Console.WriteLine(
-                    $"[{startedAt:HH:mm:ss}] #{failed.Id} 502 {outgoing.Method} {scheme}://{targetHost}{outgoing.Target} -- {ex.Message}");
+                ProxyEngine.Log("session",
+                    $"#{failed.Id} 502 {outgoing.Method} {scheme}://{targetHost}{outgoing.Target} -- {ex.Message}");
                 return null;
             }
         }
@@ -812,8 +812,8 @@ public sealed class InterceptingProxyListener
                     await HttpMessageWriter.WriteResponseAsync(clientTls, localResponse, cancellationToken);
                     timing.Done();
                     var localSession = sessionStore.Add(targetHost, startedAt, localRequest, localResponse, flags: null, scheme, timing.Build(answeredLocally: true));
-                    Console.WriteLine(
-                        $"[{startedAt:HH:mm:ss}] #{localSession.Id} {localResponse.StatusCode} {localRequest.Method} {url} " +
+                    ProxyEngine.Log("session",
+                        $"#{localSession.Id} {localResponse.StatusCode} {localRequest.Method} {url} " +
                         $"(AutoResponder: {outcome.FinalActionKind})");
                     continue;
                 }
@@ -938,8 +938,8 @@ public sealed class InterceptingProxyListener
                     timing.Done();
                     var answeredSession = sessionStore.Add(
                         targetHost, startedAt, request, localResponse, extensionSession.Flags, scheme, timing.Build(answeredLocally: true));
-                    Console.WriteLine(
-                        $"[{startedAt:HH:mm:ss}] #{answeredSession.Id} {localResponse.StatusCode} {request.Method} {url} (answered by an extension)");
+                    ProxyEngine.Log("session",
+                        $"#{answeredSession.Id} {localResponse.StatusCode} {request.Method} {url} (answered by an extension)");
                     continue;
                 }
 
@@ -967,8 +967,8 @@ public sealed class InterceptingProxyListener
 
                 if (responsePreamble is null)
                 {
-                    Console.WriteLine(
-                        $"[proxy] {targetHost}: upstream closed the connection before answering {request.Method} {request.Target}.");
+                    ProxyEngine.Log("proxy",
+                        $"{targetHost}: upstream closed the connection before answering {request.Method} {request.Target}.");
                     return;
                 }
 
@@ -1049,8 +1049,8 @@ public sealed class InterceptingProxyListener
                     : null;
                 var session = sessionStore.Add(
                     targetHost, startedAt, request, response, WithTlsFlags(extensionSession?.Flags, timings), scheme, timings, webSocket);
-                Console.WriteLine(
-                    $"[{startedAt:HH:mm:ss}] #{session.Id} {response.StatusCode} {request.Method} {scheme}://{targetHost}{request.Target} " +
+                ProxyEngine.Log("session",
+                    $"#{session.Id} {response.StatusCode} {request.Method} {scheme}://{targetHost}{request.Target} " +
                     $"({request.Body.Length} B req, {response.Body.Length} B resp)");
 
                 if (response.StatusCode == 101)
@@ -1113,7 +1113,7 @@ public sealed class InterceptingProxyListener
     {
         var response = new CapturedResponse("HTTP/1.1", 0, reason, [], []);
         var session = sessionStore.Add(targetHost, startedAt, request, response, flags: null, scheme, timings);
-        Console.WriteLine($"[{startedAt:HH:mm:ss}] #{session.Id} {request.Method} {scheme}://{targetHost}{request.Target} -- {reason}");
+        ProxyEngine.Log("session", $"#{session.Id} {request.Method} {scheme}://{targetHost}{request.Target} -- {reason}");
     }
 
     private static string DescribeRoute(UpstreamProxy? route) =>
@@ -1142,7 +1142,7 @@ public sealed class InterceptingProxyListener
     private static CapturedResponse BadGateway(string host, int port, Exception ex, string? explanation = null)
     {
         var body = Encoding.UTF8.GetBytes(
-            $"VioLens couldn't connect to {host}:{port}: {ex.Message}" + (explanation is null ? string.Empty : $"\r\n\r\n{explanation}"));
+            $"{ProxyEngine.Identity.ProductName} couldn't connect to {host}:{port}: {ex.Message}" + (explanation is null ? string.Empty : $"\r\n\r\n{explanation}"));
         return new CapturedResponse(
             "HTTP/1.1",
             502,
@@ -1222,7 +1222,7 @@ public sealed class InterceptingProxyListener
     {
         if (!File.Exists(path))
         {
-            var missingBody = Encoding.UTF8.GetBytes($"VioLens AutoResponder: file not found -- {path}");
+            var missingBody = Encoding.UTF8.GetBytes($"{ProxyEngine.Identity.ProductName} AutoResponder: file not found -- {path}");
             return new CapturedResponse(
                 "HTTP/1.1", 404, "Not Found", [("Content-Type", "text/plain; charset=utf-8")], missingBody);
         }
@@ -1284,7 +1284,7 @@ public sealed class InterceptingProxyListener
         }
         catch (Exception ex)
         {
-            var body = Encoding.UTF8.GetBytes($"VioLens AutoResponder: fetching '{url}' failed -- {ex.Message}");
+            var body = Encoding.UTF8.GetBytes($"{ProxyEngine.Identity.ProductName} AutoResponder: fetching '{url}' failed -- {ex.Message}");
             return new CapturedResponse("HTTP/1.1", 502, "Bad Gateway", [("Content-Type", "text/plain; charset=utf-8")], body);
         }
     }

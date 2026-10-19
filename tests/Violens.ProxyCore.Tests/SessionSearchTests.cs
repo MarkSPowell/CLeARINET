@@ -62,23 +62,25 @@ public class SessionSearchTests
     }
 
     [Theory]
-    [InlineData("remember=true", SessionSearchTarget.Responses, false)]
-    [InlineData("remember=true", SessionSearchTarget.Requests, true)]
-    [InlineData("Secret-Token", SessionSearchTarget.Requests, false)]
-    [InlineData("Secret-Token", SessionSearchTarget.Responses, true)]
-    public void CanLookAtOneSideOnly(string text, SessionSearchTarget target, bool expected)
+    [InlineData("remember=true", (int)SessionSearchTarget.Responses, false)]
+    [InlineData("remember=true", (int)SessionSearchTarget.Requests, true)]
+    [InlineData("Secret-Token", (int)SessionSearchTarget.Requests, false)]
+    [InlineData("Secret-Token", (int)SessionSearchTarget.Responses, true)]
+    // The enum arrives as an int: it's internal, and xUnit only runs public
+    // methods, which can't take an internal type as a parameter.
+    public void CanLookAtOneSideOnly(string text, int target, bool expected)
     {
-        Assert.Equal(expected, Finds(new SessionSearchOptions(text, target)));
+        Assert.Equal(expected, Finds(new SessionSearchOptions(text, (SessionSearchTarget)target)));
     }
 
     [Theory]
-    [InlineData("Secret-Token", SessionSearchParts.Headers, false)]
-    [InlineData("Secret-Token", SessionSearchParts.Bodies, true)]
-    [InlineData("WWW-Authenticate", SessionSearchParts.Bodies, false)]
-    [InlineData("WWW-Authenticate", SessionSearchParts.Headers, true)]
-    public void CanLookAtHeadersOrBodiesOnly(string text, SessionSearchParts parts, bool expected)
+    [InlineData("Secret-Token", (int)SessionSearchParts.Headers, false)]
+    [InlineData("Secret-Token", (int)SessionSearchParts.Bodies, true)]
+    [InlineData("WWW-Authenticate", (int)SessionSearchParts.Bodies, false)]
+    [InlineData("WWW-Authenticate", (int)SessionSearchParts.Headers, true)]
+    public void CanLookAtHeadersOrBodiesOnly(string text, int parts, bool expected)
     {
-        Assert.Equal(expected, Finds(new SessionSearchOptions(text, Parts: parts)));
+        Assert.Equal(expected, Finds(new SessionSearchOptions(text, Parts: (SessionSearchParts)parts)));
     }
 
     [Fact]

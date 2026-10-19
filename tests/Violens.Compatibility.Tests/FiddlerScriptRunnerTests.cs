@@ -8,7 +8,7 @@ namespace Violens.Compatibility.Tests;
 
 /// <summary>
 /// Exercises <see cref="FiddlerScriptRunner"/> through its
-/// <see cref="IFiddlerScriptRunner"/> surface specifically -- the same
+/// <see cref="IScriptRunner"/> surface specifically -- the same
 /// narrow contract <c>InterceptingProxyListener</c> actually calls -- rather
 /// than reaching past it into <see cref="FiddlerScriptHost"/>/<see cref="Exchange"/>
 /// directly, which <see cref="FiddlerScriptHostTests"/> already covers.
@@ -25,7 +25,7 @@ public class FiddlerScriptRunnerTests
     [Fact]
     public void BeforeAnythingIsLoaded_HasFlagsAreFalseAndRunningIsANoOp()
     {
-        IFiddlerScriptRunner runner = new FiddlerScriptRunner();
+        IScriptRunner runner = new FiddlerScriptRunner();
 
         Assert.False(runner.HasOnBeforeRequest);
         Assert.False(runner.HasOnBeforeResponse);
@@ -68,7 +68,7 @@ public class FiddlerScriptRunnerTests
                 }
             }
             """;
-        IFiddlerScriptRunner runner = LoadedRunner(script);
+        IScriptRunner runner = LoadedRunner(script);
 
         var result = runner.RunOnBeforeRequest(1, "api.example.com", SampleRequest());
 
@@ -85,7 +85,7 @@ public class FiddlerScriptRunnerTests
                 }
             }
             """;
-        IFiddlerScriptRunner runner = LoadedRunner(script);
+        IScriptRunner runner = LoadedRunner(script);
 
         var result = runner.RunOnBeforeResponse(1, "api.example.com", SampleRequest(), SampleResponse());
 
@@ -96,7 +96,7 @@ public class FiddlerScriptRunnerTests
     public void RunOnBeforeRequest_PassesTheSessionOrdinalThroughAsOSessionId()
     {
         // oSession["ui-customcolumn"] only round-trips through Exchange
-        // itself, which FiddlerScriptRequestResult doesn't carry -- so this
+        // itself, which ScriptRequestResult doesn't carry -- so this
         // asserts via the request body instead, which does round-trip
         // through the interface's own result type.
         const string script = """
@@ -106,7 +106,7 @@ public class FiddlerScriptRunnerTests
                 }
             }
             """;
-        IFiddlerScriptRunner runner = LoadedRunner(script);
+        IScriptRunner runner = LoadedRunner(script);
 
         var result = runner.RunOnBeforeRequest(42, "api.example.com", SampleRequest());
 
@@ -123,7 +123,7 @@ public class FiddlerScriptRunnerTests
                 }
             }
             """;
-        IFiddlerScriptRunner runner = LoadedRunner(script);
+        IScriptRunner runner = LoadedRunner(script);
         var request = SampleRequest();
 
         var result = runner.RunOnBeforeRequest(1, "api.example.com", request);

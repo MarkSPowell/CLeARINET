@@ -1,30 +1,37 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Violens.ProxyCore;
+namespace Violens.AppCore.Migration;
 
 /// <summary>
-/// Carries a user's data over from the project's former name, CLeARINET,
-/// the first time VioLens runs. Copies, never moves (apart from a leftover
-/// system-proxy backup, below), so the old folders are left as they were,
-/// with a note saying where everything went.
+/// Carries a user's data over from the app's former name, CLeARINET, the
+/// first time VioLens runs. Copies, never moves (apart from a leftover
+/// system-proxy backup, below), and leaves a note listing what was copied.
+///
+/// <b>Only what CLeARINET itself wrote.</b> Another project with a similar
+/// name uses folders called <c>Clearinet</c>, and Windows and macOS don't
+/// tell <c>CLeARINET</c> and <c>Clearinet</c> apart, so a folder of that
+/// name isn't necessarily ours. Nothing is copied unless the app-data folder holds
+/// files only CLeARINET wrote (see <see cref="LooksLikeFormerInstall"/>), and
+/// then only those files, never the whole folder. The note never suggests
+/// deleting the folder, only the files it lists.
 ///
 /// <list type="bullet">
-/// <item>The app-data folder (<c>CLeARINET</c> to <see cref="ViolensPaths.AppFolderName"/>):
+/// <item>The app-data folder (<c>CLeARINET</c> to <c>VioLens</c>):
 /// preferences, AutoResponder rules, FiddlerScript preferences and the
 /// legacy host's settings. Preference names starting <c>clearinet</c> are
-/// renamed to start <c>violens</c>. Only done when the new folder doesn't
-/// exist yet, so it never overwrites anything VioLens has saved.</item>
+/// renamed to start <c>violens</c>. Only done when VioLens has no settings
+/// yet, so it never overwrites anything VioLens has saved.</item>
 /// <item>A system-proxy backup left behind by a CLeARINET that didn't shut
 /// down cleanly is moved, not copied, so the crash recovery that runs at
 /// startup finds it and puts the user's proxy settings back -- and only
 /// once.</item>
 /// <item>The Documents folder's <c>Extensions</c> and <c>LegacyExtensions</c>
-/// folders, each only when VioLens doesn't have one yet.</item>
+/// folders, each only when VioLens doesn't have one yet, and only when the
+/// app-data folder was CLeARINET's.</item>
 /// </list>
 ///
-/// The root certificate is handled separately, by
-/// <see cref="Certificates.CertificateAuthority.RemoveFormerRoots"/>,
+/// The root certificate is handled separately, by <see cref="FormerRoots"/>,
 /// because it has to wait until the new root is trusted.
 /// </summary>
 public static class FormerNameMigration
@@ -32,11 +39,21 @@ public static class FormerNameMigration
     /// <summary>The app-data and Documents folder name CLeARINET used.</summary>
     public const string FormerFolderName = "CLeARINET";
 
+    /// <summary>VioLens's own folder name, under the same parents.</summary>
+    public const string NewFolderName = "VioLens";
+
     /// <summary>Left in each old folder once its contents are copied; its presence also stops a second copy.</summary>
     public const string NoteFileName = "MOVED TO VIOLENS.txt";
 
     private const string SystemProxyBackupPattern = "system-proxy-backup*.json";
     private const string PreferencesFileName = "preferences.json";
+
+    /// <summary>The app-data files CLeARINET wrote (besides system-proxy backups), copied when present.</summary>
+    private static readonly string[] AppDataFiles = [PreferencesFileName, "autoresponder-rules.json", "fiddlerscript-prefs.json"];
+
+    /// <summary>The app-data folder CLeARINET's legacy extension host kept its settings in.</summary>
+    private const string LegacyHostFolder = "LegacyExtensionHost";
+
     private static readonly string[] DocumentsSubfolders = ["Extensions", "LegacyExtensions"];
 
     /// <summary>What a run did, for the log. Empty lists when there was nothing to carry over.</summary>
@@ -46,6 +63,13 @@ public static class FormerNameMigration
         IReadOnlyList<string> MovedBackups,
         IReadOnlyList<string> CopiedDocumentsFolders)
     {
+        /// <summary>
+        /// True when this computer had CLeARINET: its app-data folder holds
+        /// CLeARINET's files, or a note from an earlier run. The trigger for
+        /// <see cref="FormerRoots.Remove"/>.
+        /// </summary>
+        public bool FoundFormerInstall { get; init; }
+
         public bool DidAnything => CopiedAppData || MovedBackups.Count > 0 || CopiedDocumentsFolders.Count > 0;
 
         public override string ToString()
@@ -96,16 +120,20 @@ public static class FormerNameMigration
     {
         var copiedAppData = false;
         var renamed = 0;
+        var foundFormerInstall = false;
         var movedBackups = new List<string>();
         var copiedDocuments = new List<string>();
 
         if (!string.IsNullOrEmpty(appDataRoot))
         {
             var oldFolder = Path.Combine(appDataRoot, FormerFolderName);
-            var newFolder = Path.Combine(appDataRoot, ViolensPaths.AppFolderName);
+            var newFolder = Path.Combine(appDataRoot, NewFolderName);
 
-            if (Directory.Exists(oldFolder) && !SameFolder(oldFolder, newFolder))
+            if (Directory.Exists(oldFolder) && !SameFolder(oldFolder, newFolder)
+                && (File.Exists(Path.Combine(oldFolder, NoteFileName)) || LooksLikeFormerInstall(oldFolder)))
             {
+                foundFormerInstall = true;
+
                 // Backups first, and whether or not the rest has been
                 // copied before: the old app may have run (and crashed)
                 // since.
@@ -131,11 +159,24 @@ public static class FormerNameMigration
 
                 if (newFolderEmpty && !File.Exists(Path.Combine(oldFolder, NoteFileName)))
                 {
-                    CopyFolder(oldFolder, newFolder, skip: name =>
-                        name.Equals(NoteFileName, StringComparison.OrdinalIgnoreCase)
-                        || name.StartsWith("system-proxy-backup", StringComparison.OrdinalIgnoreCase)
-                        || name.EndsWith(".lock", StringComparison.OrdinalIgnoreCase)
-                        || name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase));
+                    var copied = new List<string>();
+                    Directory.CreateDirectory(newFolder);
+                    foreach (var name in AppDataFiles)
+                    {
+                        var from = Path.Combine(oldFolder, name);
+                        if (File.Exists(from))
+                        {
+                            File.Copy(from, Path.Combine(newFolder, name), overwrite: false);
+                            copied.Add(name);
+                        }
+                    }
+
+                    var legacyHost = Path.Combine(oldFolder, LegacyHostFolder);
+                    if (Directory.Exists(legacyHost))
+                    {
+                        CopyFolder(legacyHost, Path.Combine(newFolder, LegacyHostFolder));
+                        copied.Add(LegacyHostFolder + Path.DirectorySeparatorChar);
+                    }
 
                     var preferences = Path.Combine(newFolder, PreferencesFileName);
                     if (File.Exists(preferences))
@@ -143,16 +184,16 @@ public static class FormerNameMigration
                         renamed = RenamePreferenceFile(preferences, log);
                     }
 
-                    WriteNote(oldFolder, newFolder);
+                    WriteNote(oldFolder, newFolder, copied);
                     copiedAppData = true;
                 }
             }
         }
 
-        if (!string.IsNullOrEmpty(documentsRoot))
+        if (foundFormerInstall && !string.IsNullOrEmpty(documentsRoot))
         {
             var oldFolder = Path.Combine(documentsRoot, FormerFolderName);
-            var newFolder = Path.Combine(documentsRoot, ViolensPaths.AppFolderName);
+            var newFolder = Path.Combine(documentsRoot, NewFolderName);
 
             if (Directory.Exists(oldFolder) && !SameFolder(oldFolder, newFolder)
                 && !File.Exists(Path.Combine(oldFolder, NoteFileName)))
@@ -163,25 +204,60 @@ public static class FormerNameMigration
                     var to = Path.Combine(newFolder, name);
                     if (Directory.Exists(from) && !Directory.Exists(to))
                     {
-                        CopyFolder(from, to, skip: _ => false);
-                        copiedDocuments.Add(name);
+                        CopyFolder(from, to);
+                        copiedDocuments.Add(name + Path.DirectorySeparatorChar);
                     }
                 }
 
                 if (copiedDocuments.Count > 0)
                 {
-                    WriteNote(oldFolder, newFolder);
+                    WriteNote(oldFolder, newFolder, copiedDocuments);
                 }
             }
         }
 
-        var result = new Result(copiedAppData, renamed, movedBackups, copiedDocuments);
+        var result = new Result(copiedAppData, renamed, movedBackups, copiedDocuments) { FoundFormerInstall = foundFormerInstall };
         if (result.DidAnything)
         {
             log?.Invoke(result.ToString());
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// True when <paramref name="folder"/> holds files CLeARINET wrote: its
+    /// AutoResponder rules, FiddlerScript preferences, legacy-host settings
+    /// or system-proxy backup, or a <c>preferences.json</c> in its exact
+    /// format with at least one of its <c>clearinet.</c> settings.
+    /// </summary>
+    public static bool LooksLikeFormerInstall(string folder)
+    {
+        if (File.Exists(Path.Combine(folder, "autoresponder-rules.json"))
+            || File.Exists(Path.Combine(folder, "fiddlerscript-prefs.json"))
+            || Directory.Exists(Path.Combine(folder, LegacyHostFolder))
+            || Directory.GetFiles(folder, SystemProxyBackupPattern).Length > 0)
+        {
+            return true;
+        }
+
+        var preferences = Path.Combine(folder, PreferencesFileName);
+        if (!File.Exists(preferences))
+        {
+            return false;
+        }
+
+        try
+        {
+            return JsonNode.Parse(File.ReadAllBytes(preferences)) is JsonObject document
+                && document["formatVersion"] is JsonValue
+                && document["preferences"] is JsonObject values
+                && values.Any(pair => pair.Key.StartsWith("clearinet.", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -263,40 +339,42 @@ public static class FormerNameMigration
         return count;
     }
 
-    private static void CopyFolder(string from, string to, Func<string, bool> skip)
+    private static void CopyFolder(string from, string to)
     {
         Directory.CreateDirectory(to);
         foreach (var file in Directory.GetFiles(from))
         {
-            var name = Path.GetFileName(file);
-            if (!skip(name))
+            var target = Path.Combine(to, Path.GetFileName(file));
+            if (!File.Exists(target))
             {
-                File.Copy(file, Path.Combine(to, name), overwrite: false);
+                File.Copy(file, target);
             }
         }
 
         foreach (var directory in Directory.GetDirectories(from))
         {
-            CopyFolder(directory, Path.Combine(to, Path.GetFileName(directory)), skip: _ => false);
+            CopyFolder(directory, Path.Combine(to, Path.GetFileName(directory)));
         }
     }
 
-    private static void WriteNote(string oldFolder, string newFolder)
+    private static void WriteNote(string oldFolder, string newFolder, IReadOnlyList<string> copied)
     {
+        var nl = Environment.NewLine;
         try
         {
             File.WriteAllText(
                 Path.Combine(oldFolder, NoteFileName),
-                "CLeARINET is now called VioLens." + Environment.NewLine + Environment.NewLine
-                + "What was in this folder has been copied to:" + Environment.NewLine
-                + "    " + newFolder + Environment.NewLine + Environment.NewLine
-                + "VioLens doesn't use this folder. Once you're happy that everything" + Environment.NewLine
-                + "carried over, you can delete it." + Environment.NewLine);
+                "CLeARINET, the HTTP(S) inspection tool, is now called VioLens." + nl + nl
+                + "VioLens copied these from this folder to " + newFolder + ":" + nl + nl
+                + string.Concat(copied.Select(name => "    " + name + nl)) + nl
+                + "VioLens doesn't use the copies here. Once you're happy that everything" + nl
+                + "carried over, you can delete them. Nothing else in this folder was" + nl
+                + "touched: another app with a similar name may use it too." + nl);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // The copy itself worked; a missing note only means the copy
-            // is offered again, and it never overwrites.
+            // The copy itself worked; without the note it isn't repeated
+            // anyway, because VioLens's own folder now has files in it.
         }
     }
 

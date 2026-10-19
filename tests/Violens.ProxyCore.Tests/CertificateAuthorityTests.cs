@@ -6,21 +6,6 @@ namespace Violens.ProxyCore.Tests;
 
 public class CertificateAuthorityTests
 {
-    /// <summary>
-    /// RemoveFormerRoots finds old roots by subject-name substring, so the
-    /// new root's name must never contain the old one's (or the other way
-    /// round) -- otherwise it would remove the root it just installed.
-    /// </summary>
-    [Fact]
-    public void TheFormerRootNameNeverMatchesTheCurrentRoot()
-    {
-        using var root = CertificateAuthority.GenerateRoot(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddYears(1));
-
-        Assert.DoesNotContain(CertificateAuthority.FormerSubjectPrefix, root.Subject, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(CertificateAuthority.SubjectPrefix, CertificateAuthority.FormerSubjectPrefix, StringComparison.OrdinalIgnoreCase);
-        Assert.StartsWith("DO_NOT_TRUST_", CertificateAuthority.FormerSubjectPrefix, StringComparison.Ordinal);
-    }
-
     [Fact]
     public void GenerateRoot_ProducesASelfSignedCertificateAuthority()
     {

@@ -5,7 +5,7 @@ using Violens.ProxyCore.Sessions;
 namespace Violens.Compatibility.FiddlerScript;
 
 /// <summary>
-/// Implements <see cref="IFiddlerScriptRunner"/> over a loaded
+/// Implements <see cref="IScriptRunner"/> over a loaded
 /// <see cref="FiddlerScriptHost"/> -- the concrete half of the
 /// interface-inversion described in that interface's own remarks. Owns the
 /// whole load/reload lifecycle (a file path plus the current
@@ -19,7 +19,7 @@ namespace Violens.Compatibility.FiddlerScript;
 /// <b>Not thread-safe</b>, for the same reason <see cref="FiddlerScriptHost"/>
 /// itself isn't -- see that class's own remarks. <c>InterceptingProxyListener</c>
 /// pumps one connection per <c>Task</c> with no serialization of its own
-/// around a shared <see cref="IFiddlerScriptRunner"/>, so a script reload
+/// around a shared <see cref="IScriptRunner"/>, so a script reload
 /// that races a concurrent <see cref="RunOnBeforeRequest"/>/
 /// <see cref="RunOnBeforeResponse"/> call on another connection is a real,
 /// accepted gap in this pass -- flagged in the design doc, not silently
@@ -27,7 +27,7 @@ namespace Violens.Compatibility.FiddlerScript;
 /// already races the very next request under this codebase's existing
 /// "no formal transaction" concurrency posture.
 /// </summary>
-public sealed class FiddlerScriptRunner : IFiddlerScriptRunner
+public sealed class FiddlerScriptRunner : IScriptRunner
 {
     private readonly Action<string> _log;
     private readonly FiddlerScriptPreferenceStore _prefStore;
@@ -151,11 +151,11 @@ public sealed class FiddlerScriptRunner : IFiddlerScriptRunner
     }
 
     /// <inheritdoc/>
-    public FiddlerScriptRequestResult RunOnBeforeRequest(int sessionOrdinal, string hostname, CapturedRequest request)
+    public ScriptRequestResult RunOnBeforeRequest(int sessionOrdinal, string hostname, CapturedRequest request)
     {
         if (_host is null || !HasOnBeforeRequest)
         {
-            return new FiddlerScriptRequestResult(request);
+            return new ScriptRequestResult(request);
         }
 
         var exchange = Exchange.ForRequest(sessionOrdinal, hostname, request);
@@ -174,19 +174,19 @@ public sealed class FiddlerScriptRunner : IFiddlerScriptRunner
             // rather than partially applied -- ToRequest() is never called
             // on this path.
             _log($"[FiddlerScript] OnBeforeRequest error: {ex.Message}");
-            return new FiddlerScriptRequestResult(request);
+            return new ScriptRequestResult(request);
         }
 
-        return new FiddlerScriptRequestResult(exchange.ToRequest());
+        return new ScriptRequestResult(exchange.ToRequest());
     }
 
     /// <inheritdoc/>
-    public FiddlerScriptResponseResult RunOnBeforeResponse(
+    public ScriptResponseResult RunOnBeforeResponse(
         int sessionOrdinal, string hostname, CapturedRequest request, CapturedResponse response)
     {
         if (_host is null || !HasOnBeforeResponse)
         {
-            return new FiddlerScriptResponseResult(response);
+            return new ScriptResponseResult(response);
         }
 
         var exchange = Exchange.ForResponse(sessionOrdinal, hostname, request, response);
@@ -197,10 +197,10 @@ public sealed class FiddlerScriptRunner : IFiddlerScriptRunner
         catch (FiddlerScriptException ex)
         {
             _log($"[FiddlerScript] OnBeforeResponse error: {ex.Message}");
-            return new FiddlerScriptResponseResult(response);
+            return new ScriptResponseResult(response);
         }
 
-        return new FiddlerScriptResponseResult(exchange.ToResponse());
+        return new ScriptResponseResult(exchange.ToResponse());
     }
 
     /// <summary>See <see cref="FiddlerScriptHost.GetRulesOptionValue"/>. Returns <see langword="false"/> when nothing is loaded, rather than throwing -- a menu built from <see cref="Directives"/> (empty when unloaded) would never call this in that state anyway, but a caller shouldn't have to know that to stay safe.</summary>

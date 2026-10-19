@@ -181,6 +181,10 @@ ever leaves the device on its own.
   AutoResponder, FiddlerScript, extensions, and SAZ import/export. It's
   also one click away from inside the running app, via **Help >
   Documentation**.
+- **Building your own tool on the proxy engine?** Read
+  [Embedding ProxyCore](docs/Embedding%20ProxyCore.md). The engine is
+  published on NuGet as `Violens.ProxyCore`, with the same version as each
+  VioLens release.
 - **Contributing or curious how something works?** The rest of `docs/` is
   written for that: design rationale, scope cuts, and open follow-ups for
   each area of the app (see [Project layout](#project-layout) below for
@@ -195,10 +199,15 @@ ever leaves the device on its own.
   design, the FiddlerScript
   compatibility design, the .NET extension compatibility design, the
   Fiddler feature/tier inventory, and breakpoints research notes.
-- `src/Violens.ProxyCore` — the proxy engine: the listener, HTTP
-  message parsing, sessions, breakpoints, AutoResponder, certificates,
-  SAZ export, system-proxy registration on both Windows and macOS, and
-  the preferences store.
+- `src/Violens.ProxyCore` — the proxy engine, also published as a NuGet
+  package for other apps: the listener, HTTP message parsing, sessions,
+  breakpoints, AutoResponder, certificates, SAZ and HAR, system-proxy
+  registration on both Windows and macOS, and the preferences store. Its
+  public types are what other apps build on, so anything else is
+  `internal` (VioLens's own assemblies are listed in its `AssemblyInfo.cs`).
+- `src/Violens.AppCore` — VioLens's own app logic that isn't part of the
+  engine: Compare, TextWizard's conversions, QuickExec, the session-list
+  column layout, and the carry-over from the app's former name.
 - `src/Violens.Extensibility` — the inspector contract and the built-in
   inspectors (Headers, Raw, Hex, Cookies, Notes).
 - `src/Violens.Compatibility` — FiddlerScript compatibility
@@ -209,6 +218,9 @@ ever leaves the device on its own.
   `Violens.CompatShim` layer for extensions ported from source — see both
   design docs above for what's built and what's still scoped out.
 - `apps/Violens.DesktopUi` — the Avalonia desktop UI.
+- `samples/EmbeddingSample` — the code from the Embedding ProxyCore guide,
+  as a console app that builds with everything else (using only
+  ProxyCore's public API), so the guide can't drift from the real thing.
 - `tools/Violens.DevHost` — a console host used during early
   development of the proxy core.
 - `tools/Violens.SampleExtension` — a small, separately-compiled .NET

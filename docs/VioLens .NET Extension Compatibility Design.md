@@ -1341,11 +1341,11 @@ the thing being reproduced rather than cutting a corner.
 **`IAutoTamper` wired into `InterceptingProxyListener`**
 (`Violens.ProxyCore.Extensions.IExtensionAutoTamperHost`, implemented by
 `Violens.Compatibility.Extensions.LoadedExtensionSet`). Same
-interface-inversion pattern as `IFiddlerScriptRunner`/`FiddlerScriptRunner`
+interface-inversion pattern as `IScriptRunner`/`FiddlerScriptRunner`
 (see that pair's own remarks): `InterceptingProxyListener` takes an
 optional `IExtensionAutoTamperHost` and joins its
 `HasAnyRequestBeforeHandlers`/`HasAnyResponseBeforeHandlers` into the
-exact same body-buffering fork `IFiddlerScriptRunner.HasOnBeforeRequest`/
+exact same body-buffering fork `IScriptRunner.HasOnBeforeRequest`/
 `HasOnBeforeResponse` already forces, running immediately *after*
 FiddlerScript's own handler (an assumed, not confirmed-against-real-Fiddler
 ordering — see `IExtensionAutoTamperHost`'s own remarks) and before the
@@ -1481,7 +1481,7 @@ marked done here.
 exercises `LoadedExtensionSet` through its `IExtensionAutoTamperHost`
 surface with small, original fake `IAutoTamper` implementations — no real
 compiled extension `.dll` anywhere in the suite, matching the
-`FiddlerScriptRunner`/`IFiddlerScriptRunner` testability split this one
+`FiddlerScriptRunner`/`IScriptRunner` testability split this one
 was built to mirror. `ExtensionHost`'s own disk/reflection/
 `AssemblyLoadContext` scanning isn't covered by an automated test in this
 pass (there's no local build toolchain in this environment to compile a

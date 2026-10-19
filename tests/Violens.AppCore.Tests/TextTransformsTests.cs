@@ -1,8 +1,8 @@
 using System.Text;
-using Violens.ProxyCore.Text;
+using Violens.AppCore.Text;
 using Xunit;
 
-namespace Violens.ProxyCore.Tests;
+namespace Violens.AppCore.Tests;
 
 /// <summary>TextWizard's conversions (<see cref="TextTransforms"/>).</summary>
 public class TextTransformsTests

@@ -16,7 +16,7 @@ namespace Violens.ProxyCore.Proxy;
 /// unless a user name and password were given. Basic needs a user name and
 /// password, and is used only when the proxy offers nothing else.
 /// </summary>
-public sealed class ProxyAuthenticator : IDisposable
+internal sealed class ProxyAuthenticator : IDisposable
 {
     // Enough for a three-leg handshake plus a retry; a proxy that keeps
     // asking after that isn't going to accept these credentials.

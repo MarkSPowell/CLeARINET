@@ -62,19 +62,21 @@ public class SessionStatisticsTests
     }
 
     [Theory]
-    [InlineData("text/html", ResourceKind.Document)]
-    [InlineData("text/javascript; charset=utf-8", ResourceKind.Script)]
-    [InlineData("text/css", ResourceKind.Stylesheet)]
-    [InlineData("image/webp", ResourceKind.Image)]
-    [InlineData("font/woff2", ResourceKind.Font)]
-    [InlineData("application/problem+json", ResourceKind.Data)]
-    [InlineData("video/mp4", ResourceKind.Media)]
-    [InlineData("application/octet-stream", ResourceKind.Other)]
-    public void SortsResponsesIntoTheKindsDevToolsUses(string contentType, ResourceKind expected)
+    [InlineData("text/html", (int)ResourceKind.Document)]
+    [InlineData("text/javascript; charset=utf-8", (int)ResourceKind.Script)]
+    [InlineData("text/css", (int)ResourceKind.Stylesheet)]
+    [InlineData("image/webp", (int)ResourceKind.Image)]
+    [InlineData("font/woff2", (int)ResourceKind.Font)]
+    [InlineData("application/problem+json", (int)ResourceKind.Data)]
+    [InlineData("video/mp4", (int)ResourceKind.Media)]
+    [InlineData("application/octet-stream", (int)ResourceKind.Other)]
+    // The kind arrives as an int: ResourceKind is internal, and xUnit only
+    // runs public methods, which can't take an internal type as a parameter.
+    public void SortsResponsesIntoTheKindsDevToolsUses(string contentType, int expected)
     {
         var response = new CapturedResponse("HTTP/1.1", 200, "OK", [("Content-Type", contentType)], []);
 
-        Assert.Equal(expected, SessionStatistics.KindOf(response));
+        Assert.Equal((ResourceKind)expected, SessionStatistics.KindOf(response));
     }
 
     [Fact]

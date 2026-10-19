@@ -9,6 +9,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Violens.DesktopUi.ViewModels;
+using Violens.AppCore.Preferences;
 using Violens.ProxyCore.Preferences;
 
 namespace Violens.DesktopUi;

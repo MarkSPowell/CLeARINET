@@ -11,7 +11,7 @@ namespace Violens.ProxyCore.AutoResponder;
 /// AutoResponder's on/off switch deliberately isn't: it always starts off,
 /// for the reason the design doc gives.
 /// </summary>
-public static class AutoResponderRuleFile
+internal static class AutoResponderRuleFile
 {
     public const string FileName = "autoresponder-rules.json";
 
@@ -24,8 +24,8 @@ public static class AutoResponderRuleFile
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
 
-    /// <summary><c>autoresponder-rules.json</c> in <see cref="ViolensPaths.AppDataFolder"/>.</summary>
-    public static string DefaultPath => Path.Combine(ViolensPaths.AppDataFolder, FileName);
+    /// <summary><c>autoresponder-rules.json</c> in the host app's data folder (<see cref="ProxyHostIdentity.ResolveDataFolder"/>).</summary>
+    public static string DefaultPath => Path.Combine(ProxyEngine.Identity.ResolveDataFolder(), FileName);
 
     /// <summary>
     /// Reads the rules saved at <paramref name="path"/>: none when there's
@@ -48,7 +48,7 @@ public static class AutoResponderRuleFile
                 ?? throw new JsonException("the file is empty");
             if (saved.Version > CurrentVersion)
             {
-                throw new JsonException($"it was saved by a newer version of VioLens (format {saved.Version})");
+                throw new JsonException($"it was saved by a newer version of {ProxyEngine.Identity.ProductName} (format {saved.Version})");
             }
 
             return (saved.Rules ?? [])

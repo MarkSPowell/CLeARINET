@@ -6,7 +6,7 @@ namespace Violens.ProxyCore.Sessions;
 /// What kind of resource a response is, by its Content-Type, using the
 /// groups browsers' developer tools filter by.
 /// </summary>
-public enum ResourceKind
+internal enum ResourceKind
 {
     Document,
     Script,
@@ -19,7 +19,7 @@ public enum ResourceKind
 }
 
 /// <summary>One group in a breakdown: how many sessions, how many bytes received, and the total time.</summary>
-public sealed record StatisticsGroup(string Name, int Count, long ResponseBytes, double TotalMilliseconds);
+internal sealed record StatisticsGroup(string Name, int Count, long ResponseBytes, double TotalMilliseconds);
 
 /// <summary>
 /// The Statistics view, for a set of sessions: totals, breakdowns by status,
@@ -28,7 +28,7 @@ public sealed record StatisticsGroup(string Name, int Count, long ResponseBytes,
 /// Statistics tab, laid out the way browsers' developer tools summarise
 /// a page load.
 /// </summary>
-public sealed record SessionStatistics
+internal sealed record SessionStatistics
 {
     // Text responses smaller than this aren't worth compressing.
     private const int CompressibleThreshold = 1024;

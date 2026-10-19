@@ -6,7 +6,7 @@ using System.Text.Json.Nodes;
 using Violens.ProxyCore.Http;
 using Violens.ProxyCore.Sessions;
 
-namespace Violens.ProxyCore.Compare;
+namespace Violens.AppCore.Compare;
 
 /// <summary>How Compare Sessions shows each message before comparing.</summary>
 /// <param name="DecodeBodies">Decompress bodies (gzip, Brotli...), so the content is compared, not the compressed bytes.</param>

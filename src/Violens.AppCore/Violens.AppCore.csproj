@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    VioLens's own app logic that isn't part of the proxy engine: Compare,
+    TextWizard's conversions, QuickExec, the session-list column layout and
+    the carry-over from the app's former name. Kept out of Violens.ProxyCore
+    so the engine package only promises what other apps need, and these can
+    change with the app. Not packaged.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Violens.AppCore</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Violens.AppCore.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Violens.ProxyCore\Violens.ProxyCore.csproj" />
+  </ItemGroup>
+
+</Project>

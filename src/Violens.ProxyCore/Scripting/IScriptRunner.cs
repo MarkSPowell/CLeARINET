@@ -3,7 +3,12 @@ using Violens.ProxyCore.Http;
 namespace Violens.ProxyCore.Scripting;
 
 /// <summary>
-/// The narrow surface <c>InterceptingProxyListener</c> needs in order to run
+/// A script that sees, and can change, each request before it's sent and
+/// each response before it's returned. Any scripting engine can implement
+/// it; VioLens's FiddlerScript support (in <c>Violens.Compatibility</c>) is
+/// one. Pass an implementation to <c>InterceptingProxyListener</c>.
+///
+/// It's the narrow surface <c>InterceptingProxyListener</c> needs in order to run
 /// FiddlerScript's <c>Handlers.OnBeforeRequest</c>/<c>OnBeforeResponse</c>
 /// against a real request/response pair, without <c>Violens.ProxyCore</c>
 /// taking on a dependency on Jint or
@@ -37,7 +42,7 @@ namespace Violens.ProxyCore.Scripting;
 /// feed back into routing (those are pre-existing gaps in <c>Exchange</c>
 /// itself, unchanged by this interface).
 /// </summary>
-public interface IFiddlerScriptRunner
+public interface IScriptRunner
 {
     /// <summary>
     /// Whether the currently-loaded script defines <c>Handlers.OnBeforeRequest</c>.
@@ -71,15 +76,15 @@ public interface IFiddlerScriptRunner
     /// reservation.
     /// </param>
     /// <param name="hostname">The target hostname -- <c>oSession.hostname</c>.</param>
-    FiddlerScriptRequestResult RunOnBeforeRequest(int sessionOrdinal, string hostname, CapturedRequest request);
+    ScriptRequestResult RunOnBeforeRequest(int sessionOrdinal, string hostname, CapturedRequest request);
 
     /// <summary>Same as <see cref="RunOnBeforeRequest"/>, for <c>Handlers.OnBeforeResponse</c>.</summary>
-    FiddlerScriptResponseResult RunOnBeforeResponse(
+    ScriptResponseResult RunOnBeforeResponse(
         int sessionOrdinal, string hostname, CapturedRequest request, CapturedResponse response);
 }
 
 /// <summary>
-/// The edited request <see cref="IFiddlerScriptRunner.RunOnBeforeRequest"/>
+/// The edited request <see cref="IScriptRunner.RunOnBeforeRequest"/>
 /// hands back. Deliberately just the request itself -- an earlier version of
 /// this design also considered a force-breakpoint flag here (mirroring
 /// <c>AutoResponderOutcome.ForceBreakpointBeforeRequest</c>), but nothing
@@ -87,7 +92,7 @@ public interface IFiddlerScriptRunner
 /// implies, so it was left out rather than added as dead surface. See the
 /// design doc's own note on this.
 /// </summary>
-public sealed record FiddlerScriptRequestResult(CapturedRequest Request);
+public sealed record ScriptRequestResult(CapturedRequest Request);
 
-/// <summary>The edited response <see cref="IFiddlerScriptRunner.RunOnBeforeResponse"/> hands back. Same reasoning as <see cref="FiddlerScriptRequestResult"/> for why this carries only the response.</summary>
-public sealed record FiddlerScriptResponseResult(CapturedResponse Response);
+/// <summary>The edited response <see cref="IScriptRunner.RunOnBeforeResponse"/> hands back. Same reasoning as <see cref="ScriptRequestResult"/> for why this carries only the response.</summary>
+public sealed record ScriptResponseResult(CapturedResponse Response);

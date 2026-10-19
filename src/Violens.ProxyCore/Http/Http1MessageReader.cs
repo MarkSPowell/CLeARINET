@@ -44,7 +44,7 @@ namespace Violens.ProxyCore.Http;
 /// connection over to a raw pump, which is a deliberate follow-up rather
 /// than something to guess at here.
 /// </summary>
-public static class Http1MessageReader
+internal static class Http1MessageReader
 {
     private const int MaxStartLineOrHeaderLength = 16 * 1024;
 

@@ -88,7 +88,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 ; Not the folder a previous version was installed in: until 0.2 the app was
 ; called CLeARINET and lived in ...\CLeARINET. Upgrading installs into
-; ...\VioLens instead and removes the old folder (see [Code]).
+; ...\VioLens instead and removes what CLeARINET installed (see [Code]).
 UsePreviousAppDir=no
 
 ; See this file's own header comment for what these two do together.
@@ -179,9 +179,6 @@ Source: "{#ExtensionsDir}\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}\Extensions";
 #endif
 
 [InstallDelete]
-; Shortcuts left by a CLeARINET install (the app's former name).
-Type: files; Name: "{autoprograms}\CLeARINET.lnk"
-Type: files; Name: "{autodesktop}\CLeARINET.lnk"
 #ifdef ExtensionsDir
 ; Re-running setup with an extension unticked removes it.
 Type: files; Name: "{app}\Extensions\VioLensNetLog.dll"; Tasks: not ext_netlog
@@ -212,12 +209,51 @@ Type: filesandordirs; Name: "{app}"
 [Code]
 // Until 0.2 the app was called CLeARINET. It has the same AppId, so Setup
 // treats this as an upgrade, but the new version goes in its own folder
-// (UsePreviousAppDir=no above). Once it's installed, the old folder --
-// including the old uninstaller, whose entry this install has replaced --
-// is removed. Only a folder named CLeARINET that holds the old app's exe is
-// ever deleted. Settings live elsewhere and are carried over by the app.
+// (UsePreviousAppDir=no above). Once it's installed, what CLeARINET
+// installed in its old folder -- including the old uninstaller, whose
+// entry this install has replaced -- is removed.
+//
+// File by file, never the whole folder: another project with a similar
+// name installs to "...\Clearinet", which Windows treats as the same
+// folder, so it may hold someone else's files too. The folder itself goes
+// only if nothing else is left in it. Only a folder named CLeARINET that
+// holds the old app's exe is touched at all. Settings live elsewhere and
+// are carried over by the app.
 var
   FormerAppDir: String;
+
+procedure RemoveFormerFiles(Dir: String);
+var
+  Ext: String;
+begin
+  DeleteFile(Dir + '\Clearinet.DesktopUi.exe');
+  DeleteFile(Dir + '\Clearinet.DesktopUi.pdb');
+  DeleteFile(Dir + '\unins000.exe');
+  DeleteFile(Dir + '\unins000.dat');
+  DeleteFile(Dir + '\unins000.msg');
+  DeleteFile(Dir + '\Documentation\User Guide.md');
+  RemoveDir(Dir + '\Documentation');
+  DelTree(Dir + '\LegacyHost', True, True, True);
+
+  Ext := Dir + '\Extensions';
+  DeleteFile(Ext + '\CLeARINETNetLog.dll');
+  DeleteFile(Ext + '\CLeARINETCSP.dll');
+  DeleteFile(Ext + '\PrivacyScanner.dll');
+  DeleteFile(Ext + '\THIRD-PARTY-NOTICES.txt');
+  DeleteFile(Ext + '\licenses\CLeARINETNetLog-LICENSE.txt');
+  DeleteFile(Ext + '\licenses\CLeARINETCSP-LICENSE.txt');
+  DeleteFile(Ext + '\licenses\PrivacyScanner-LICENSE.txt');
+  RemoveDir(Ext + '\licenses');
+  RemoveDir(Ext);
+
+  if not RemoveDir(Dir) then
+    Log('Left the former CLeARINET folder in place, as it holds other files: ' + Dir);
+
+  // CLeARINET's shortcuts. Only reached when this computer had CLeARINET
+  // installed under this AppId (see CurStepChanged).
+  DeleteFile(ExpandConstant('{autoprograms}\CLeARINET.lnk'));
+  DeleteFile(ExpandConstant('{autodesktop}\CLeARINET.lnk'));
+end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
@@ -238,9 +274,6 @@ begin
       and (CompareText(ExtractFileName(FormerAppDir), 'CLeARINET') = 0)
       and (CompareText(FormerAppDir, RemoveBackslashUnlessRoot(ExpandConstant('{app}'))) <> 0)
       and FileExists(AddBackslash(FormerAppDir) + 'Clearinet.DesktopUi.exe') then
-    begin
-      if not DelTree(FormerAppDir, True, True, True) then
-        Log('Could not remove the former CLeARINET folder: ' + FormerAppDir);
-    end;
+      RemoveFormerFiles(FormerAppDir);
   end;
 end;

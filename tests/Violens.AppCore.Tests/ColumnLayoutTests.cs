@@ -1,7 +1,8 @@
+using Violens.AppCore.Preferences;
 using Violens.ProxyCore.Preferences;
 using Xunit;
 
-namespace Violens.ProxyCore.Tests;
+namespace Violens.AppCore.Tests;
 
 /// <summary>The session list's remembered column order and widths (<see cref="ColumnLayout"/>).</summary>
 public class ColumnLayoutTests

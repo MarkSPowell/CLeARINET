@@ -1,7 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Violens.DesktopUi.ViewModels;
-using Violens.ProxyCore.Compare;
+using Violens.AppCore.Compare;
 using Violens.ProxyCore.Sessions;
 
 namespace Violens.DesktopUi;

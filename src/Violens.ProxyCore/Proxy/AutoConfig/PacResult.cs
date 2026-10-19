@@ -4,7 +4,7 @@ namespace Violens.ProxyCore.Proxy.AutoConfig;
 /// Reads what <c>FindProxyForURL</c> returns: a list such as
 /// "PROXY proxy1:8080; PROXY proxy2:8080; DIRECT", tried in order.
 /// </summary>
-public static class PacResult
+internal static class PacResult
 {
     /// <summary>
     /// The routes to try, in order: an <see cref="UpstreamProxy"/>, or null

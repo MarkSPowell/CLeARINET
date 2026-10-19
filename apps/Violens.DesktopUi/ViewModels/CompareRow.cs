@@ -1,5 +1,5 @@
 using Avalonia.Media;
-using Violens.ProxyCore.Compare;
+using Violens.AppCore.Compare;
 
 namespace Violens.DesktopUi.ViewModels;
 

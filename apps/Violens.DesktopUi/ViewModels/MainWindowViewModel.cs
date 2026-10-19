@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Reflection;
 using Avalonia.Threading;
+using Violens.AppCore.Migration;
 using Violens.Compatibility.Extensions;
 using Violens.Compatibility.FiddlerScript;
 using Violens.DesktopUi.Models;
@@ -42,7 +43,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     /// <see cref="_breakpointManager"/>/<see cref="_autoResponderRules"/>
     /// above -- constructed once here (the composition root) and handed to
     /// <see cref="InterceptingProxyListener"/> as
-    /// <c>Violens.ProxyCore.Scripting.IFiddlerScriptRunner</c> on every
+    /// <c>Violens.ProxyCore.Scripting.IScriptRunner</c> on every
     /// <see cref="Start"/>. Its own <c>Load</c>/<c>Reload</c> can be called
     /// at any time, including while the proxy is running, the same way
     /// <see cref="AutoResponderRules.Rules"/> can already be edited live.
@@ -1056,7 +1057,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (InvalidOperationException ex)
         {
-            // ViolensPaths found no app-data folder at all. Settings are a
+            // The data folder couldn't be found (no app-data folder at all). Settings are a
             // convenience: run with in-memory-only preferences rather than
             // not at all.
             Console.WriteLine($"[Preferences] {ex.Message} Settings won't be saved this run.");
@@ -1134,7 +1135,18 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             // app -- there's no reason to re-install a new trust-store
             // root every time, only a fresh leaf provider (cheap, and it
             // keeps each run's leaves independent of any that came before).
-            _authority ??= new CertificateAuthority();
+            if (_authority is null)
+            {
+                _authority = new CertificateAuthority();
+
+                // CLeARINET's old root, now that VioLens's own is trusted.
+                // Only on a computer that had CLeARINET; see FormerRoots.
+                if (Program.Migration?.FoundFormerInstall == true)
+                {
+                    FormerRoots.Remove(log: message => Console.WriteLine($"[certificates] {message}"));
+                }
+            }
+
             var leafProvider = new LeafCertificateProvider(_authority.RootCertificate);
             // Port 0 is the same "let the OS pick" signal
             // StartOnAvailablePort itself falls back to on a collision --

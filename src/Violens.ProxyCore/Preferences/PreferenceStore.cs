@@ -11,7 +11,7 @@ namespace Violens.ProxyCore.Preferences;
 ///
 /// <b>Same behavior on Windows and macOS.</b> Nothing in this class
 /// branches on the operating system: the folder comes from
-/// <see cref="ViolensPaths"/>, the file bytes are fixed (UTF-8, no BOM,
+/// <see cref="ProxyHostIdentity.ResolveDataFolder"/>, the file bytes are fixed (UTF-8, no BOM,
 /// <c>\n</c>, sorted keys), every number is culture-invariant, and the
 /// atomic-replace and cross-process-lock primitives used here
 /// (<see cref="File.Move(string, string, bool)"/>,
@@ -101,9 +101,9 @@ public sealed class PreferenceStore : IPreferenceStore, IDisposable
         _values = ImmutableDictionary.Create<string, string>(NameComparer);
     }
 
-    /// <summary><c>preferences.json</c> under <see cref="ViolensPaths.AppDataFolder"/>.</summary>
+    /// <summary><c>preferences.json</c> in the host app's data folder (<see cref="ProxyHostIdentity.ResolveDataFolder"/>).</summary>
     public static PreferenceStore CreateDefault(Action<string>? log = null) =>
-        new(Path.Combine(ViolensPaths.AppDataFolder, DefaultFileName), log: log);
+        new(Path.Combine(ProxyEngine.Identity.ResolveDataFolder(), DefaultFileName), log: log);
 
     /// <summary>A store that never touches disk -- for tests and for hosts that don't want persistence.</summary>
     public static PreferenceStore CreateInMemory() => new();
@@ -448,7 +448,7 @@ public sealed class PreferenceStore : IPreferenceStore, IDisposable
         switch (TryParse(bytes, out var formatVersion, out var values))
         {
             case ParseResult.Ok when formatVersion > CurrentFormatVersion:
-                _log($"{_filePath} was written by a newer VioLens (format {formatVersion}); loading it read-only.");
+                _log($"{_filePath} was written by a newer version of {ProxyEngine.Identity.ProductName} (format {formatVersion}); loading it read-only.");
                 return (values!, true);
 
             case ParseResult.Ok:
@@ -554,7 +554,7 @@ public sealed class PreferenceStore : IPreferenceStore, IDisposable
         using var crossProcessLock = TryAcquireCrossProcessLock();
         if (crossProcessLock is null)
         {
-            _log($"Another VioLens kept {_lockFilePath} locked for over {LockTimeout.TotalSeconds:0} s; will retry the save later.");
+            _log($"Another copy of {ProxyEngine.Identity.ProductName} kept {_lockFilePath} locked for over {LockTimeout.TotalSeconds:0} s; will retry the save later.");
             return false;
         }
 
@@ -597,7 +597,7 @@ public sealed class PreferenceStore : IPreferenceStore, IDisposable
         switch (TryParse(bytes, out var formatVersion, out var values))
         {
             case ParseResult.Ok when formatVersion > CurrentFormatVersion:
-                _log($"{_filePath} was replaced by a newer VioLens (format {formatVersion}); no longer saving changes this run.");
+                _log($"{_filePath} was replaced by a newer version of {ProxyEngine.Identity.ProductName} (format {formatVersion}); no longer saving changes this run.");
                 return null;
 
             case ParseResult.Ok:
