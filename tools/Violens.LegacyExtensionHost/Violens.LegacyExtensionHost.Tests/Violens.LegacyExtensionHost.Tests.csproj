@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Tests for the legacy extension host, added only to this sub-project's
+    own Violens.LegacyExtensionHost.sln, never to the main VioLens.sln,
+    for the same reason the host and shim projects themselves aren't
+    referenced from there (see their own csproj remarks).
+
+    net48, not net10.0, and PlatformTarget=x86: this test process loads the
+    same real compiled Fiddler Classic extension DLLs the host does, via
+    the real Violens.LegacyExtensionHost.LegacyExtensionLoader (not a
+    reimplementation), so it needs to be binary-compatible with them the
+    same way the host process is, including AustralianImages.dll's own
+    32-bit-only requirement (see Violens.LegacyExtensionHost.csproj's own
+    remarks on COMIMAGE_FLAGS_32BITREQUIRED).
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x86</PlatformTarget>
+    <IsPackable>false</IsPackable>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>Violens.LegacyExtensionHost.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Violens.LegacyExtensionHost.CompatShim\Violens.LegacyExtensionHost.CompatShim.csproj" />
+    <ProjectReference Include="..\Violens.LegacyExtensionHost\Violens.LegacyExtensionHost.csproj" />
+    <!-- For SessionBridgeRunnerTests/SessionBridgeServerTests' own use of
+         BridgeRequestMessage/BridgeResponseMessage/WireRequest/WireResponse/
+         SessionBridgeProtocol directly. -->
+    <ProjectReference Include="..\Violens.LegacyExtensionHost.Bridge\Violens.LegacyExtensionHost.Bridge.csproj" />
+  </ItemGroup>
+
+</Project>

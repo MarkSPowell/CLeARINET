@@ -1,5 +1,5 @@
 # Signs one file with Azure Artifact Signing. Inno Setup runs this (see the
-# SignTool lines in CLeARINET.iss) for the installer and the uninstaller it
+# SignTool lines in VioLens.iss) for the installer and the uninstaller it
 # builds; .github/workflows/release-windows.yml sets it up.
 #
 # Needs: the ArtifactSigning PowerShell module installed, an Azure sign-in
@@ -28,8 +28,8 @@ Invoke-ArtifactSigning `
     -FileDigest SHA256 `
     -TimestampRfc3161 'http://timestamp.acs.microsoft.com' `
     -TimestampDigest SHA256 `
-    -Description 'CLeARINET' `
-    -DescriptionUrl 'https://github.com/MarkSPowell/CLeARINET' `
+    -Description 'VioLens' `
+    -DescriptionUrl 'https://github.com/MarkSPowell/VioLens' `
     -ExcludeInteractiveBrowserCredential
 
 # Fail loudly if nothing was signed, so Inno Setup stops the build rather

@@ -1,16 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Eric Lawrence's FiddlerImportNetlog, built unmodified (apart from
-       port.ps1 deleting its `using Fiddler;` lines) against CLeARINET's
-       Fiddler-shaped compatibility layer. Not part of CLeARINET.sln: it
+       port.ps1 deleting its `using Fiddler;` lines) against VioLens's
+       Fiddler-shaped compatibility layer. Not part of VioLens.sln: it
        needs the upstream source, which port.ps1 fetches into ../.work/.
        See ../README.md. -->
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <!-- Shipped as CLeARINETNetLog.dll: CLeARINET doesn't put "Fiddler" in
+    <!-- Shipped as VioLensNetLog.dll: VioLens doesn't put "Fiddler" in
          the names of files it installs (tenet 5). The source is unchanged. -->
-    <AssemblyName>CLeARINETNetLog</AssemblyName>
+    <AssemblyName>VioLensNetLog</AssemblyName>
     <RootNamespace>FiddlerImportNetlog</RootNamespace>
 
     <!-- Upstream code is .NET Framework-era C#: no implicit usings, no
@@ -63,10 +63,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Private=false: the host supplies Clearinet.Compatibility at run time;
+    <!-- Private=false: the host supplies Violens.Compatibility at run time;
          a second copy next to the extension must never be loaded (see
          ExtensionHost's load context). -->
-    <ProjectReference Include="../../../src/Clearinet.Compatibility/Clearinet.Compatibility.csproj" Private="false" />
+    <ProjectReference Include="../../../src/Violens.Compatibility/Violens.Compatibility.csproj" Private="false" />
   </ItemGroup>
 
 </Project>

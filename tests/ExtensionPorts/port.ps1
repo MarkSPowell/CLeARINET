@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Fetches real Fiddler Classic extensions at pinned commits and applies
-    CLeARINET's port to each, into tests/ExtensionPorts/.work/ (git-ignored).
+    VioLens's port to each, into tests/ExtensionPorts/.work/ (git-ignored).
 
 .DESCRIPTION
     Upstream source is never committed to this repo. Each extension is
@@ -14,13 +14,13 @@
       1. Delete every `using Fiddler;` line. Nothing else in the upstream
          source is touched.
       2. The port project adds one file, PortGlobalUsings.cs, which imports
-         Clearinet.CompatShim and aliases `Fiddler` to it, so qualified
+         Violens.CompatShim and aliases `Fiddler` to it, so qualified
          names like `Fiddler.Parser.ParseRequest(...)` compile unchanged.
       3. A new SDK-style project file targeting net10.0.
 
     An extension with a WinForms UI can't build that way on either
-    platform. It gets a CLeARINET-only fork instead, with its own project
-    file, which this script fetches and copies unchanged (see
+    platform. It gets a VioLens-only fork instead, with its own project
+    file, which this script fetches and copies (see
     tests/ExtensionPorts/README.md).
 
     One script for every platform: it runs in Windows PowerShell 5.1 (built
@@ -36,7 +36,7 @@
     pwsh tests/ExtensionPorts/port.ps1
 
 .PARAMETER CspSource
-    A local clone of the CSP Rule Collector's CLeARINET fork
+    A local clone of the CSP Rule Collector's VioLens fork
     (MarkSPowell/CSP-CLeARINET-Extension). Used instead of downloading, so
     changes can be tried before they're pushed.
 
@@ -149,7 +149,7 @@ Invoke-ExtensionPort `
 # Telerik's Fiddler docs (Apache-2.0). It's one C# code block in a Markdown
 # page, fetched at a pinned commit. Besides the usual `using Fiddler;` lines,
 # its port drops `using System.Windows.Forms;` and the `System.Windows.Forms.`
-# prefix on MenuItem: CLeARINET's compatibility layer has a MenuItem of its
+# prefix on MenuItem: VioLens's compatibility layer has a MenuItem of its
 # own, which the app draws as an Avalonia menu.
 function Invoke-DocsSamplePort {
     param(
@@ -208,12 +208,35 @@ Invoke-DocsSamplePort `
     -MarkdownPath 'extend-fiddler/cookieextension.md' `
     -OutputFile 'TagCookies.cs'
 
-# The CSP Rule Collector is a CLeARINET-only fork with its own project file
-# (CLeARINETCSP.csproj) and no Fiddler code left in it, so it's copied as it
-# is: nothing to port. The test project builds it from .work/CLeARINETCSP/.
+# The CSP Rule Collector is a VioLens-only fork with its own project file
+# and no Fiddler code left in it, so there's nothing to port. The test
+# project builds it from .work/VioLensCSP/.
+#
+# The pinned commit is from before the project was renamed from CLeARINET,
+# so its source still uses the old names (CLeARINETCSP.csproj, the
+# Clearinet.* namespaces). Until the fork itself is renamed and re-pinned,
+# the copy renames them on the way in -- the same text replacement the
+# rename made in this repo, and nothing else.
 # To try unpushed changes, pass -CspSource <local clone> instead.
 $cspRepository = 'MarkSPowell/CSP-CLeARINET-Extension'
 $cspCommit = '4d4cb9ab242d509ee2a4cdbc14ffa1fc9b4c9d38'
+
+# Ordinal, case-sensitive, applied in order. ericlaw1979/Clearinet is
+# someone else's project and keeps its name.
+$formerNames = @(
+    @('ericlaw1979/Clearinet', 'ericlaw1979/<<KEEP>>'),
+    @('CLeARINET', 'VioLens'),
+    @('CLEARINET', 'VIOLENS'),
+    @('Clearinet', 'Violens'),
+    @('clearinet', 'violens'),
+    @('ericlaw1979/<<KEEP>>', 'ericlaw1979/Clearinet')
+)
+$renamedExtensions = @('.cs', '.csproj', '.props', '.targets', '.json', '.axaml', '.xaml', '.resx', '.sln', '.config')
+
+function Rename-FormerName([string] $Text) {
+    foreach ($pair in $formerNames) { $Text = $Text.Replace($pair[0], $pair[1]) }
+    return $Text
+}
 
 function Copy-ExtensionSource {
     param(
@@ -227,29 +250,41 @@ function Copy-ExtensionSource {
     if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
 
     $files = 0
+    $renamed = 0
     foreach ($file in Get-ChildItem -LiteralPath $from -Recurse -File -Force) {
         $relative = $file.FullName.Substring($from.Length).TrimStart('\', '/')
         # A local clone has git data and may have build output; neither is source.
         if ($relative -match '(^|[\\/])(bin|obj|\.git|\.vs)([\\/]|$)') { continue }
 
-        $destination = Join-Path $target $relative
+        $destination = Join-Path $target (Rename-FormerName $relative)
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
-        Copy-Item -LiteralPath $file.FullName -Destination $destination
+
+        if ($renamedExtensions -contains $file.Extension.ToLowerInvariant()) {
+            $bytes = [IO.File]::ReadAllBytes($file.FullName)
+            $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+            $text = [IO.File]::ReadAllText($file.FullName)
+            $converted = Rename-FormerName $text
+            if ($converted -cne $text) { $renamed++ }
+            [IO.File]::WriteAllText($destination, $converted, (New-Object Text.UTF8Encoding($hasBom)))
+        }
+        else {
+            Copy-Item -LiteralPath $file.FullName -Destination $destination
+        }
         $files++
     }
 
-    Write-Host "Copied $Name from ${Label}: $files file(s), unchanged."
+    Write-Host "Copied $Name from ${Label}: $files file(s), former name replaced in $renamed."
 }
 
 if ($CspSource) {
-    Copy-ExtensionSource -Name 'CLeARINETCSP' -From $CspSource -Label "local clone $CspSource"
+    Copy-ExtensionSource -Name 'VioLensCSP' -From $CspSource -Label "local clone $CspSource"
 }
 elseif ($cspCommit) {
-    $root = Get-PinnedSource -Name 'CLeARINETCSP' -Repository $cspRepository -Commit $cspCommit
-    Copy-ExtensionSource -Name 'CLeARINETCSP' -From $root -Label "$cspRepository @ $($cspCommit.Substring(0, 7))"
+    $root = Get-PinnedSource -Name 'VioLensCSP' -Repository $cspRepository -Commit $cspCommit
+    Copy-ExtensionSource -Name 'VioLensCSP' -From $root -Label "$cspRepository @ $($cspCommit.Substring(0, 7))"
 }
 else {
-    $stale = Join-Path $work 'CLeARINETCSP'
+    $stale = Join-Path $work 'VioLensCSP'
     if (Test-Path -LiteralPath $stale) { Remove-Item -LiteralPath $stale -Recurse -Force }
-    Write-Host 'Skipped CLeARINETCSP: no commit pinned yet. Pass -CspSource <local clone> to use one.'
+    Write-Host 'Skipped VioLensCSP: no commit pinned yet. Pass -CspSource <local clone> to use one.'
 }

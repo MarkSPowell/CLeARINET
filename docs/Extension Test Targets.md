@@ -1,13 +1,13 @@
 # Extension Test Targets
 
 Four real, public Fiddler Classic extensions chosen as the first ones to
-get working in CLeARINET. This doc checks each one against what CLeARINET
+get working in VioLens. This doc checks each one against what VioLens
 supports today, lists what's missing and proposes an order. It's based on reading each extension's public source.
 No Fiddler source was consulted (see the clean-room policy in
 CONTRIBUTING.md).
 
 **Where things stand:** all four are covered. The NetLog importer and the
-CSP Rule Collector run in CLeARINET on Windows and macOS; cookie viewing
+CSP Rule Collector run in VioLens on Windows and macOS; cookie viewing
 is built in, with Eric Lawrence's cookie sample ported as a test of the
 extension UI hooks; and image-bloat detection is built in, designed from
 the ImageBloat blog posts' description of what it does (no code from them). The Status table below is current; the gap analysis after it was
@@ -26,17 +26,17 @@ written before the work started and is kept for its reasoning.
 |---|---|---|
 | 1 | NetLog importer | **Ported (milestones 1 and 2).** Builds from upstream with only its three `using Fiddler;` lines deleted. Loads through `ExtensionHost` and imports on both platforms in CI (the extension-ports test step in `ci.yml`). See "NetLog port: known differences" below. Included with the installers as an optional extension. |
 | 2 | Cookie/P3P sample | **Built in, and ported as a test.** Cookie viewing is built in (the Cookies tab, `CookiesInspector`). The sample itself (Eric Lawrence's Privacy Scanner) is also ported, from Telerik's docs repo at a pinned commit, as the test of extension menus, flag-bound session-list columns and row colours. Also included with the installers as an optional extension, off by default. |
-| 3 | ImageBloat | **Built in.** CLeARINET's own `ImageBloatAnalyzer` finds bytes that don't change how a PNG, JPEG, GIF or WebP looks (metadata, comments, text, trailing data), shown in an Image Bloat column (heavily bloated rows are tinted) and on the ImageView tab. Designed from the published description of the extension's behaviour; its rules come from the format specifications, not its code. Not done: the extension's in-page overlay, which rewrites images in flight. |
-| 4 | CSP Rule Collector | **CLeARINET-only fork** ([MarkSPowell/CSP-CLeARINET-Extension](https://github.com/MarkSPowell/CSP-CLeARINET-Extension), builds `CLeARINETCSP.dll`). Its traffic code runs on the new per-request hooks (`ShimAutoTamperSet`) with only renames; its tab is rewritten in Avalonia. Fiddler Classic users keep the original. Headless tests in `tests/ExtensionPorts`, built from the fork at a pinned commit. Tried in the app against real sites. The fork also fixes two things that affect the original: current browsers report inline code and `eval()` as the keywords `inline`/`eval` (the original turned them into `inline:`), and rule order no longer depends on the machine's language settings. It adds **Tools > Hide CSP Report Requests**. Included with the installers as an optional extension. |
+| 3 | ImageBloat | **Built in.** VioLens's own `ImageBloatAnalyzer` finds bytes that don't change how a PNG, JPEG, GIF or WebP looks (metadata, comments, text, trailing data), shown in an Image Bloat column (heavily bloated rows are tinted) and on the ImageView tab. Designed from the published description of the extension's behaviour; its rules come from the format specifications, not its code. Not done: the extension's in-page overlay, which rewrites images in flight. |
+| 4 | CSP Rule Collector | **VioLens-only fork** ([MarkSPowell/CSP-CLeARINET-Extension](https://github.com/MarkSPowell/CSP-CLeARINET-Extension), builds `VioLensCSP.dll`). Its traffic code runs on the new per-request hooks (`ShimAutoTamperSet`) with only renames; its tab is rewritten in Avalonia. Fiddler Classic users keep the original. Headless tests in `tests/ExtensionPorts`, built from the fork at a pinned commit. Tried in the app against real sites. The fork also fixes two things that affect the original: current browsers report inline code and `eval()` as the keywords `inline`/`eval` (the original turned them into `inline:`), and rule order no longer depends on the machine's language settings. It adds **Tools > Hide CSP Report Requests**. Included with the installers as an optional extension. |
 
 ## Port or build in?
 
 Before porting any extension, whether one of these four or a later one,
-decide whether its feature belongs in CLeARINET itself. Porting proves
+decide whether its feature belongs in VioLens itself. Porting proves
 compatibility; building in serves users better when the feature is
 something almost everyone needs. Record the verdict and the reason here.
 
-**Build it into CLeARINET when most of these are true:**
+**Build it into VioLens when most of these are true:**
 
 - Most users would want it. Examples: it's standard HTTP behaviour
   (cookies, caching, compression), or it's a Fiddler Classic built-in
@@ -79,23 +79,23 @@ something almost everyone needs. Record the verdict and the reason here.
 ## The central finding: today's "source-level" compatibility isn't close enough yet
 
 *Since resolved: the Fiddler-shaped layer proposed here now exists
-(`Clearinet.CompatShim`, in the main app, on both platforms). Kept for
+(`Violens.CompatShim`, in the main app, on both platforms). Kept for
 the reasoning.*
 
 The .NET Extension Compatibility Design doc promises that an extension
 with source can be ported with "a new `using`/base-interface and a
 recompile." Against real extensions, that doesn't hold yet, on either of
-CLeARINET's two extension paths:
+VioLens's two extension paths:
 
-- **The main app's path** (`Clearinet.Compatibility`, net10.0,
-  cross-platform) uses CLeARINET-native shapes: `Exchange` instead of
+- **The main app's path** (`Violens.Compatibility`, net10.0,
+  cross-platform) uses VioLens-native shapes: `Exchange` instead of
   `Session`, and `ISessionImporter` returning
   `IReadOnlyList<ImportedSession>` instead of `Session[]`. Every
   `Session.BuildFromData`, `HTTPRequestHeaders`,
   `FiddlerApplication.Log` and `Utilities.*` call would have to be
   rewritten. For the NetLog importer that means touching most of its
   1,700-line parser. That's a rewrite, not a port.
-- **The legacy host's path** (`Clearinet.CompatShim`, net48) is shaped
+- **The legacy host's path** (`Violens.CompatShim`, net48) is shaped
   like Fiddler's own API, but it only covers members seen in five other
   extensions. It only bridges `IAutoTamper`, not importers, and it only
   runs on Windows.
@@ -104,7 +104,7 @@ CLeARINET's two extension paths:
 The legacy host can never run on a Mac. The proposal below is to add a
 Fiddler-shaped source-compatibility layer to the main app that runs on
 net10.0 on both platforms. The goal is that porting one of these
-extensions means changing `using Fiddler;` to the CLeARINET namespace,
+extensions means changing `using Fiddler;` to the VioLens namespace,
 retargeting the project to net10.0 and nothing else.
 
 Two useful side effects:
@@ -128,12 +128,12 @@ the only one that exercises the import path. A working NetLog import also
 closes a README "Known limitations" item ("No HAR or Chromium Netlog
 import").
 
-**What it uses and CLeARINET lacks today:**
+**What it uses and VioLens lacks today:**
 
 - `ISessionImporter.ImportSessions(string, Dictionary<string,object>, EventHandler<ProgressCallbackEventArgs>)` returning `Session[]`.
-  CLeARINET's version has a different signature and return type.
+  VioLens's version has a different signature and return type.
 - `[ProfferFormat(name, description, extensions)]`. It uses the
-  three-argument form. CLeARINET's attribute only takes two.
+  three-argument form. VioLens's attribute only takes two.
 - `Session.BuildFromData(bool, HTTPRequestHeaders, byte[], HTTPResponseHeaders, byte[], SessionFlags)`.
   Nothing equivalent exists.
 - `HTTPRequestHeaders(string path, string[] headers)`,
@@ -153,10 +153,10 @@ import").
 
 **Parity notes:**
 
-- `ObtainOpenFilename` is a WinForms dialog in Fiddler. In CLeARINET it
+- `ObtainOpenFilename` is a WinForms dialog in Fiddler. In VioLens it
   has to route to Avalonia's cross-platform file picker through a
   host-provided callback. It isn't called when the host passes
-  `Filename` in the options, which CLeARINET's File > Import can always
+  `Filename` in the options, which VioLens's File > Import can always
   do.
 - `UNSTABLE_DescribeClientHello` / `ServerHello` produce descriptive
   text only. A reasonable first cut returns a hex dump plus the parsed
@@ -188,7 +188,7 @@ session-list column (`lvSessions.AddBoundColumn`) and row colors
   menus and `[BindUIColumn]` columns. This is mostly wiring.
 - `ui-backcolor` isn't honored by the session grid at all yet.
 - `FiddlerApplication.Prefs` (backed by `PreferenceStore`, see above).
-- `IAutoTamper2.OnPeekAtResponseHeaders` is already built in CLeARINET's
+- `IAutoTamper2.OnPeekAtResponseHeaders` is already built in VioLens's
   interfaces. Check that the listener actually calls it.
 
 **Parity note:** Fiddler's `MenuItem`/`ListView` types are WinForms. The
@@ -197,7 +197,7 @@ never loads WinForms, which doesn't exist on macOS.
 
 ### 3. ImageBloat (third, once the source is confirmed)
 
-**Superseded:** built in as CLeARINET's own feature instead (see the Status
+**Superseded:** built in as VioLens's own feature instead (see the Status
 table). The notes below are kept for the reasoning.
 
 **Its GitHub repo isn't publicly available.** The source is published in
@@ -261,7 +261,7 @@ has unit tests for it.
 ## Proposed order and milestones
 
 1. **Fiddler-shaped compatibility layer, core types.** `Session` (backed
-   by CLeARINET's own session, so there's still one set of mutation
+   by VioLens's own session, so there's still one set of mutation
    plumbing), `HTTPRequestHeaders`/`HTTPResponseHeaders`, `SessionFlags`,
    `SessionTimers`, `Parser`, `FiddlerApplication.Log`/`Prefs`/
    `DoNotifyUser`/`ReportException`, and the `Utilities` subset above.
@@ -277,12 +277,12 @@ has unit tests for it.
 3. **Extension UI hooks and a built-in Cookies inspector.** The menu,
    column and row-color adapters, plus `ui-backcolor` in the grid, tested
    with the cookie sample as a fixture. The Cookies inspector is
-   CLeARINET's own feature (see "Port or build in?"). **Done**, plus
+   VioLens's own feature (see "Port or build in?"). **Done**, plus
    Edit > Remove Selected/All Sessions.
 4. **CSP.** Bypass responses, one session object per request, and
    multi-value `headers.Add`; the tab became an Avalonia rewrite in a
-   CLeARINET-only fork. `x-replywithtunnel` turned out not to be needed:
-   CLeARINET always answers CONNECT itself. **Done.**
+   VioLens-only fork. `x-replywithtunnel` turned out not to be needed:
+   VioLens always answers CONNECT itself. **Done.**
 5. **Image-bloat detection built in** (see "Port or build in?"). It
    replaces porting ImageBloat. **Done** (column and ImageView breakdown;
    the in-page overlay isn't).
@@ -300,11 +300,11 @@ it inside Fiddler Classic. None of them needed a change to the importer's source
   Framework and modern .NET, so a one-line upstream change would fix it
   everywhere. Worth offering upstream.
 - **TLS ClientHello/ServerHello descriptions** in that same summary use
-  CLeARINET's own text layout (`Utilities.UNSTABLE_DescribeClientHello`
+  VioLens's own text layout (`Utilities.UNSTABLE_DescribeClientHello`
   is undocumented, so it was written from the TLS RFCs). The two
   properties the importer relies on hold: the first two lines are a
   header, and a TLS 1.3 ServerHello contains `supported_versions\tTls1.3`.
-- **Only the start time survives.** CLeARINET's native session has one
+- **Only the start time survives.** VioLens's native session has one
   timestamp, so the importer's other `SessionTimers` values are dropped on
   import.
 - **String flags are kept, `BitFlags` aren't.** Flags such as
@@ -329,12 +329,12 @@ Eric Lawrence's cookie/P3P sample is the smallest real extension that uses the U
 hooks most extensions use. Its port deletes its `using Fiddler;` and
 `using System.Windows.Forms;` lines and drops the `System.Windows.Forms.`
 prefix from `MenuItem` (seven places); nothing else changes. To run, it
-needed three things CLeARINET now has:
+needed three things VioLens now has:
 
 - **`FiddlerApplication.UI`**: a stand-in for Fiddler's main window with
   `mnuMain` (top-level menus, shown before Help), `mnuTools` (Tools menu
   items) and `lvSessions.AddBoundColumn` (a session-list column showing a
-  session flag). `MenuItem` is CLeARINET's own, WinForms-shaped
+  session flag). `MenuItem` is VioLens's own, WinForms-shaped
   (`Text` with `&` access keys, `Checked`, `Enabled`, `MenuItems`,
   `Click`); the app draws it with Avalonia on both platforms.
 - **Row styling from flags**: `ui-backcolor`, `ui-color`, `ui-bold`,

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Smoke-tests a finished CLeARINET .dmg on the macOS release runner, so a
+# Smoke-tests a finished VioLens .dmg on the macOS release runner, so a
 # broken bundle fails the build instead of reaching someone with a Mac:
 #
-#   1. The .dmg mounts, and holds CLeARINET.app and an Applications link.
+#   1. The .dmg mounts, and holds VioLens.app and an Applications link.
 #   2. The app's signature verifies the way macOS checks it (strict, and
 #      every nested file sealed), and Contents/MacOS holds only the
 #      executable (anything else there breaks the signature).
@@ -27,8 +27,8 @@ if [[ $# -ne 1 ]]; then
 fi
 
 DMG_PATH="$1"
-APP_NAME="CLeARINET"
-EXECUTABLE_NAME="Clearinet.DesktopUi"
+APP_NAME="VioLens"
+EXECUTABLE_NAME="Violens.DesktopUi"
 LAUNCH_WAIT_SECONDS=20
 
 failures=0
@@ -83,9 +83,9 @@ echo "3. Documentation"
 echo "4. Optional Extensions"
 OPTIONAL_DIR="$MOUNT_POINT/Optional Extensions"
 for expected in \
-  CLeARINETNetLog.dll CLeARINETCSP.dll PrivacyScanner.dll \
+  VioLensNetLog.dll VioLensCSP.dll PrivacyScanner.dll \
   README.txt THIRD-PARTY-NOTICES.txt \
-  licenses/CLeARINETNetLog-LICENSE.txt licenses/CLeARINETCSP-LICENSE.txt licenses/PrivacyScanner-LICENSE.txt; do
+  licenses/VioLensNetLog-LICENSE.txt licenses/VioLensCSP-LICENSE.txt licenses/PrivacyScanner-LICENSE.txt; do
   [[ -f "$OPTIONAL_DIR/$expected" ]] && pass "$expected" || fail "Optional Extensions/$expected is missing"
 done
 

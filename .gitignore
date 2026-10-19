@@ -4,7 +4,7 @@ obj/
 out/
 
 # Windows installer build output (.github/workflows/release-windows.yml and
-# installer/CLeARINET.iss): the dotnet publish payload and Inno Setup's own
+# installer/VioLens.iss): the dotnet publish payload and Inno Setup's own
 # compiled setup.exe, both easily 50-100+ MB and neither meant to be
 # committed -- CI produces these fresh on every tagged release and attaches
 # the installer to the GitHub Release itself, not to the repository.
@@ -48,9 +48,9 @@ Thumbs.db
 # Personal build/test/run shortcut -- convenient locally, not meant to
 # become a maintained, cross-platform project script.
 /test.bat
-tools/Clearinet.LegacyExtensionHost/Retarget-LegacyExtension.ps1
-tools/Clearinet.LegacyExtensionHost/Retarget-LegacyExtension.ps1
-tools/Clearinet.LegacyExtensionHost/Retarget-LegacyExtension.ps1
+tools/Violens.LegacyExtensionHost/Retarget-LegacyExtension.ps1
+tools/Violens.LegacyExtensionHost/Retarget-LegacyExtension.ps1
+tools/Violens.LegacyExtensionHost/Retarget-LegacyExtension.ps1
 
 # Upstream extension source fetched by tests/ExtensionPorts/port.ps1, and the
 # ports built from it. Third-party code is fetched at a pinned commit on

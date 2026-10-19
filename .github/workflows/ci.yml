@@ -23,17 +23,17 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore
-        run: dotnet restore CLeARINET.sln
+        run: dotnet restore VioLens.sln
 
       - name: Build
-        run: dotnet build CLeARINET.sln --no-restore --configuration Release
+        run: dotnet build VioLens.sln --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test CLeARINET.sln --no-build --configuration Release --verbosity normal
+        run: dotnet test VioLens.sln --no-build --configuration Release --verbosity normal
 
       - name: Fetch and port upstream extensions
         shell: pwsh
         run: ./tests/ExtensionPorts/port.ps1
 
       - name: Test ported extensions
-        run: dotnet test tests/ExtensionPorts/Clearinet.ExtensionPorts.Tests/Clearinet.ExtensionPorts.Tests.csproj --configuration Release --verbosity normal
+        run: dotnet test tests/ExtensionPorts/Violens.ExtensionPorts.Tests/Violens.ExtensionPorts.Tests.csproj --configuration Release --verbosity normal

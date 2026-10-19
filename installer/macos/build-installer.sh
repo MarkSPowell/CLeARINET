@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Assembles a `dotnet publish -r osx-arm64` output into a real CLeARINET.app
+# Assembles a `dotnet publish -r osx-arm64` output into a real VioLens.app
 # bundle, then packages that bundle into a .dmg -- the macOS equivalent of
-# what installer/CLeARINET.iss (Inno Setup) does for the Windows installer.
+# what installer/VioLens.iss (Inno Setup) does for the Windows installer.
 # There's no push-button "ISCC.exe" for macOS the way there is for Windows,
 # so this is a plain script instead of a config file for some other tool --
 # see .github/workflows/release-macos.yml, the only caller, for how this is
@@ -24,17 +24,17 @@
 #     "damaged"). So the finished bundle is ad-hoc signed as a whole below. Gatekeeper then shows its ordinary
 #     "can't be verified" prompt instead, which the user can get past once
 #     (System Settings > Privacy & Security > Open Anyway, or
-#     `xattr -dr com.apple.quarantine /Applications/CLeARINET.app`).
+#     `xattr -dr com.apple.quarantine /Applications/VioLens.app`).
 #   - No custom app icon (no CFBundleIconFile below) -- matches
-#     installer/CLeARINET.iss's own precedent of shipping no standalone
+#     installer/VioLens.iss's own precedent of shipping no standalone
 #     .ico today either; see that file's own remarks.
 #
 # Usage: build-installer.sh <version> <bundleVersion> <publishDir> <outputDmgPath> [extensionsDir]
 #   version        Full version string, e.g. "0.1.1-preview.1" -- goes into
 #                   CFBundleShortVersionString (Finder's "Get Info" version)
 #                   and the .app bundle's own display name is left as plain
-#                   "CLeARINET", matching the Windows installer's own
-#                   MyAppName/MyAppVersion split (installer/CLeARINET.iss).
+#                   "VioLens", matching the Windows installer's own
+#                   MyAppName/MyAppVersion split (installer/VioLens.iss).
 #   bundleVersion  Purely numeric X.X.X.X derivative of the above (no
 #                   prerelease suffix), e.g. "0.1.1.0" -- goes into
 #                   CFBundleVersion. Same reasoning as the Windows release
@@ -43,8 +43,8 @@
 #                   and neither should a well-formed CFBundleVersion.
 #   publishDir     The `dotnet publish -r osx-arm64 --self-contained
 #                   -p:PublishSingleFile=true` output directory -- expects
-#                   to find the Clearinet.DesktopUi executable directly
-#                   inside it (see Clearinet.DesktopUi.csproj's own remarks
+#                   to find the Violens.DesktopUi executable directly
+#                   inside it (see Violens.DesktopUi.csproj's own remarks
 #                   on PublishSingleFile for why nothing else needs
 #                   flattening here the way the legacy-host build does on
 #                   the Windows side).
@@ -67,15 +67,12 @@ PUBLISH_DIR="$3"
 OUTPUT_DMG_PATH="$4"
 EXTENSIONS_DIR="${5:-}"
 
-APP_NAME="CLeARINET"
-EXECUTABLE_NAME="Clearinet.DesktopUi"
-# Arbitrary, not tied to any domain CLeARINET actually owns -- reverse-DNS
-# bundle identifiers only need to be locally unique, not a real registered
-# domain, and this project doesn't have one yet (see the Project Plan's
-# "Still undecided" section, which already flags the name/trademark
-# question as open). Easy to change later; nothing else in this script or
-# the app itself depends on this specific string.
-BUNDLE_IDENTIFIER="net.clearinet.desktopui"
+APP_NAME="VioLens"
+EXECUTABLE_NAME="Violens.DesktopUi"
+# Reverse-DNS of violens.dev, which the project owns. Changed from
+# net.clearinet.desktopui with the rename, so macOS sees VioLens as a new
+# app; its settings are carried over by the app itself, not by macOS.
+BUNDLE_IDENTIFIER="dev.violens.desktopui"
 
 EXECUTABLE_PATH="$PUBLISH_DIR/$EXECUTABLE_NAME"
 if [[ ! -f "$EXECUTABLE_PATH" ]]; then
@@ -96,13 +93,13 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 # The executable itself goes straight into Contents/MacOS, matching every
 # other Mac app bundle's own layout, under its own actual name --
-# CFBundleExecutable below points at this same name, not "CLeARINET", so
+# CFBundleExecutable below points at this same name, not "VioLens", so
 # the two stay in sync without needing a rename.
 cp "$EXECUTABLE_PATH" "$MACOS_DIR/$EXECUTABLE_NAME"
 chmod +x "$MACOS_DIR/$EXECUTABLE_NAME"
 
 # Everything else PublishSingleFile left loose beside the executable (the
-# Documentation/User Guide.md folder -- see Clearinet.DesktopUi.csproj's
+# Documentation/User Guide.md folder -- see Violens.DesktopUi.csproj's
 # None/Link entry for it) goes into Resources only. Contents/MacOS must
 # hold nothing but code: codesign treats every file there as a code
 # subcomponent, and a non-code file (a .pdb, a .md) fails verification with
@@ -177,7 +174,7 @@ rm -f "$OUTPUT_DMG_PATH"
 # UDZO = compressed, read-only -- the same format every ordinary
 # drag-to-Applications .dmg distribution uses. The Applications symlink
 # alongside the .app in the staged volume is what makes Finder show the
-# familiar "drag CLeARINET.app onto Applications" arrangement when the
+# familiar "drag VioLens.app onto Applications" arrangement when the
 # .dmg is opened; nothing generates that automatically just from
 # -srcfolder containing only the .app itself.
 DMG_STAGING_DIR="$WORK_DIR/dmg-staging"
@@ -194,24 +191,24 @@ if [[ -n "$EXTENSIONS_DIR" ]]; then
   mkdir -p "$OPTIONAL_DIR"
   cp -R "$EXTENSIONS_DIR"/. "$OPTIONAL_DIR/"
   cat > "$OPTIONAL_DIR/README.txt" <<'README'
-Optional extensions for CLeARINET
+Optional extensions for VioLens
 =================================
 
-CLeARINET works without these. To add one, copy its .dll into
+VioLens works without these. To add one, copy its .dll into
 
-    ~/Documents/CLeARINET/Extensions
+    ~/Documents/VioLens/Extensions
 
-(create the folder if it isn't there), then restart CLeARINET.
+(create the folder if it isn't there), then restart VioLens.
 
-  CLeARINETNetLog.dll      NetLog importer: File > Import via Extension,
+  VioLensNetLog.dll      NetLog importer: File > Import via Extension,
                            for Chromium NetLog JSON captures.
-  CLeARINETCSP.dll         CSP Rule Collector: builds a
+  VioLensCSP.dll         CSP Rule Collector: builds a
                            Content-Security-Policy for the sites you browse.
   PrivacyScanner.dll       Privacy Scanner: colours responses that set
                            cookies and checks P3P headers (P3P is obsolete;
                            mostly useful as an example extension).
 
-To remove one, delete its .dll from that folder and restart CLeARINET.
+To remove one, delete its .dll from that folder and restart VioLens.
 
 Each extension is a separate work under its own licence: see
 THIRD-PARTY-NOTICES.txt and the licenses folder.

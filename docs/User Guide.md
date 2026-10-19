@@ -1,4 +1,4 @@
-# CLeARINET User Guide
+# VioLens User Guide
 
 This is the end-user guide: how to actually use the app once it's running.
 If you're looking for build instructions, project layout, or the "why" behind
@@ -7,23 +7,46 @@ this `docs/` folder instead — those are written for contributors, not for
 someone just trying to inspect some traffic. You can always get back to this
 guide from inside the app itself via **Help > Documentation**.
 
+## Upgrading from CLeARINET
+
+VioLens was called CLeARINET until version 0.2. If you used CLeARINET on
+this computer:
+
+- **Settings carry over.** The first time VioLens runs, it copies
+  CLeARINET's settings, AutoResponder rules and FiddlerScript preferences
+  into its own folder, and the extensions in `Documents\CLeARINET\Extensions`
+  into `Documents\VioLens\Extensions`. The old folders are left as they
+  were, each with a note saying where things went; delete them once you're
+  happy. If CLeARINET was closed without putting your proxy settings back,
+  VioLens puts them back.
+- **A new root certificate.** VioLens asks you to trust its own
+  `DO_NOT_TRUST_ViolensRoot` certificate, then removes CLeARINET's
+  `DO_NOT_TRUST_ClearinetRoot` (on Windows, the system asks you to confirm
+  the removal). Phones and other devices you set up to trust CLeARINET's
+  certificate need the new one: visit `http://violens/` through the proxy
+  to download it, and remove the old one from the device.
+- **The installer replaces CLeARINET.** On Windows, installing VioLens
+  removes CLeARINET's program folder and shortcuts. On macOS, VioLens is a
+  separate app: drag CLeARINET from Applications to the Bin once VioLens
+  is working.
+
 ## Starting the proxy
 
 1. Pick a port. **Port: Auto** (the default) lets the OS hand back any free
    port — the simplest choice unless something else on your machine expects
-   CLeARINET on a specific port. **Specify** lets you type one in.
+   VioLens on a specific port. **Specify** lets you type one in.
 2. Click **Start**.
 3. The first time you do this, you'll be asked to trust a new certificate
-   named `DO_NOT_TRUST_ClearinetRoot...`. This is expected — it's what
-   lets CLeARINET see inside HTTPS traffic on this machine, the same
+   named `DO_NOT_TRUST_ViolensRoot...`. This is expected — it's what
+   lets VioLens see inside HTTPS traffic on this machine, the same
    mechanism Fiddler Classic uses. On Windows this is the OS's own "Do you
    want to install this certificate?" prompt; on macOS it's a confirmation
-   dialog CLeARINET shows itself (macOS has no equivalent OS-level prompt
-   for the way CLeARINET installs it) before it ever touches your login
+   dialog VioLens shows itself (macOS has no equivalent OS-level prompt
+   for the way VioLens installs it) before it ever touches your login
    keychain. Accept it to continue. Nothing captured ever leaves your
    device on its own.
 4. Once running, the status bar at the bottom shows which port you're
-   listening on and whether CLeARINET successfully registered itself as
+   listening on and whether VioLens successfully registered itself as
    the system proxy. If it couldn't (some other tool already has that
    role, for example), you'll still capture traffic from anything you point
    at the port manually.
@@ -32,7 +55,7 @@ Click **Stop** to release the port and stop capturing. Sessions already
 captured stay in the list until you remove them (see below) or close the
 app.
 
-CLeARINET's HTTPS interception (certificate trust and system proxy
+VioLens's HTTPS interception (certificate trust and system proxy
 registration) is implemented on both Windows and macOS. The macOS side is
 new and has had little testing on a real Mac so far — see
 [README.md](../README.md)'s Known limitations section for the specifics.
@@ -43,7 +66,7 @@ Privacy & Security > Open Anyway**; you only need to do this once.
 
 ## The session list and inspectors
 
-Every request/response pair CLeARINET sees appears as a row in the main
+Every request/response pair VioLens sees appears as a row in the main
 grid: number, time, status, method, URL, and request/response sizes. Click a
 row to see its **Request** and **Response** panels below, each with its own
 tabs:
@@ -106,7 +129,7 @@ Waterfall and Image Bloat columns and columns a script or extension added;
 **Show All Columns** brings them all back. Drag a header to move its
 column, or drag the edge between headers to resize it.
 
-CLeARINET remembers which columns are shown, their order and their widths
+VioLens remembers which columns are shown, their order and their widths
 for next time. A script's or extension's column keeps its place and width
 while that script or extension isn't loaded, and comes back there. (The URL
 column always fills the space that's left.) **Reset Columns** in the same
@@ -127,7 +150,7 @@ re-applies it live.
 
 ### Timing, the waterfall and statistics
 
-CLeARINET times each phase of every exchange, and shows it the way
+VioLens times each phase of every exchange, and shows it the way
 browsers' developer tools do:
 
 - The **Waterfall** column in the session list draws each session on a
@@ -143,28 +166,28 @@ browsers' developer tools do:
 - The **Timing** tab shows the selected session's phases with their
   durations, whether it used a new or reused connection (and through which
   upstream proxy), and how long it sat at a breakpoint, if it did. For
-  HTTPS it also shows the TLS version and cipher suite CLeARINET agreed
+  HTTPS it also shows the TLS version and cipher suite VioLens agreed
   with the server, and the server's certificate.
 - The **Statistics** tab sums up the sessions the filter shows: bytes sent
   and received (and what compression saved), breakdowns by type, status and
   host, the slowest requests, and easy wins such as text sent uncompressed,
   image bloat, and responses with no caching headers.
 
-The times are measured at CLeARINET, so they don't include time the
+The times are measured at VioLens, so they don't include time the
 browser spent before sending a request, and anything the browser served
-from its own cache never reaches CLeARINET at all. Sessions imported from a
+from its own cache never reaches VioLens at all. Sessions imported from a
 file without timings have no bar.
 
 If you don't need timing, right-click a column header and uncheck
 **Waterfall** to hide that column.
 
-**Servers that ask for a client certificate (mutual TLS).** CLeARINET makes
+**Servers that ask for a client certificate (mutual TLS).** VioLens makes
 its own connection to the server, so when a server asks for a client
-certificate, it asks CLeARINET, and the browser never sees the request (or
-shows its certificate prompt). CLeARINET records it instead: the Timing tab
+certificate, it asks VioLens, and the browser never sees the request (or
+shows its certificate prompt). VioLens records it instead: the Timing tab
 says the server asked, and which certificate authorities it accepts, and the
 session gets a **Notes** tab with the `x-client-certificate-requested` note.
-CLeARINET doesn't send a client certificate yet, so a server that requires
+VioLens doesn't send a client certificate yet, so a server that requires
 one refuses the connection; the 502 page then says that's the likely reason.
 
 ### Finding sessions
@@ -234,7 +257,7 @@ developer tools do:
 
 Compressed messages (permessage-deflate) are decompressed, and messages
 sent in several pieces are put back together. The Size column shows a
-compressed message's size as sent, then as decompressed. CLeARINET keeps up
+compressed message's size as sent, then as decompressed. VioLens keeps up
 to 1 MB of each message and 64 MB per connection; beyond that it counts
 messages but doesn't keep their content. **Find** searches text messages
 too: sent messages count as the request, received ones as the response.
@@ -343,7 +366,7 @@ server.
    **Remove** deletes the selected rule.
 
 Rules are saved as you edit them, with each row's checkbox, and are back
-the next time you open CLeARINET. The panel's own switch always starts
+the next time you open VioLens. The panel's own switch always starts
 off (see "Settings that are remembered").
 
 ## Composer and Replay
@@ -365,7 +388,7 @@ Composer**. **Edit > Replay Selected Session** (or **R** in the session
 list) sends the selected request again, unchanged, like Fiddler Classic's
 Reissue.
 
-Both send through CLeARINET itself, so capture has to be running. What they
+Both send through VioLens itself, so capture has to be running. What they
 send shows up as a new session, and goes through the AutoResponder,
 breakpoints, FiddlerScript and extensions just like traffic from a browser.
 The Host header is set from the URL, and Content-Length from the body. The
@@ -427,40 +450,40 @@ return true has handled it.
 **Tools > Connections** shows two settings.
 
 **Upstream proxy.** On a network where the internet is only reachable
-through a proxy (common at work), CLeARINET has to send its own connections
-through that proxy too. Leave the box empty and CLeARINET uses whatever
+through a proxy (common at work), VioLens has to send its own connections
+through that proxy too. Leave the box empty and VioLens uses whatever
 proxy the computer was set to before you clicked Start; the status line
 says what it chose. Type `host:port` to use a specific proxy, or `none` to
 connect directly. Changes apply straight away.
 
 If the computer uses an automatic proxy configuration script ("Use setup
 script" on Windows, "Automatic proxy configuration" on macOS) or
-"Automatically detect settings", CLeARINET fetches the script when you
+"Automatically detect settings", VioLens fetches the script when you
 click Start and asks it which proxy to use for each site, as a browser
 would; the status line shows the script's address once it has loaded. If
-the script can't be found or loaded, CLeARINET uses the computer's manual
+the script can't be found or loaded, VioLens uses the computer's manual
 proxy setting if there is one, or connects directly, and the status line
-says why. While capturing, CLeARINET turns those automatic settings off
-(browsers would otherwise skip CLeARINET) and turns them back on when you
+says why. While capturing, VioLens turns those automatic settings off
+(browsers would otherwise skip VioLens) and turns them back on when you
 click Stop.
 
-**Proxy sign-in.** If the upstream proxy asks for a sign-in, CLeARINET
+**Proxy sign-in.** If the upstream proxy asks for a sign-in, VioLens
 signs in as you, the way browsers do on a company network (Windows
 sign-in: Negotiate, which is Kerberos, or NTLM). To use a different
 account, or for a proxy that wants a plain user name and password
 (Basic), enter them on the **Proxy sign-in** line. Type `DOMAIN\user` for
-a domain account. The password is kept only while CLeARINET is running
-and is never saved. If signing in doesn't work, the 502 page CLeARINET
+a domain account. The password is kept only while VioLens is running
+and is never saved. If signing in doesn't work, the 502 page VioLens
 shows says what the proxy offered.
 
-CLeARINET can't yet use a SOCKS proxy.
+VioLens can't yet use a SOCKS proxy.
 
 **Allow remote computers to connect.** Lets phones, tablets and other
-computers use CLeARINET as their proxy, so their traffic shows up
+computers use VioLens as their proxy, so their traffic shows up
 here. Check it, then click Start (it takes effect on the next Start; your
 firewall may ask whether to allow it). The row then shows the address and
 port to set as the proxy on the other device. On that device, with the
-proxy set, open `http://clearinet/` to download CLeARINET's root
+proxy set, open `http://violens/` to download VioLens's root
 certificate, and follow the instructions on that page to install and trust
 it. Anyone on your network can use the proxy while this is on, so turn it
 off when you've finished, and remove the certificate from the other device.
@@ -500,16 +523,16 @@ response hooks:
 ## Extensions
 
 Compiled .NET extensions (the successor to Fiddler Classic's `.dll`-based
-extension model) are loaded automatically from CLeARINET's Extensions
+extension model) are loaded automatically from VioLens's Extensions
 folder at startup — there's no in-app step to load one, only to drop the
-`.dll` there before launching CLeARINET. That folder is
-`Documents\CLeARINET\Extensions` on Windows and
-`~/Documents/CLeARINET/Extensions` on macOS; CLeARINET also loads the
+`.dll` there before launching VioLens. That folder is
+`Documents\VioLens\Extensions` on Windows and
+`~/Documents/VioLens/Extensions` on macOS; VioLens also loads the
 `Extensions` folder next to the app itself, where the Windows installer
 puts the optional extensions below. If the same `.dll` is in both, the copy
 in your Documents folder is used.
 
-### Optional extensions included with CLeARINET
+### Optional extensions included with VioLens
 
 Three extensions come with the installers. Each is a separate work by its
 author, under its own licence (see `THIRD-PARTY-NOTICES.txt` and the
@@ -517,15 +540,15 @@ author, under its own licence (see `THIRD-PARTY-NOTICES.txt` and the
 
 | Extension | What it does | Windows installer |
 |---|---|---|
-| NetLog importer (`CLeARINETNetLog.dll`) | Imports Chromium/Edge NetLog captures | Ticked by default |
-| CSP Rule Collector (`CLeARINETCSP.dll`) | Builds a Content-Security-Policy for the sites you browse | Ticked by default |
+| NetLog importer (`VioLensNetLog.dll`) | Imports Chromium/Edge NetLog captures | Ticked by default |
+| CSP Rule Collector (`VioLensCSP.dll`) | Builds a Content-Security-Policy for the sites you browse | Ticked by default |
 | Privacy Scanner (`PrivacyScanner.dll`) | Colours responses that set cookies and checks P3P headers | Unticked (P3P is obsolete; mostly an example extension) |
 
 - **Windows:** choose them on the installer's "Select Additional Tasks"
   page. Run the installer again to add or remove one.
 - **macOS:** the `.dmg` has an **Optional Extensions** folder next to the
-  app. Copy the `.dll`s you want into `~/Documents/CLeARINET/Extensions`
-  and restart CLeARINET.
+  app. Copy the `.dll`s you want into `~/Documents/VioLens/Extensions`
+  and restart VioLens.
 
 Check **Tools > Extensions** to see a status readout: which folders were
 scanned, how many `.dll` files were found, how many of each extension role
@@ -546,7 +569,7 @@ picked last time already selected. With only one, it's used straight away.
 ### Fiddler Classic extensions ported from source
 
 A Fiddler Classic extension whose source you have can usually be rebuilt
-for CLeARINET with very small changes, and then runs on both Windows and
+for VioLens with very small changes, and then runs on both Windows and
 macOS. The first one proven this way is Eric Lawrence's
 [NetLog importer](https://github.com/ericlaw1979/FiddlerImportNetlog),
 which imports Chromium/Edge NetLog captures (`.json`, `.json.gz` or a
@@ -563,7 +586,7 @@ An extension can add its own tab next to **Inspectors** above the request
 and response panels; the tab strip only appears once one has.
 
 The **CSP Rule Collector**, which works out the smallest
-Content-Security-Policy a page needs, has a CLeARINET-only version:
+Content-Security-Policy a page needs, has a VioLens-only version:
 [CSP-CLeARINET-Extension](https://github.com/MarkSPowell/CSP-CLeARINET-Extension),
 a fork of the Fiddler extension with an Avalonia tab. It's one of the
 optional extensions above (or build it yourself; see its README). Open
@@ -587,29 +610,29 @@ A separate, optional tool for a specific case the Extensions feature above
 can't cover: an already-compiled Fiddler Classic extension `.dll` whose UI
 hooks reach directly into Windows Forms menu/toolbar/tab controls that
 Microsoft removed from .NET 5 and later. Those extensions can't run inside
-CLeARINET's own process at all — not a bug, a platform limitation — so
-`Clearinet.LegacyExtensionHost.exe`, a separate program included with
-CLeARINET, runs them instead, in its own window, wired up to your real
+VioLens's own process at all — not a bug, a platform limitation — so
+`Violens.LegacyExtensionHost.exe`, a separate program included with
+VioLens, runs them instead, in its own window, wired up to your real
 captured traffic.
 
 This is off by default and entirely optional; skip this section if you
 don't have an existing compiled Fiddler Classic extension you specifically
 want to keep using.
 
-1. Drop the extension's `.dll` into `Documents\CLeARINET\LegacyExtensions\`.
+1. Drop the extension's `.dll` into `Documents\VioLens\LegacyExtensions\`.
    An extension still compiled against the real Fiddler assembly won't load
    as-is — see the pop-up/log message it produces for what to do, which
-   comes down to recompiling it against `Clearinet.CompatShim` (if you
+   comes down to recompiling it against `Violens.CompatShim` (if you
    have its source).
 2. Check **Tools > Legacy Extension Host** to show the panel, then check
-   "Launch Clearinet.LegacyExtensionHost.exe automatically on Start". With
+   "Launch Violens.LegacyExtensionHost.exe automatically on Start". With
    that on, clicking **Start** also launches the legacy host (if it isn't
    already running) and connects it to your real traffic; the panel's
    status line reports what happened (already running, launched, not
    found, or launch failed). Leave the checkbox off and nothing about your
-   normal CLeARINET usage changes.
+   normal VioLens usage changes.
 3. The legacy host opens as its own separate window, not merged into
-   CLeARINET's own — that's a known, permanent limitation, not a bug.
+   VioLens's own — that's a known, permanent limitation, not a bug.
    Loaded extensions' request/response-tampering hooks run against your
    real traffic either way; anything the extension shows in its own
    window's session list is separate demo data, not your real sessions.
@@ -631,7 +654,7 @@ want to keep using.
 
 ## Settings that are remembered
 
-CLeARINET remembers these settings between runs, the same way on Windows
+VioLens remembers these settings between runs, the same way on Windows
 and macOS:
 
 - The port choice (Auto or a specific port number)
@@ -649,36 +672,36 @@ and macOS:
 - Whether the legacy extension host launches automatically
 
 Breakpoints and the AutoResponder's on/off switch are **not** remembered,
-on purpose. Once CLeARINET is the system proxy, a breakpoint or
+on purpose. Once VioLens is the system proxy, a breakpoint or
 AutoResponder rule that switched itself back on at launch would affect
 every app on your machine as soon as you clicked Start.
 
 Settings are saved in a `preferences.json` file:
 
-- **Windows:** `%LOCALAPPDATA%\CLeARINET\preferences.json`
-- **macOS:** `~/Library/Application Support/CLeARINET/preferences.json`
+- **Windows:** `%LOCALAPPDATA%\VioLens\preferences.json`
+- **macOS:** `~/Library/Application Support/VioLens/preferences.json`
 
 The file is the same format on both platforms, so you can copy it from one
-machine to another. You can edit it by hand while CLeARINET is closed.
+machine to another. You can edit it by hand while VioLens is closed.
 Changes made while it's running are picked up the next time it starts. If
-the file ever becomes unreadable, CLeARINET renames it to
+the file ever becomes unreadable, VioLens renames it to
 `preferences.json.corrupt-<date>` and starts with defaults, so nothing you
-had is lost. To reset every setting, quit CLeARINET and delete the file.
+had is lost. To reset every setting, quit VioLens and delete the file.
 
 ## The Help menu
 
 - **Help > Documentation** opens this file through whatever your system
   uses to open `.md` files. If nothing's registered for that extension,
   you can also find this file directly at `docs/User Guide.md` in the
-  CLeARINET source tree, or, for a running build, in a `Documentation`
+  VioLens source tree, or, for a running build, in a `Documentation`
   folder next to the app's executable.
-- **Help > About CLeARINET** shows which build you're actually running —
+- **Help > About VioLens** shows which build you're actually running —
   useful when reporting an issue, or checking whether you're on the
   latest preview.
 
 ## Known limitations
 
-CLeARINET is an early, working MVP, not a 1.0 release. See
+VioLens is an early, working MVP, not a 1.0 release. See
 [README.md](../README.md)'s Known limitations section for what's
 deliberately not here yet (HTTP/2, proxies
 that need a sign-in, little testing on a real Mac so far, and more) — that list is kept in one place, in README.md, rather than

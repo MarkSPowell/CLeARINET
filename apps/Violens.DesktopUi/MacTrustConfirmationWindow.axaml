@@ -1,0 +1,45 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Violens.DesktopUi.MacTrustConfirmationWindow"
+        Title="Install VioLens's root certificate?"
+        Width="420"
+        SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Icon="avares://Violens.DesktopUi/Assets/violens.webp"
+        Background="{DynamicResource AppBackgroundBrush}">
+
+  <!-- No bindings, no DataContext, same reasoning as AboutWindow.axaml:
+       this dialog has exactly one job (get an explicit yes/no before
+       CertificateAuthority ever touches the login keychain on macOS) and
+       nothing here is state that changes while it's open. See the
+       Interception Certificate Design doc's "silent-install tension"
+       section for why this dialog exists at all. On Windows, adding to
+       CurrentUser\Root is what triggers the OS's own install-certificate
+       prompt; `security add-trusted-cert` on macOS has no equivalent, so
+       this dialog is what keeps that same "never silent" guarantee, as
+       VioLens's own doing rather than the OS's. -->
+  <StackPanel Margin="24" Spacing="4">
+    <TextBlock Text="Install VioLens's root certificate?"
+               FontSize="16"
+               FontWeight="Bold"
+               Foreground="{DynamicResource AppAccentBrush}"
+               TextWrapping="Wrap"
+               Margin="0,0,0,10" />
+    <TextBlock Text="VioLens needs to add a certificate to your login keychain so it can decrypt this account's HTTPS traffic for inspection. It will only be trusted for your user account -- not system-wide -- and can be removed later from Keychain Access or VioLens's own uninstall."
+               FontSize="12"
+               Foreground="{DynamicResource AppMutedTextBrush}"
+               TextWrapping="Wrap"
+               Margin="0,0,0,18" />
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="Cancel"
+              Click="CancelButton_Click"
+              MinWidth="90" />
+      <Button Content="Install"
+              Click="InstallButton_Click"
+              Classes="accent"
+              MinWidth="90" />
+    </StackPanel>
+  </StackPanel>
+</Window>

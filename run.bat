@@ -1,1 +1,1 @@
-dotnet run --project apps/Clearinet.DesktopUi
+dotnet run --project apps/Violens.DesktopUi

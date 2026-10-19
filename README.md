@@ -1,11 +1,15 @@
-# CLeARINET
+# VioLens
 
 An open source HTTP(S) inspection tool for developers — a spiritual
 successor to Fiddler Web Debugger (Fiddler Classic), whose licence
 Progress Software changed in 2026 to allow non-commercial use only.
-CLeARINET is free for any use, under the MIT licence. It's an independent
+VioLens is free for any use, under the MIT licence. It's an independent
 project, not affiliated with Progress or Telerik (see
 [Relationship to Fiddler](#relationship-to-fiddler)).
+
+VioLens was called CLeARINET until version 0.2. Settings, rules and
+extensions from a CLeARINET install carry over the first time VioLens
+runs (see the User Guide's "Upgrading from CLeARINET").
 
 ## Status
 
@@ -60,15 +64,15 @@ here yet. Feedback and issues are welcome.
   change how it looks, with heavily bloated images highlighted.
 - A Composer tab for writing or editing a request and sending it, and
   Replay (**R**) to send a captured request again. Both go through
-  CLeARINET itself, so the result is captured like any other traffic.
-- Forwarding through the network's own proxy: CLeARINET picks up the
+  VioLens itself, so the result is captured like any other traffic.
+- Forwarding through the network's own proxy: VioLens picks up the
   proxy the computer used before it started, including an automatic
   proxy configuration script (PAC) or "Automatically detect settings"
   (WPAD), or uses one you set under **Tools > Connections**. A proxy
   that asks for a sign-in gets one: as you (Windows sign-in, Negotiate or
   NTLM), or with a user name and password entered there.
 - Capturing phones and other computers: "Allow remote computers to
-  connect", and a page at `http://clearinet/` for installing CLeARINET's
+  connect", and a page at `http://violens/` for installing VioLens's
   certificate on the other device.
 - Rows in the session list can be coloured, bold, italic, struck through
   or hidden by an extension or importer (Fiddler's `ui-backcolor` and
@@ -98,11 +102,11 @@ here yet. Feedback and issues are welcome.
   FiddlerScript Compatibility Design doc for the full scope and cuts.
 - Compiled .NET extension compatibility: drop a compiled extension `.dll`
   (the successor to Fiddler Classic's own extension model) into
-  CLeARINET's Extensions folder and it's loaded automatically at
+  VioLens's Extensions folder and it's loaded automatically at
   startup — AutoTamper hooks, request/response inspectors, and session
   import/export are all supported; see the .NET Extension Compatibility
   Design doc.
-- A Fiddler-shaped compatibility layer (`Clearinet.CompatShim`) for
+- A Fiddler-shaped compatibility layer (`Violens.CompatShim`) for
   porting real Fiddler Classic extensions from their source, on both
   Windows and macOS. Ported extensions can import sessions, work on live
   traffic (one session object per request, and answering requests
@@ -110,7 +114,7 @@ here yet. Feedback and issues are welcome.
   row colours. Working so far:
   - **NetLog importer** (Eric Lawrence's): builds with only its
     `using Fiddler;` lines removed.
-  - **CSP Rule Collector**: a CLeARINET-only fork,
+  - **CSP Rule Collector**: a VioLens-only fork,
     [CSP-CLeARINET-Extension](https://github.com/MarkSPowell/CSP-CLeARINET-Extension),
     with its tab rewritten in Avalonia.
   - **Privacy Scanner** (cookies/P3P): ported as a test of the UI hooks;
@@ -124,7 +128,7 @@ here yet. Feedback and issues are welcome.
   CI builds and tests all three on both platforms. See
   `tests/ExtensionPorts/README.md` and the Extension Test Targets doc.
 - Optional legacy extension host: a separate, opt-in tool
-  (`tools/Clearinet.LegacyExtensionHost`) that runs real, unmodified-source
+  (`tools/Violens.LegacyExtensionHost`) that runs real, unmodified-source
   Fiddler Classic extensions against real proxied traffic, bridged to the
   main app over a local IPC connection, for extensions that reach into UI
   surface removed from modern .NET — not part of the main app's own build,
@@ -141,8 +145,8 @@ here yet. Feedback and issues are welcome.
 - An automatic or manually-specified listening port (defaults to Auto).
 - Settings that persist between runs (port choice, Tools-menu panels,
   filter text and more), stored the same way on Windows and macOS in
-  `preferences.json` under `%LOCALAPPDATA%\CLeARINET\` or
-  `~/Library/Application Support/CLeARINET/`. Unknown keys are kept, a
+  `preferences.json` under `%LOCALAPPDATA%\VioLens\` or
+  `~/Library/Application Support/VioLens/`. Unknown keys are kept, a
   corrupt file is set aside rather than overwritten, and two running
   copies don't clobber each other's changes. See the Preferences Design
   doc.
@@ -155,18 +159,18 @@ here yet. Feedback and issues are welcome.
 Requires the .NET 10 SDK.
 
 ```
-dotnet restore CLeARINET.sln
-dotnet build CLeARINET.sln
-dotnet test CLeARINET.sln
-dotnet run --project apps/Clearinet.DesktopUi
+dotnet restore VioLens.sln
+dotnet build VioLens.sln
+dotnet test VioLens.sln
+dotnet run --project apps/Violens.DesktopUi
 ```
 
 The first time you click Start, you'll be asked to trust a new local root
-certificate (named `DO_NOT_TRUST_ClearinetRoot...`, following Fiddler
+certificate (named `DO_NOT_TRUST_ViolensRoot...`, following Fiddler
 Classic's own naming convention for the same purpose) — this is what lets
-CLeARINET see inside HTTPS traffic on this machine. On Windows that's the
-OS's own native prompt; on macOS, where the `security` CLI CLeARINET uses
-has no equivalent OS-level prompt, it's a confirmation dialog CLeARINET
+VioLens see inside HTTPS traffic on this machine. On Windows that's the
+OS's own native prompt; on macOS, where the `security` CLI VioLens uses
+has no equivalent OS-level prompt, it's a confirmation dialog VioLens
 shows itself before ever touching your login keychain. Nothing captured
 ever leaves the device on its own.
 
@@ -191,35 +195,35 @@ ever leaves the device on its own.
   design, the FiddlerScript
   compatibility design, the .NET extension compatibility design, the
   Fiddler feature/tier inventory, and breakpoints research notes.
-- `src/Clearinet.ProxyCore` — the proxy engine: the listener, HTTP
+- `src/Violens.ProxyCore` — the proxy engine: the listener, HTTP
   message parsing, sessions, breakpoints, AutoResponder, certificates,
   SAZ export, system-proxy registration on both Windows and macOS, and
   the preferences store.
-- `src/Clearinet.Extensibility` — the inspector contract and the built-in
+- `src/Violens.Extensibility` — the inspector contract and the built-in
   inspectors (Headers, Raw, Hex, Cookies, Notes).
-- `src/Clearinet.Compatibility` — FiddlerScript compatibility
+- `src/Violens.Compatibility` — FiddlerScript compatibility
   (`FiddlerScriptRunner`, the `Exchange`/`AppObject` shim, the directive
   scanner behind the Rules menu/Script Actions/custom columns) and
   compiled .NET extension compatibility (`ExtensionHost` and the
   `IFiddlerExtension`-family interfaces), and the Fiddler-shaped
-  `Clearinet.CompatShim` layer for extensions ported from source — see both
+  `Violens.CompatShim` layer for extensions ported from source — see both
   design docs above for what's built and what's still scoped out.
-- `apps/Clearinet.DesktopUi` — the Avalonia desktop UI.
-- `tools/Clearinet.DevHost` — a console host used during early
+- `apps/Violens.DesktopUi` — the Avalonia desktop UI.
+- `tools/Violens.DevHost` — a console host used during early
   development of the proxy core.
-- `tools/Clearinet.SampleExtension` — a small, separately-compiled .NET
+- `tools/Violens.SampleExtension` — a small, separately-compiled .NET
   extension used to validate `ExtensionHost` against a real `.dll` rather
   than only in-process fakes; see its own README for what it demonstrates
   and how to build it.
-- `tools/Clearinet.LegacyExtensionHost` — the optional, separate legacy
+- `tools/Violens.LegacyExtensionHost` — the optional, separate legacy
   extension host: a `net48` process that can run real, unmodified-source
   Fiddler Classic extensions, bridged to the main app's own proxied
-  traffic. Deliberately kept out of `CLeARINET.sln`/the main app's build
+  traffic. Deliberately kept out of `VioLens.sln`/the main app's build
   entirely, so nothing about it can affect either — see its own README and
   the .NET Extension Compatibility Design doc.
 - `tests/` — unit tests for the projects above, plus `tests/ExtensionPorts`:
   real Fiddler Classic extensions fetched at pinned commits, ported, and
-  tested (not part of `CLeARINET.sln`; see its README).
+  tested (not part of `VioLens.sln`; see its README).
 
 ## Known limitations
 
@@ -233,7 +237,7 @@ way:
   launches after every macOS build; a hands-on check on a Mac is still to
   come. Certificate
   trust (via the `security` CLI, into the login keychain, behind
-  CLeARINET's own confirmation dialog since `security` has no OS-level
+  VioLens's own confirmation dialog since `security` has no OS-level
   install prompt the way Windows does) and system proxy registration (via
   `networksetup`, per network service) are both implemented — see the
   Interception Certificate Design doc's "Platform status" section for the
@@ -264,17 +268,17 @@ way:
   DNS (`wpad.<your domain>`), not DHCP.
 - **The main app's own compiled-extension support is source-level, not
   binary.** An already-compiled Fiddler Classic extension `.dll` can't be
-  dropped straight into CLeARINET's own Extensions folder as-is; a new
-  extension has to be built against CLeARINET's own (source-level
+  dropped straight into VioLens's own Extensions folder as-is; a new
+  extension has to be built against VioLens's own (source-level
   compatible) interfaces. Real binary compatibility does exist, just not
-  here — see `tools/Clearinet.LegacyExtensionHost`, the separate, optional
+  here — see `tools/Violens.LegacyExtensionHost`, the separate, optional
   legacy extension host above, which runs real unmodified-*source*
   extensions (recompiled against its own compat assembly) against real
   proxied traffic; it's not part of the main app's own build, but the
   Windows installer can include it as an unchecked-by-default optional
   component.
 - **No client certificates (mutual TLS) yet.** When a server asks for
-  one, CLeARINET records that on the session (Timing and Notes tabs), but
+  one, VioLens records that on the session (Timing and Notes tabs), but
   doesn't send a certificate, so a server that requires one refuses the
   connection.
 - **No headless/CLI mode.** Left out of this milestone by design, not by
@@ -282,14 +286,14 @@ way:
 
 ## Relationship to Fiddler
 
-CLeARINET is an independent open source project. It isn't affiliated
+VioLens is an independent open source project. It isn't affiliated
 with, endorsed by or sponsored by Progress Software Corporation or
 Telerik. Fiddler, Fiddler Classic, Fiddler Everywhere, FiddlerCore and
-Telerik are trademarks of Progress Software Corporation; CLeARINET uses
+Telerik are trademarks of Progress Software Corporation; VioLens uses
 those names only to describe what it's compatible with, and never
 presents itself, or anything it ships, as Fiddler.
 
-CLeARINET is built independently: from publicly available documentation,
+VioLens is built independently: from publicly available documentation,
 publicly observable behavior (such as the structure of `.saz` files
 produced by the real tool), and original design decisions — never from
 decompiled or leaked Fiddler source, and with no code from Fiddler. See
@@ -298,7 +302,7 @@ governs every contribution here. The optional extensions included with
 the installers are separate works by their authors, under their own
 licences (see `THIRD-PARTY-NOTICES.txt` alongside them).
 
-CLeARINET is inspired by Eric Lawrence's public writing about Fiddler,
+VioLens is inspired by Eric Lawrence's public writing about Fiddler,
 including his post [Fiddler in 2026](https://textslashplain.com/2026/08/05/fiddler-in-2026/),
 and by his public [Clearinet](https://github.com/ericlaw1979/Clearinet)
 repository. It isn't his project, and he hasn't contributed code to it.

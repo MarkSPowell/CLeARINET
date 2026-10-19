@@ -1,7 +1,7 @@
 name: Release macOS Installer
 
 # The macOS counterpart to release-windows.yml: publishes a self-contained
-# osx-arm64 build of the desktop app, assembles it into a real CLeARINET.app
+# osx-arm64 build of the desktop app, assembles it into a real VioLens.app
 # bundle and packages that into a .dmg (installer/macos/build-installer.sh
 # does the actual assembly -- there's no macOS equivalent of Inno Setup to
 # hand this off to), and attaches that .dmg to the GitHub Release for the
@@ -103,7 +103,7 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Restore
-        run: dotnet restore CLeARINET.sln
+        run: dotnet restore VioLens.sln
 
       # Self-contained, single-file, arm64 only -- see this workflow's own
       # header remarks on the arm64-only decision. Publishing only the
@@ -116,7 +116,7 @@ jobs:
       # remarks.
       - name: Publish self-contained osx-arm64 build
         run: >-
-          dotnet publish apps/Clearinet.DesktopUi/Clearinet.DesktopUi.csproj
+          dotnet publish apps/Violens.DesktopUi/Violens.DesktopUi.csproj
           --configuration Release
           --runtime osx-arm64
           --self-contained true
@@ -136,7 +136,7 @@ jobs:
           "${{ steps.version.outputs.version }}"
           "${{ steps.version.outputs.bundleVersion }}"
           "${{ github.workspace }}/publish/osx-arm64"
-          "${{ github.workspace }}/installer/Output/CLeARINET-${{ steps.version.outputs.version }}-macos-arm64.dmg"
+          "${{ github.workspace }}/installer/Output/VioLens-${{ steps.version.outputs.version }}-macos-arm64.dmg"
           "${{ github.workspace }}/publish/extensions"
 
       # Checks the finished .dmg: signature, contents, and that the app
@@ -144,13 +144,13 @@ jobs:
       - name: Smoke-test the .dmg
         run: >-
           bash installer/macos/smoke-test.sh
-          "${{ github.workspace }}/installer/Output/CLeARINET-${{ steps.version.outputs.version }}-macos-arm64.dmg"          
+          "${{ github.workspace }}/installer/Output/VioLens-${{ steps.version.outputs.version }}-macos-arm64.dmg"          
 
       - name: Upload installer as a build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: CLeARINET-macOS-${{ steps.version.outputs.version }}
-          path: installer/Output/CLeARINET-*-macos-arm64.dmg
+          name: VioLens-macOS-${{ steps.version.outputs.version }}
+          path: installer/Output/VioLens-*-macos-arm64.dmg
           if-no-files-found: error
 
       # Only on a real tag push -- see release-windows.yml's own remarks
@@ -159,5 +159,5 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: installer/Output/CLeARINET-*-macos-arm64.dmg
+          files: installer/Output/VioLens-*-macos-arm64.dmg
           fail_on_unmatched_files: true

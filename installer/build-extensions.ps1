@@ -8,13 +8,13 @@
     at its pinned commit), builds each extension in Release, and writes:
 
       <OutputDir>/
-        CLeARINETNetLog.dll        NetLog importer (BSD-3-Clause)
-        CLeARINETCSP.dll           CSP Rule Collector (MIT)
+        VioLensNetLog.dll        NetLog importer (BSD-3-Clause)
+        VioLensCSP.dll           CSP Rule Collector (MIT)
         PrivacyScanner.dll         Privacy Scanner sample (Apache-2.0)
         licenses/                  each extension's licence text
         THIRD-PARTY-NOTICES.txt    where each one came from and what changed
 
-    Only the extension's own .dll ships: CLeARINET supplies the
+    Only the extension's own .dll ships: VioLens supplies the
     compatibility layer and Avalonia at run time.
 
     Used by .github/workflows/release-windows.yml (the installer's optional
@@ -46,33 +46,33 @@ $extensions = @(
     [pscustomobject]@{
         Name        = 'NetLog importer'
         Project     = Join-Path $ports 'FiddlerImportNetlog/FiddlerImportNetlog.Port.csproj'
-        Dll         = Join-Path $work 'bin/FiddlerImportNetlog/CLeARINETNetLog.dll'
+        Dll         = Join-Path $work 'bin/FiddlerImportNetlog/VioLensNetLog.dll'
         License     = { Join-Path (@(Get-ChildItem -LiteralPath (Join-Path $work 'FiddlerImportNetlog-upstream') -Directory)[0].FullName) 'LICENSE' }
-        LicenseName = 'CLeARINETNetLog-LICENSE.txt'
+        LicenseName = 'VioLensNetLog-LICENSE.txt'
         Notice      = @'
-NetLog importer (CLeARINETNetLog.dll)
+NetLog importer (VioLensNetLog.dll)
   Source:  https://github.com/ericlaw1979/FiddlerImportNetlog
   Commit:  1a927f4fe1519d681b112c5b02c6a1cc20142fb9
   Author:  Eric Lawrence
-  Licence: BSD 3-Clause (licenses/CLeARINETNetLog-LICENSE.txt)
+  Licence: BSD 3-Clause (licenses/VioLensNetLog-LICENSE.txt)
   Changes: its `using Fiddler;` lines were removed, and it is built for .NET 10
-           against CLeARINET's compatibility layer, as CLeARINETNetLog.dll
+           against VioLens's compatibility layer, as VioLensNetLog.dll
            (upstream builds FiddlerImportNetlog.dll).
 '@
     },
     [pscustomobject]@{
         Name        = 'CSP Rule Collector'
-        Project     = Join-Path $work 'CLeARINETCSP/CLeARINETCSP.csproj'
-        Dll         = Join-Path $work 'CLeARINETCSP/bin/Release/net10.0/CLeARINETCSP.dll'
-        License     = { Join-Path $work 'CLeARINETCSP/LICENSE' }
-        LicenseName = 'CLeARINETCSP-LICENSE.txt'
+        Project     = Join-Path $work 'VioLensCSP/VioLensCSP.csproj'
+        Dll         = Join-Path $work 'VioLensCSP/bin/Release/net10.0/VioLensCSP.dll'
+        License     = { Join-Path $work 'VioLensCSP/LICENSE' }
+        LicenseName = 'VioLensCSP-LICENSE.txt'
         Notice      = @'
-CSP Rule Collector (CLeARINETCSP.dll)
+CSP Rule Collector (VioLensCSP.dll)
   Source:  https://github.com/MarkSPowell/CSP-CLeARINET-Extension
-           (a CLeARINET fork of https://github.com/ericlaw1979/CSP-Fiddler-Extension)
+           (a VioLens fork of https://github.com/ericlaw1979/CSP-Fiddler-Extension)
   Commit:  4d4cb9ab242d509ee2a4cdbc14ffa1fc9b4c9d38
-  Author:  David Risney; CLeARINET changes by the CLeARINET project
-  Licence: MIT (licenses/CLeARINETCSP-LICENSE.txt)
+  Author:  David Risney; VioLens changes by the VioLens project
+  Licence: MIT (licenses/VioLensCSP-LICENSE.txt)
   Changes: see the fork's history and README.
 '@
     },
@@ -92,7 +92,7 @@ Privacy Scanner (PrivacyScanner.dll)
   Changes: the C# code block was extracted from the page; its `using Fiddler;`
            and `using System.Windows.Forms;` lines were removed, the
            `System.Windows.Forms.` prefix was dropped from MenuItem, and it is
-           built for .NET 10 against CLeARINET's compatibility layer.
+           built for .NET 10 against VioLens's compatibility layer.
 '@
     }
 )
@@ -102,11 +102,11 @@ $licenses = Join-Path $OutputDir 'licenses'
 New-Item -ItemType Directory -Force -Path $licenses | Out-Null
 
 $notices = @(
-    'Optional extensions included with CLeARINET',
+    'Optional extensions included with VioLens',
     '============================================',
     '',
     'These extensions are separate works by their authors, included under their',
-    'own licences. Each is optional; CLeARINET works without them.',
+    'own licences. Each is optional; VioLens works without them.',
     ''
 )
 

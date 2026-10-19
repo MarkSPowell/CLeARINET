@@ -1,6 +1,6 @@
-# Contributing to CLeARINET
+# Contributing to VioLens
 
-Thanks for your interest in CLeARINET, an open source HTTP(S) inspection
+Thanks for your interest in VioLens, an open source HTTP(S) inspection
 proxy built as a spiritual successor to the Fiddler Web Debugger. This
 document covers what to know before you open an issue or a pull request.
 
@@ -10,7 +10,7 @@ This is the most important rule in this repository, and it exists to keep
 the project on solid legal footing.
 
 Fiddler Classic, Fiddler Everywhere, and FiddlerCore are proprietary
-software. CLeARINET is built independently, from:
+software. VioLens is built independently, from:
 
 - publicly available documentation (such as the [Fiddler Classic
   docs](https://github.com/telerik/fiddler-docs)),
@@ -32,7 +32,7 @@ implementation code is not.
 
 ## No-relicensing commitment
 
-CLeARINET is licensed under the MIT License (see [LICENSE](LICENSE)) --
+VioLens is licensed under the MIT License (see [LICENSE](LICENSE)) --
 the same licence as Eric Lawrence's public ericlaw1979/Clearinet
 repository, which inspired it, so work can move between the two freely --
 and will stay that way. No

@@ -17,7 +17,7 @@ Fiddler's breakpoint behavior gets researched for future work.
 active value per command rather than a general rule-list engine (matching
 how Fiddler itself works — one active value per command, not a list):
 
-| CLeARINET | Fiddler QuickExec | Behavior |
+| VioLens | Fiddler QuickExec | Behavior |
 |---|---|---|
 | `BreakOnAllRequests` | `Rules > Automatic Breakpoints > Before Requests` | Pause every request |
 | `BreakOnAllResponses` | `Rules > Automatic Breakpoints > After Responses` | Pause every response |
@@ -26,7 +26,7 @@ how Fiddler itself works — one active value per command, not a list):
 | `RequestMethodEquals` | `bpm` | Pause a request with a specific HTTP method |
 | `ResponseStatusCodeEquals` | `bps` | Pause a response with a specific status code |
 
-The last four are implemented in `Clearinet.ProxyCore.Breakpoints.BreakpointRules`
+The last four are implemented in `Violens.ProxyCore.Breakpoints.BreakpointRules`
 but — see the Fiddler Feature Inventory doc — not yet exposed anywhere in
 the desktop UI, which only wires up the two "break on all" toggles today.
 
@@ -35,7 +35,7 @@ the desktop UI, which only wires up the two "break on all" toggles today.
 Fiddler Classic's own documentation doesn't describe a distinct "abort" a
 paused session, as an action separate from simply not resuming it. This
 research treated that as ambiguous enough to warrant an explicit design
-decision rather than silently guessing: CLeARINET makes Abort a first-class
+decision rather than silently guessing: VioLens makes Abort a first-class
 action (`PendingBreakpoint.Abort`, surfaced as its own command in the UI),
 distinct from Resume, and both are handled through the same
 `BreakpointAbortedException` path a killed session would otherwise reach —
@@ -48,7 +48,7 @@ Fiddler Classic's TextView shows a paused message as one editable blob of
 raw text (start line, headers, and body together) rather than separate
 controls per field. `PendingBreakpoint.RawText` and `HttpMessageText`
 follow that same model — see `HttpMessageText`'s own doc comment for how
-CLeARINET deliberately differs from Fiddler Classic here: an edit that
+VioLens deliberately differs from Fiddler Classic here: an edit that
 leaves the raw text malformed is reported back as an error rather than
 being silently dropped when the person tries to resume, which is a
 documented Fiddler Classic gotcha this design avoids.

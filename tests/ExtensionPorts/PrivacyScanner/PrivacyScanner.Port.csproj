@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Eric Lawrence's Privacy Scanner (cookies and P3P), the sample in
-       Telerik's Fiddler docs (Apache-2.0), built against CLeARINET's
+       Telerik's Fiddler docs (Apache-2.0), built against VioLens's
        Fiddler-shaped compatibility layer. port.ps1 fetches it into
        ../.work/PrivacyScanner/ and makes the port's only changes (see
        ../README.md). A test of extension menus, flag-bound session-list
@@ -36,7 +36,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../../src/Clearinet.Compatibility/Clearinet.Compatibility.csproj" Private="false" />
+    <ProjectReference Include="../../../src/Violens.Compatibility/Violens.Compatibility.csproj" Private="false" />
   </ItemGroup>
 
 </Project>

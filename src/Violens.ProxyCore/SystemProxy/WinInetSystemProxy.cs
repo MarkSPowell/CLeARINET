@@ -1,0 +1,371 @@
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using System.Text.Json;
+using Microsoft.Win32;
+
+namespace Violens.ProxyCore.SystemProxy;
+
+/// <summary>
+/// Registers VioLens as the current user's Windows system proxy, the same
+/// way Fiddler Classic's Start/Stop capture toggle does: writing the
+/// WinINET registry values under <c>...\Internet Settings</c> and
+/// broadcasting <c>INTERNET_OPTION_SETTINGS_CHANGED</c>/<c>_REFRESH</c> so
+/// already-running WinINET-aware processes (Internet Explorer, Chromium
+/// browsers via their own IE-proxy-config reader, .NET's default proxy
+/// resolution, and so on) pick it up immediately, no logoff required.
+///
+/// This only affects applications that consult that particular registry
+/// store in the first place -- a separate, machine-wide WinHTTP proxy store
+/// (configured via <c>netsh winhttp</c>, used by services and some system
+/// components) is deliberately left untouched, which is a large part of why
+/// this doesn't drag unrelated background processes through the proxy too.
+///
+/// The other half of the design is crash safety: <see cref="Enable"/>
+/// backs up whatever was there before to a small JSON file under the local
+/// app-data folder *before* overwriting anything, and <see cref="Disable"/>
+/// restores from it and deletes it. If VioLens's process dies before
+/// Disable ever runs -- a crash, a kill, Windows tearing it down without
+/// warning -- that backup file survives on disk. <see cref="RecoverFromCrash"/>
+/// is meant to be called once, early, on the next launch: finding the file
+/// still there is exactly the signal that the previous run never cleaned up
+/// after itself, so it restores from it before this run touches the
+/// registry at all.
+/// </summary>
+public static class WinInetSystemProxy
+{
+    private const string InternetSettingsKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+    private const int InternetOptionSettingsChanged = 39;
+    private const int InternetOptionRefresh = 37;
+
+    private static string BackupFilePath { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "VioLens",
+        "system-proxy-backup.json");
+
+    /// <summary>
+    /// Points the system proxy at <c>127.0.0.1:port</c>. A no-op on
+    /// anything but Windows. Safe to call more than once in a row without
+    /// an intervening <see cref="Disable"/> -- only the first call in such
+    /// a run writes a backup, so a second Enable (e.g. Start clicked twice
+    /// through some UI race) can never overwrite the real pre-VioLens
+    /// settings with VioLens's own.
+    /// </summary>
+    public static void Enable(int port)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var key = OpenInternetSettingsKey();
+        var connection = TryReadConnectionOptions();
+
+        if (!File.Exists(BackupFilePath))
+        {
+            WriteBackup(new ProxyBackup
+            {
+                ProxyEnable = Convert.ToInt32(key.GetValue("ProxyEnable", 0)) != 0,
+                ProxyServer = key.GetValue("ProxyServer") as string,
+                ProxyOverride = key.GetValue("ProxyOverride") as string,
+                ManagedPort = port,
+                ConnectionFlags = connection?.Flags,
+                AutoConfigUrl = connection?.AutoConfigUrl,
+            });
+        }
+
+        var server = $"127.0.0.1:{port}";
+        var bypass = MergeBypassList(key.GetValue("ProxyOverride") as string);
+        key.SetValue("ProxyEnable", 1, RegistryValueKind.DWord);
+        key.SetValue("ProxyServer", server, RegistryValueKind.String);
+        key.SetValue("ProxyOverride", bypass, RegistryValueKind.String);
+
+        // "Automatically detect settings" and "Use setup script" take
+        // priority over the manual proxy, so while either is on, browsers
+        // would never reach VioLens. Turn them off for the capture (the
+        // backup above puts them back). The setup script's address is kept.
+        if (connection is not null &&
+            (connection.Flags & (WinInetConnectionOptions.AutoDetect | WinInetConnectionOptions.AutoProxyUrl)) != 0)
+        {
+            WinInetConnectionOptions.Write(new WinInetConnectionOptions.Settings(
+                WinInetConnectionOptions.Direct | WinInetConnectionOptions.ManualProxy, server, bypass, AutoConfigUrl: null));
+        }
+
+        BroadcastSettingsChanged();
+    }
+
+    /// <summary>
+    /// The proxy Windows is set to use right now, for VioLens to forward
+    /// through (see <see cref="Proxy.UpstreamProxy"/>). Call before
+    /// <see cref="Enable"/> replaces the setting with VioLens itself.
+    /// Ignores a setting that points at VioLens's own
+    /// <paramref name="ownPort"/>. With "Automatically detect settings" or
+    /// "Use setup script" on, returns a <see cref="Proxy.AutoConfig.ProxyAutoConfig"/>
+    /// that starts looking for and loading the script straight away, with
+    /// the manual proxy (if any) as its fallback, as Windows itself uses them.
+    /// </summary>
+    public static UpstreamProxyDetection DetectUpstream(int ownPort)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return UpstreamProxyDetection.None;
+        }
+
+        using var key = OpenInternetSettingsKey();
+        var connection = TryReadConnectionOptions();
+
+        Proxy.UpstreamProxy? manual;
+        bool autoDetect;
+        string? scriptUrl;
+        if (connection is not null)
+        {
+            manual = (connection.Flags & WinInetConnectionOptions.ManualProxy) != 0
+                ? Proxy.UpstreamProxy.FromWindowsSettings(connection.ProxyServer, connection.ProxyBypass)
+                : null;
+            autoDetect = (connection.Flags & WinInetConnectionOptions.AutoDetect) != 0;
+            scriptUrl = (connection.Flags & WinInetConnectionOptions.AutoProxyUrl) != 0 ? connection.AutoConfigUrl : null;
+        }
+        else
+        {
+            // Couldn't use the API: the registry values have the manual
+            // proxy and the script address, but not "Automatically detect".
+            manual = Convert.ToInt32(key.GetValue("ProxyEnable", 0)) != 0
+                ? Proxy.UpstreamProxy.FromWindowsSettings(key.GetValue("ProxyServer") as string, key.GetValue("ProxyOverride") as string)
+                : null;
+            autoDetect = false;
+            scriptUrl = key.GetValue("AutoConfigURL") as string;
+        }
+
+        if (manual is not null && manual.IsSelf(ownPort))
+        {
+            manual = null;
+        }
+
+        if (autoDetect || !string.IsNullOrWhiteSpace(scriptUrl))
+        {
+            return UpstreamProxyDetection.Automatic(Proxy.AutoConfig.ProxyAutoConfig.Create(autoDetect, scriptUrl, manual), "Windows proxy settings");
+        }
+
+        return manual is not null
+            ? new UpstreamProxyDetection(manual, $"forwarding through {manual} (Windows proxy settings)")
+            : UpstreamProxyDetection.None;
+    }
+
+    /// <summary>
+    /// Restores whatever the system proxy was set to before <see cref="Enable"/>
+    /// last ran, and deletes the backup file. A no-op on anything but
+    /// Windows. If no backup file exists -- Disable called without a
+    /// matching Enable, or the file was already cleaned up -- the safe
+    /// fallback is just turning the proxy off, rather than risking it stay
+    /// pointed at a port nothing is listening on any more.
+    /// </summary>
+    public static void Disable()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var backup = ReadBackup();
+        using (var key = OpenInternetSettingsKey())
+        {
+            if (backup is not null)
+            {
+                key.SetValue("ProxyEnable", backup.ProxyEnable ? 1 : 0, RegistryValueKind.DWord);
+                SetOrRemove(key, "ProxyServer", backup.ProxyServer);
+                SetOrRemove(key, "ProxyOverride", backup.ProxyOverride);
+
+                // Enable only touched these when automatic detection or a
+                // setup script was on; put them back exactly.
+                if (backup.ConnectionFlags is { } flags &&
+                    (flags & (WinInetConnectionOptions.AutoDetect | WinInetConnectionOptions.AutoProxyUrl)) != 0)
+                {
+                    try
+                    {
+                        WinInetConnectionOptions.Write(new WinInetConnectionOptions.Settings(
+                            flags, backup.ProxyServer ?? string.Empty, backup.ProxyOverride ?? string.Empty, backup.AutoConfigUrl ?? string.Empty));
+                    }
+                    catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or DllNotFoundException or EntryPointNotFoundException)
+                    {
+                        // The manual settings above are restored either way;
+                        // say what couldn't be, rather than fail Stop.
+                        Console.WriteLine(
+                            $"[proxy] Couldn't turn automatic proxy settings back on ({ex.Message}); " +
+                            "check Settings > Network & internet > Proxy.");
+                    }
+                }
+            }
+            else
+            {
+                key.SetValue("ProxyEnable", 0, RegistryValueKind.DWord);
+            }
+        }
+
+        BroadcastSettingsChanged();
+        DeleteBackupFile();
+    }
+
+    /// <summary>
+    /// Call once, early, on every launch, before anything else in this
+    /// class runs. A leftover backup file is exactly the signature of a
+    /// previous run that never reached its own <see cref="Disable"/> call
+    /// -- this restores from it immediately. A clean previous shutdown
+    /// leaves no file behind, so an ordinary cold start is a cheap
+    /// <see cref="File.Exists(string)"/> check and nothing more.
+    /// </summary>
+    public static void RecoverFromCrash()
+    {
+        if (!OperatingSystem.IsWindows() || !File.Exists(BackupFilePath))
+        {
+            return;
+        }
+
+        Disable();
+    }
+
+    // Neither of these has its own OperatingSystem.IsWindows() guard --
+    // the platform-compatibility analyzer only recognizes that pattern
+    // within the guarded method itself, and both of these are private
+    // helpers only ever reached from Enable/Disable, which already guard
+    // before calling them. [SupportedOSPlatform] here is what tells the
+    // analyzer these two are Windows-only by contract instead, which is
+    // enough for it to stop warning at those (already-guarded) call sites.
+    [SupportedOSPlatform("windows")]
+    private static WinInetConnectionOptions.Settings? TryReadConnectionOptions()
+    {
+        try
+        {
+            return WinInetConnectionOptions.Read();
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or DllNotFoundException or EntryPointNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static RegistryKey OpenInternetSettingsKey() =>
+        Registry.CurrentUser.OpenSubKey(InternetSettingsKeyPath, writable: true)
+            ?? throw new InvalidOperationException($"Could not open registry key '{InternetSettingsKeyPath}'.");
+
+    /// <summary>
+    /// Internal rather than private purely so
+    /// <c>Violens.ProxyCore.Tests.WinInetSystemProxyTests</c> can exercise
+    /// this one pure, no-registry-touching piece of the class directly --
+    /// see that test file's remarks on why the rest of this class isn't
+    /// unit-tested the same way.
+    /// </summary>
+    internal static string MergeBypassList(string? existing)
+    {
+        if (string.IsNullOrEmpty(existing))
+        {
+            return "<local>";
+        }
+
+        var entries = existing.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return entries.Any(entry => string.Equals(entry, "<local>", StringComparison.OrdinalIgnoreCase))
+            ? existing
+            : existing + ";<local>";
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void SetOrRemove(RegistryKey key, string name, string? value)
+    {
+        if (value is null)
+        {
+            key.DeleteValue(name, throwOnMissingValue: false);
+        }
+        else
+        {
+            key.SetValue(name, value, RegistryValueKind.String);
+        }
+    }
+
+    private static ProxyBackup? ReadBackup()
+    {
+        try
+        {
+            if (!File.Exists(BackupFilePath))
+            {
+                return null;
+            }
+
+            return JsonSerializer.Deserialize<ProxyBackup>(File.ReadAllText(BackupFilePath));
+        }
+        catch
+        {
+            // A corrupt or partially-written backup file is exactly the
+            // kind of thing a crash could leave behind. Treating it as "no
+            // backup" falls through to Disable's safe fallback (turn the
+            // proxy off) instead of throwing during what's meant to be
+            // cleanup.
+            return null;
+        }
+    }
+
+    private static void WriteBackup(ProxyBackup backup)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(BackupFilePath)!);
+        File.WriteAllText(BackupFilePath, JsonSerializer.Serialize(backup));
+    }
+
+    private static void DeleteBackupFile()
+    {
+        try
+        {
+            File.Delete(BackupFilePath);
+        }
+        catch
+        {
+            // Best-effort -- a leftover (harmless, still-deletable) file
+            // here just means the next RecoverFromCrash re-applies the
+            // same restore it already just performed. Not worth failing
+            // Disable over.
+        }
+    }
+
+    private static void BroadcastSettingsChanged()
+    {
+        InternetSetOption(0, InternetOptionSettingsChanged, 0, 0);
+        InternetSetOption(0, InternetOptionRefresh, 0, 0);
+    }
+
+    // EntryPoint pinned explicitly: wininet.dll exports InternetSetOptionA
+    // and InternetSetOptionW, not a plain "InternetSetOption" symbol --
+    // classic DllImport marshaling resolves that automatically when
+    // ExactSpelling is left false, but naming the real W export directly
+    // removes any doubt. No strings actually cross this boundary (every
+    // argument here is 0/null), so A-vs-W has no behavioral effect either
+    // way; W is just the unambiguous choice. DllImport rather than the
+    // newer LibraryImport source generator specifically because
+    // LibraryImport's generated marshaling stub needs unsafe code, which
+    // would mean turning on AllowUnsafeBlocks for this whole project just
+    // for one P/Invoke that doesn't marshal anything unsafe in the first
+    // place.
+    [DllImport("wininet.dll", EntryPoint = "InternetSetOptionW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool InternetSetOption(nint hInternet, int dwOption, nint lpBuffer, int dwBufferLength);
+
+    /// <summary>
+    /// Plain-property shape on purpose -- the safest one for
+    /// <see cref="JsonSerializer"/> to round-trip without depending on
+    /// constructor-parameter matching. Internal rather than private so
+    /// there's no question of System.Text.Json's default reflection-based
+    /// (de)serializer being able to see it.
+    /// </summary>
+    internal sealed class ProxyBackup
+    {
+        public bool ProxyEnable { get; set; }
+
+        public string? ProxyServer { get; set; }
+
+        public string? ProxyOverride { get; set; }
+
+        public int ManagedPort { get; set; }
+
+        /// <summary>The LAN connection's proxy flags before capture (null in a backup from an older version).</summary>
+        public int? ConnectionFlags { get; set; }
+
+        /// <summary>The "Use setup script" address before capture.</summary>
+        public string? AutoConfigUrl { get; set; }
+    }
+}

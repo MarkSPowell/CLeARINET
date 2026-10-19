@@ -4,7 +4,7 @@ name: Release Windows Installer
 # with Inno Setup into one setup.exe that can install either per-machine
 # (Program Files, needs an admin elevation prompt) or per-user (the current
 # user's own AppData\Local\Programs folder, no admin needed at all -- the
-# person picks at install time; see installer/CLeARINET.iss for how), and
+# person picks at install time; see installer/VioLens.iss for how), and
 # attaches that installer to the GitHub Release for the pushed tag. Separate
 # from ci.yml on purpose: ci.yml runs on every push/PR to build+test both
 # supported OSes; this only runs on an actual version tag, and only builds
@@ -84,7 +84,7 @@ jobs:
           # own AssemblyVersion/FileVersion (InformationalVersion, set
           # alongside it below, is what keeps the full string -- see
           # AboutWindow.axaml.cs's own remarks) and Inno Setup's
-          # VersionInfoVersion directive (installer/CLeARINET.iss's own
+          # VersionInfoVersion directive (installer/VioLens.iss's own
           # VersionInfoTextVersion is the equivalent full-string escape
           # hatch there). Drops everything from the first "-" onward, then
           # pads with trailing ".0"s so there are always exactly four
@@ -105,25 +105,25 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Restore
-        run: dotnet restore CLeARINET.sln
+        run: dotnet restore VioLens.sln
 
       # Self-contained: bundles the .NET 10 runtime into the published
       # output, so the installer works on a machine with no .NET installed
-      # at all -- CLeARINET's own users are the target audience this
+      # at all -- VioLens's own users are the target audience this
       # matters for, not developers who already have the SDK. Publishing
       # only the desktop app project (not the whole solution) is
       # deliberate: DevHost/FiddlerScriptDemo/SampleExtension and the test
       # projects are developer-only tools, not part of what ships to an
       # end user. PublishSingleFile bundles the app's own assemblies into
       # one .exe; loose content files (like the bundled User Guide.md --
-      # see Clearinet.DesktopUi.csproj's own None/Link entry for it) are
+      # see Violens.DesktopUi.csproj's own None/Link entry for it) are
       # NOT folded into that single file by design, and still land next to
       # it in the publish output, which is exactly what
       # OpenDocumentationCommand's AppContext.BaseDirectory-relative path
       # expects.
       - name: Publish self-contained win-x64 build
         run: >-
-          dotnet publish apps/Clearinet.DesktopUi/Clearinet.DesktopUi.csproj
+          dotnet publish apps/Violens.DesktopUi/Violens.DesktopUi.csproj
           --configuration Release
           --runtime win-x64
           --self-contained true
@@ -135,7 +135,7 @@ jobs:
 
                 # Independently built from the main app on purpose -- see this
       # project's own csproj header comment ("deliberately NOT referenced
-      # by the main CLeARINET.sln/apps/Clearinet.DesktopUi... so it can
+      # by the main VioLens.sln/apps/Violens.DesktopUi... so it can
       # never affect the main app's build or release"). This step exists
       # only so the installer below has something to package for the
       # optional "legacyhost" Task; skipping/failing it would never affect
@@ -147,9 +147,9 @@ jobs:
       # 10/11 already, the same dependency real Fiddler Classic itself
       # had), so there's no publish-specific packaging step to gain here.
       # --output flattens this project's own build output *and* its
-      # ProjectReferences' outputs (Clearinet.CompatShim.dll,
-      # Clearinet.LegacyExtensionHost.Bridge.dll) into one folder, exactly
-      # matching what Clearinet.LegacyExtensionHost.csproj's own
+      # ProjectReferences' outputs (Violens.CompatShim.dll,
+      # Violens.LegacyExtensionHost.Bridge.dll) into one folder, exactly
+      # matching what Violens.LegacyExtensionHost.csproj's own
       # CopyOutputToDesktopUiLegacyHostFolder dev-build step already copies
       # into a local LegacyHost folder -- see that target's own remarks.
       # No explicit --runtime win-x86: the project's own PlatformTarget=x86
@@ -159,7 +159,7 @@ jobs:
       # framework-dependent project doesn't need.
       - name: Build legacy extension host (optional installer component)
         run: >-
-          dotnet build tools/Clearinet.LegacyExtensionHost/Clearinet.LegacyExtensionHost/Clearinet.LegacyExtensionHost.csproj
+          dotnet build tools/Violens.LegacyExtensionHost/Violens.LegacyExtensionHost/Violens.LegacyExtensionHost.csproj
           --configuration Release
           --output publish/legacyhost
 
@@ -207,8 +207,8 @@ jobs:
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
-          description: CLeARINET
-          description-url: https://github.com/MarkSPowell/CLeARINET
+          description: VioLens
+          description-url: https://github.com/MarkSPowell/VioLens
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
@@ -241,7 +241,7 @@ jobs:
             "/DLegacyHostDir=${{ github.workspace }}\publish\legacyhost" `
             "/DExtensionsDir=${{ github.workspace }}\publish\extensions" `
             @signing `
-            installer\CLeARINET.iss
+            installer\VioLens.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       # Fails the release if anything that should be signed isn't, so an
@@ -261,8 +261,8 @@ jobs:
       - name: Upload installer as a build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: CLeARINET-Setup-${{ steps.version.outputs.version }}
-          path: installer/Output/CLeARINET-Setup-*.exe
+          name: VioLens-Setup-${{ steps.version.outputs.version }}
+          path: installer/Output/VioLens-Setup-*.exe
           if-no-files-found: error
 
       # Only on a real tag push -- a workflow_dispatch test build has no
@@ -271,5 +271,5 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: installer/Output/CLeARINET-Setup-*.exe
+          files: installer/Output/VioLens-Setup-*.exe
           fail_on_unmatched_files: true
