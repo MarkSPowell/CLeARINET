@@ -132,7 +132,7 @@ public sealed class LeafCertificateProvider
     /// <summary>
     /// Signs a single leaf certificate for <paramref name="host"/>. Kept
     /// separate from the cache so it can be unit tested directly against a
-    /// root produced by <see cref="CertificateAuthority.GenerateRoot"/>,
+    /// root produced by <see cref="CertificateAuthority.GenerateRoot(DateTimeOffset, DateTimeOffset)"/>,
     /// without touching any OS certificate store.
     /// </summary>
     public static X509Certificate2 CreateLeaf(

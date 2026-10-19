@@ -10,7 +10,7 @@ namespace Violens.ProxyCore.Http;
 /// Violens.ProxyCore.Breakpoints.PendingBreakpoint, which owns exactly
 /// one round trip through this class per edit.
 ///
-/// <see cref="Format"/> is built on <see cref="HttpMessageWriter"/>, so
+/// <see cref="Format(CapturedRequest)"/> is built on <see cref="HttpMessageWriter"/>, so
 /// what a user sees already has Content-Length fixed up and
 /// Transfer-Encoding dropped, same as what would finally go on the wire.
 /// <see cref="TryParseRequest"/>/<see cref="TryParseResponse"/>

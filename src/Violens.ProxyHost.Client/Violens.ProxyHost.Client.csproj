@@ -2,8 +2,8 @@
 
   <!--
     The .NET Framework (and any other .NET) side of the proxy host: an app
-    references this, and it runs Violens.ProxyHost -- a separate .NET 10
-    process hosting Violens.ProxyCore -- and talks to it over a named pipe.
+    references this, and it runs Violens.ProxyHost (a separate .NET 10
+    process hosting Violens.ProxyCore) and talks to it over a named pipe.
     See docs/Embedding ProxyCore.md, "Apps on .NET Framework".
 
     netstandard2.0, so .NET Framework 4.6.2 and later can use it, with no

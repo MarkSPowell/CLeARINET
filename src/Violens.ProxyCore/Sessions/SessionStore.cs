@@ -17,7 +17,7 @@ public sealed class SessionStore
     private int _nextId = 1;
 
     /// <summary>
-    /// Raised synchronously, on whatever thread called <see cref="Add"/>,
+    /// Raised synchronously, on whatever thread called <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/>,
     /// right after a session is recorded -- that's proxy connection-handling
     /// threads, never a UI thread. Subscribers that touch UI state (like
     /// the desktop app) must marshal back to the UI thread themselves
@@ -166,21 +166,21 @@ public sealed class SessionStore
 
     /// <summary>
     /// A best-effort look at the id the <em>next</em> session recorded via
-    /// <see cref="Add"/> will receive. Exists for FiddlerScript/extension
+    /// <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> will receive. Exists for FiddlerScript/extension
     /// code that wants to read <c>oSession.id</c> from inside
     /// <c>OnBeforeRequest</c>/<c>OnBeforeResponse</c> -- see
     /// <c>Violens.ProxyCore.Scripting.IScriptRunner</c> -- before
     /// the session that exchange belongs to has actually been recorded here;
-    /// <see cref="Add"/> only assigns a real id once both the request and
+    /// <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> only assigns a real id once both the request and
     /// the response are known, which for a request-side hook is still in the
     /// future.
     ///
     /// <b>Best-effort under concurrency, not a reservation:</b> another
-    /// connection's own <see cref="Add"/> can run between this call
-    /// returning and the caller's own eventual <see cref="Add"/> call, so
+    /// connection's own <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> can run between this call
+    /// returning and the caller's own eventual <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> call, so
     /// the id actually assigned to that session can end up higher than
     /// whatever this returned. There is deliberately no way to reserve an id
-    /// ahead of time -- that would need <see cref="Add"/> itself to change
+    /// ahead of time -- that would need <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> itself to change
     /// shape (pre-allocate, then fill in later), which nothing today
     /// requires closely enough to justify. This matches how real Fiddler's
     /// own <c>oSession.id</c> numbering works in spirit: assigned by capture

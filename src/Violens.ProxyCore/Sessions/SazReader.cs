@@ -23,7 +23,7 @@ namespace Violens.ProxyCore.Sessions;
 /// a captured image or other binary body survives export-then-import
 /// byte-for-byte.
 ///
-/// Imported sessions are added through <see cref="SessionStore.Add"/> --
+/// Imported sessions are added through <see cref="SessionStore.Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> --
 /// the exact same path live capture uses -- rather than handed back as a
 /// list for a caller to insert some other way. That means an import gets
 /// fresh, store-assigned <see cref="Session.Id"/> values (an archive's own
