@@ -825,6 +825,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand ExportViaExtensionCommand { get; }
     public RelayCommand OpenDocumentationCommand { get; }
 
+    /// <summary>Tools > Remove Root Certificate (see <see cref="RemoveRootCertificate"/>).</summary>
+    public RelayCommand RemoveRootCertificateCommand { get; }
+
     /// <summary>Edit > Remove Selected Session (also the Delete key in the session list).</summary>
     public RelayCommand RemoveSelectedSessionCommand { get; }
 
@@ -921,6 +924,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         ImportViaExtensionCommand = new RelayCommand(ImportViaExtension, () => _extensionHost.Importers.Count > 0);
         ExportViaExtensionCommand = new RelayCommand(ExportViaExtension, () => _extensionHost.Exporters.Count > 0 && Sessions.Count > 0);
         OpenDocumentationCommand = new RelayCommand(OpenDocumentation);
+        RemoveRootCertificateCommand = new RelayCommand(RemoveRootCertificate);
         RemoveSelectedSessionCommand = new RelayCommand(
             () => { if (SelectedSessionRow is { } row) { _sessionStore.Remove([row.Id]); } },
             () => SelectedSessionRow is not null);
@@ -1319,6 +1323,30 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         StatusText = $"Stopped and released as the system proxy. {Sessions.Count} session(s) captured this run -- " +
                       "Start again to keep going, or File > Save SAZ to export what's here.";
+    }
+
+    /// <summary>
+    /// Tools > Remove Root Certificate: stops capturing (HTTPS can't be
+    /// decrypted without the root), then removes every VioLens root from
+    /// this account's certificate stores, key included. The next Start
+    /// creates and trusts a new one. <c>async void</c> because it's a
+    /// command handler; on macOS the removal shells out to <c>security</c>,
+    /// so it runs off the UI thread there, as CreateAuthority does.
+    /// </summary>
+    private async void RemoveRootCertificate()
+    {
+        Stop();
+        _authority = null;
+
+        var name = Violens.ProxyCore.ProxyEngine.Identity.RootCertificateName;
+        void Log(string message) => Console.WriteLine($"[certificates] {message}");
+        var removed = OperatingSystem.IsMacOS()
+            ? await Task.Run(() => CertificateAuthority.RemoveRoots(name, Log))
+            : CertificateAuthority.RemoveRoots(name, Log);
+
+        StatusText = removed > 0
+            ? $"Removed {removed} root certificate(s). Start again to create and trust a new one."
+            : "No root certificate was removed (none was trusted, or the removal was declined).";
     }
 
     /// <summary>

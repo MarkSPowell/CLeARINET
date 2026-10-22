@@ -201,16 +201,14 @@ public sealed class LeafCertificateProvider
         // a certificate whose private key exists only in memory --
         // CopyWithPrivateKey's result -- and throws "Authentication
         // failed because the platform does not support ephemeral keys."
-        // Exporting to a PFX and re-importing with PersistKeySet gives it
-        // a real (if short-lived) CNG key container instead, which
-        // Schannel accepts. Same pattern as the root's own key handling,
-        // just without also adding the certificate to a visible store --
-        // only the key needs to stop being ephemeral.
+        // Exporting to a PFX and re-importing gives it a real CNG key
+        // container instead, which Schannel accepts.
         //
-        // Trade-off worth tracking: this leaves a small key-container
-        // artifact behind per leaf generated. Cleaning those up as leaves
-        // expire and are evicted from the cache is a real follow-up, not
-        // something this spike solves.
+        // Deliberately without PersistKeySet (unlike the root's own key):
+        // without it, .NET deletes the key container when the certificate
+        // is released -- disposed, or finalized once nothing (the cache, an
+        // SslStream) holds it any more. With it, every leaf ever signed
+        // left a key file behind in the user's profile, forever.
         //
         // A freshly persisted key container isn't always immediately ready
         // for Schannel to grab -- reproduced live as an occasional,
@@ -239,7 +237,7 @@ public sealed class LeafCertificateProvider
                 persisted = X509CertificateLoader.LoadPkcs12(
                     pfxBytes,
                     password,
-                    X509KeyStorageFlags.PersistKeySet | X509KeyStorageFlags.UserKeySet);
+                    X509KeyStorageFlags.UserKeySet);
 
                 WarmUpPrivateKey(persisted);
                 return persisted;

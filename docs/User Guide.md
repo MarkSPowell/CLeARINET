@@ -59,6 +59,11 @@ Click **Stop** to release the port and stop capturing. Sessions already
 captured stay in the list until you remove them (see below) or close the
 app.
 
+To stop trusting VioLens's certificate, choose **Tools > Remove Root
+Certificate**. This stops capturing and removes the certificate and its key
+from your account; the next **Start** makes a new one. Uninstalling VioLens
+on Windows does the same. On Windows, the system asks you to confirm.
+
 VioLens's HTTPS interception (certificate trust and system proxy
 registration) is implemented on both Windows and macOS. The macOS side is
 new and has had little testing on a real Mac so far — see

@@ -197,6 +197,13 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
+[UninstallRun]
+; Removes VioLens's root certificate from the user's certificate stores, so
+; a root that can sign for any site isn't left trusted after VioLens is
+; gone. Windows asks the user to confirm; a "No" leaves it in place (it
+; can also be removed later with certmgr.msc). Runs before the files go.
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--remove-root-certificate"; Flags: waituntilterminated; RunOnceId: "RemoveRootCertificate"
+
 [UninstallDelete]
 ; Belt-and-suspenders alongside Inno Setup's own automatic per-file
 ; uninstall list: catches anything the app itself might drop into its own

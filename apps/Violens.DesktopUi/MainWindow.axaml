@@ -212,6 +212,11 @@
              column header). Filled in by MainWindow.axaml.cs, since script
              and extension columns come and go. -->
         <MenuItem Header="Session List _Columns" x:Name="ColumnsMenu" />
+        <Separator />
+        <!-- Stops capturing and removes VioLens's root certificate from this
+             account's certificate stores; the Windows uninstaller does the
+             same (see Program.RemoveRootCertificateArgument). -->
+        <MenuItem Header="Remove _Root Certificate" Command="{Binding RemoveRootCertificateCommand}" />
       </MenuItem>
 
       <!-- _Documentation opens the bundled end-user-facing User Guide

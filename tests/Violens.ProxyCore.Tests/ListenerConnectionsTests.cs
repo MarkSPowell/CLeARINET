@@ -129,6 +129,48 @@ public class ListenerConnectionsTests
         }
     }
 
+    [Theory]
+    [InlineData("HTTP/1.1 100 Continue\r\n\r\n")]
+    [InlineData("HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n")]
+    [InlineData("HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 102 Processing\r\n\r\n")]
+    public async Task PassesInterimResponsesOnAndThenTheFinalOne(string interim)
+    {
+        using var root = NewRoot();
+        await using var origin = UpstreamProxyTests.FakeProxy.Start(interim + "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello");
+        var (store, recorded) = RecordingStore();
+        var listener = InterceptingProxyListener.StartOnAvailablePort(0, new LeafCertificateProvider(root), store);
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var client = new TcpClient();
+            await client.ConnectAsync(IPAddress.Loopback, listener.Port, timeout.Token);
+            var stream = client.GetStream();
+            await stream.WriteAsync(
+                Encoding.ASCII.GetBytes($"POST http://127.0.0.1:{origin.Port}/ HTTP/1.1\r\nHost: 127.0.0.1:{origin.Port}\r\nContent-Length: 2\r\n\r\nhi"), timeout.Token);
+
+            // The client sees each interim response, then the real one.
+            var interimCount = interim.Split("HTTP/1.1 ").Length - 1;
+            for (var i = 0; i < interimCount; i++)
+            {
+                var interimResponse = await Http1MessageReader.ReadResponseAsync(stream, isResponseToHeadRequest: false, timeout.Token);
+                Assert.InRange(interimResponse!.StatusCode, 100, 199);
+            }
+
+            var final = await Http1MessageReader.ReadResponseAsync(stream, isResponseToHeadRequest: false, timeout.Token);
+            Assert.Equal(200, final!.StatusCode);
+            Assert.Equal("hello", Encoding.ASCII.GetString(final.Body));
+
+            // Recorded once, as the final response.
+            var session = await recorded.Task.WaitAsync(timeout.Token);
+            Assert.Equal(200, session.Response.StatusCode);
+            Assert.Single(store.Snapshot());
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
     [Fact]
     public async Task AnswersBadGatewayWhenTheServerCantBeReached()
     {

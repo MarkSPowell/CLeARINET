@@ -957,6 +957,18 @@ public sealed class InterceptingProxyListener
                 var isHeadRequest = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
                 var responsePreamble = await Http1MessageReader.ReadResponsePreambleAsync(upstreamStream, cancellationToken);
                 timing.FirstByte();
+
+                // Interim responses (100 Continue, 102 Processing, 103 Early
+                // Hints) come before the real one, on the same request. Pass
+                // each on and keep reading: treating one as the answer would
+                // leave the real response unread while the client waits for
+                // it. 101 is final -- the connection switches protocols.
+                while (responsePreamble is { StatusCode: >= 100 and < 200 and not 101 } interim)
+                {
+                    await HttpMessageWriter.WriteResponsePreambleAsync(clientTls, interim, cancellationToken);
+                    responsePreamble = await Http1MessageReader.ReadResponsePreambleAsync(upstreamStream, cancellationToken);
+                }
+
                 if (responsePreamble is { StatusCode: 407 } && !isTls && upstreamRoute is not null)
                 {
                     // The network's proxy wants a sign-in for plain HTTP.
