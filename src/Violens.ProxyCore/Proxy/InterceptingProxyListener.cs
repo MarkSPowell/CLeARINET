@@ -180,6 +180,27 @@ public sealed class InterceptingProxyListener
         set => Volatile.Write(ref _proxyCredential, value);
     }
 
+    private long _maxCapturedBodyBytes = Http1MessageReader.DefaultMaxCapturedBodyBytes;
+
+    /// <summary>
+    /// How much of each relayed request or response body is kept in its
+    /// session (64 MB unless changed). Every byte is still relayed; a body
+    /// larger than this is captured only up to here, and the session gets
+    /// <see cref="Session.RequestBodyTruncatedFlag"/> or
+    /// <see cref="Session.ResponseBodyTruncatedFlag"/>. Read when each
+    /// client connection opens. A body that's buffered so a breakpoint,
+    /// FiddlerScript or an extension can change it is always kept whole.
+    /// </summary>
+    public long MaxCapturedBodyBytes
+    {
+        get => Interlocked.Read(ref _maxCapturedBodyBytes);
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            Interlocked.Exchange(ref _maxCapturedBodyBytes, value);
+        }
+    }
+
     private static readonly IReadOnlyList<UpstreamProxy?> DirectOnly = [null];
 
     /// <summary>
@@ -314,7 +335,9 @@ public sealed class InterceptingProxyListener
 
         try
         {
-            using var clientStream = client.GetStream();
+            // Read-buffered (see ReadBufferedStream), and the TLS handshake after
+            // CONNECT reads through it too, so nothing read ahead is lost.
+            using var clientStream = new ReadBufferedStream(client.GetStream());
             var first = await Http1MessageReader.ReadRequestPreambleAsync(clientStream, cancellationToken);
             if (first is null)
             {
@@ -343,7 +366,7 @@ public sealed class InterceptingProxyListener
                 await PumpSessionsAsync(
                     isTls: false, string.Empty, PlainHttpRequest.DefaultPort, client, clientStream, first, _sessionStore,
                     _breakpointManager, _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, _proxyUrlClient, Port,
-                    () => _leafProvider.IssuerCertificateDer, cancellationToken);
+                    () => _leafProvider.IssuerCertificateDer, MaxCapturedBodyBytes, cancellationToken);
                 return;
             }
 
@@ -366,9 +389,9 @@ public sealed class InterceptingProxyListener
             // The upstream connection is NOT made here anymore -- see
             // PumpSessionsAsync's own remarks on why it has to be lazy.
             await PumpSessionsAsync(
-                isTls: true, targetHost, targetPort, client, clientTls, firstRequest: null, _sessionStore, _breakpointManager,
+                isTls: true, targetHost, targetPort, client, new ReadBufferedStream(clientTls), firstRequest: null, _sessionStore, _breakpointManager,
                 _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, _proxyUrlClient, Port,
-                () => _leafProvider.IssuerCertificateDer, cancellationToken);
+                () => _leafProvider.IssuerCertificateDer, MaxCapturedBodyBytes, cancellationToken);
         }
         catch (BreakpointAbortedException ex)
         {
@@ -467,6 +490,7 @@ public sealed class InterceptingProxyListener
         HttpClient proxyUrlClient,
         int ownPort,
         Func<byte[]> rootCertificateDer,
+        long maxCapturedBodyBytes,
         CancellationToken cancellationToken)
     {
         // clientTls is the client's TLS stream for a CONNECT tunnel, or its
@@ -564,14 +588,14 @@ public sealed class InterceptingProxyListener
 
                     await tls.AuthenticateAsClientAsync(upstreamTlsProbe.CreateOptions(targetHost), cancellationToken);
                     currentTiming?.TlsDone();
-                    upstreamTls = tls;
+                    upstreamTls = new ReadBufferedStream(tls);
                     sendAbsoluteForm = false;
                 }
                 else
                 {
                     // Plain HTTP goes to a proxy as an ordinary proxy
                     // request (full URL in the request line).
-                    upstreamTls = upstreamClient!.GetStream();
+                    upstreamTls = new ReadBufferedStream(upstreamClient!.GetStream());
                     sendAbsoluteForm = route is not null;
                 }
 
@@ -641,7 +665,7 @@ public sealed class InterceptingProxyListener
                     upstreamTls = null;
                     upstreamClient = new TcpClient();
                     await upstreamClient.ConnectAsync(proxy.Host, proxy.Port, cancellationToken);
-                    upstreamTls = upstreamClient.GetStream();
+                    upstreamTls = new ReadBufferedStream(upstreamClient.GetStream());
                 }
 
                 var stream = upstreamTls!;
@@ -851,6 +875,8 @@ public sealed class InterceptingProxyListener
                 var mustBufferRequestForExtensions = extensionHost?.HasAnyRequestBeforeHandlers ?? false;
                 CapturedRequest request;
                 CapturedResponse? extensionLocalResponse = null;
+                Http1MessageReader.RelayedBody? relayedRequestBody = null;
+                Http1MessageReader.RelayedBody? relayedResponseBody = null;
                 if (breakpointManager.WouldBreakBeforeRequest(outgoingPreamble) || outcome.ForceBreakpointBeforeRequest ||
                     mustBufferRequestForScript || mustBufferRequestForExtensions || extensionSession is not null)
                 {
@@ -919,9 +945,10 @@ public sealed class InterceptingProxyListener
                     timing.SendStarted();
                     await HttpMessageWriter.WriteRequestPreambleAsync(upstream, ForUpstream(outgoingPreamble), cancellationToken);
                     var requestBody = await Http1MessageReader.RelayBodyAsync(
-                        clientTls, upstream, outgoingPreamble.Headers, cancellationToken);
+                        clientTls, upstream, outgoingPreamble.Headers, cancellationToken, maxCapturedBodyBytes);
                     timing.SendDone();
-                    request = outgoingPreamble with { Body = requestBody };
+                    request = outgoingPreamble with { Body = requestBody.Captured };
+                    relayedRequestBody = requestBody;
                 }
 
                 if (extensionLocalResponse is not null)
@@ -957,6 +984,18 @@ public sealed class InterceptingProxyListener
                 var isHeadRequest = string.Equals(request.Method, "HEAD", StringComparison.OrdinalIgnoreCase);
                 var responsePreamble = await Http1MessageReader.ReadResponsePreambleAsync(upstreamStream, cancellationToken);
                 timing.FirstByte();
+
+                // Interim responses (100 Continue, 102 Processing, 103 Early
+                // Hints) come before the real one, on the same request. Pass
+                // each on and keep reading: treating one as the answer would
+                // leave the real response unread while the client waits for
+                // it. 101 is final -- the connection switches protocols.
+                while (responsePreamble is { StatusCode: >= 100 and < 200 and not 101 } interim)
+                {
+                    await HttpMessageWriter.WriteResponsePreambleAsync(clientTls, interim, cancellationToken);
+                    responsePreamble = await Http1MessageReader.ReadResponsePreambleAsync(upstreamStream, cancellationToken);
+                }
+
                 if (responsePreamble is { StatusCode: 407 } && !isTls && upstreamRoute is not null)
                 {
                     // The network's proxy wants a sign-in for plain HTTP.
@@ -1027,10 +1066,11 @@ public sealed class InterceptingProxyListener
                     // once the whole thing is done.
                     await HttpMessageWriter.WriteResponsePreambleAsync(clientTls, responsePreamble, cancellationToken);
                     var responseBody = responseHasNoBody
-                        ? Array.Empty<byte>()
+                        ? Http1MessageReader.RelayedBody.Empty
                         : await Http1MessageReader.RelayResponseBodyAsync(
-                            upstreamStream, clientTls, responsePreamble.Headers, cancellationToken);
-                    response = responsePreamble with { Body = responseBody };
+                            upstreamStream, clientTls, responsePreamble.Headers, cancellationToken, maxCapturedBodyBytes);
+                    response = responsePreamble with { Body = responseBody.Captured };
+                    relayedResponseBody = responseBody;
                 }
 
                 // Fire-and-observe -- see this method's own remarks on why
@@ -1047,8 +1087,9 @@ public sealed class InterceptingProxyListener
                 var webSocket = response.StatusCode == 101 && IsWebSocketUpgrade(response.Headers)
                     ? new WebSocketLog(DateTimeOffset.Now, ContentDecoder.FindHeader(response.Headers, "Sec-WebSocket-Extensions"))
                     : null;
+                var flags = WithTruncationFlags(WithTlsFlags(extensionSession?.Flags, timings), relayedRequestBody, relayedResponseBody);
                 var session = sessionStore.Add(
-                    targetHost, startedAt, request, response, WithTlsFlags(extensionSession?.Flags, timings), scheme, timings, webSocket);
+                    targetHost, startedAt, request, response, flags, scheme, timings, webSocket);
                 ProxyEngine.Log("session",
                     $"#{session.Id} {response.StatusCode} {request.Method} {scheme}://{targetHost}{request.Target} " +
                     $"({request.Body.Length} B req, {response.Body.Length} B resp)");
@@ -1137,6 +1178,40 @@ public sealed class InterceptingProxyListener
         combined[ServerTlsInfo.ClientCertificateRequestedFlag] = tls.DescribeAcceptableIssuers();
         return combined;
     }
+
+    /// <summary>
+    /// <paramref name="flags"/> plus <see cref="Session.RequestBodyTruncatedFlag"/>/
+    /// <see cref="Session.ResponseBodyTruncatedFlag"/> for a relayed body
+    /// that was only partly kept.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string>? WithTruncationFlags(
+        IReadOnlyDictionary<string, string>? flags, Http1MessageReader.RelayedBody? requestBody, Http1MessageReader.RelayedBody? responseBody)
+    {
+        if (requestBody is not { Truncated: true } && responseBody is not { Truncated: true })
+        {
+            return flags;
+        }
+
+        var combined = flags is null
+            ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string>(flags, StringComparer.OrdinalIgnoreCase);
+        if (requestBody is { Truncated: true } request)
+        {
+            combined[Session.RequestBodyTruncatedFlag] = DescribeTruncation(request);
+        }
+
+        if (responseBody is { Truncated: true } response)
+        {
+            combined[Session.ResponseBodyTruncatedFlag] = DescribeTruncation(response);
+        }
+
+        return combined;
+    }
+
+    private static string DescribeTruncation(Http1MessageReader.RelayedBody body) =>
+        string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"kept the first {body.Captured.Length:N0} of {body.Length:N0} bytes");
 
     /// <summary>The response sent when VioLens can't reach the server, with an optional explanation.</summary>
     private static CapturedResponse BadGateway(string host, int port, Exception ex, string? explanation = null)

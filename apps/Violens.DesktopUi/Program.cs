@@ -1,6 +1,7 @@
 using Avalonia;
 using Violens.AppCore.Migration;
 using Violens.ProxyCore;
+using Violens.ProxyCore.Certificates;
 
 namespace Violens.DesktopUi;
 
@@ -15,6 +16,9 @@ namespace Violens.DesktopUi;
 // starts.
 internal static class Program
 {
+    /// <summary>The command-line switch installer/VioLens.iss's [UninstallRun] passes.</summary>
+    internal const string RemoveRootCertificateArgument = "--remove-root-certificate";
+
     // Avalonia's own startup convention: BuildAvaloniaApp() is looked up by
     // name by the Avalonia designer/previewer tooling, so its signature and
     // name are kept exactly as the framework expects even though nothing
@@ -25,6 +29,15 @@ internal static class Program
         // VioLens's own names for what the engine creates (its root
         // certificate, data folder, proxy page), and its log on the console.
         ProxyEngine.Configure(ProxyHostIdentity.Default, log: entry => Console.WriteLine($"{entry.Time:HH:mm:ss} {entry}"));
+
+        // Run by the Windows uninstaller: remove the root certificate (so
+        // nothing VioLens trusted outlives it) and exit, without a window.
+        if (args.Contains(RemoveRootCertificateArgument, StringComparer.OrdinalIgnoreCase))
+        {
+            CertificateAuthority.RemoveRoots(
+                ProxyEngine.Identity.RootCertificateName, log: message => Console.WriteLine($"[certificates] {message}"));
+            return;
+        }
 
         // Before anything reads a setting or the system-proxy crash
         // recovery runs: brings over what CLeARINET (this app's former

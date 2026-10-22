@@ -43,6 +43,36 @@ public class LeafCertificateProviderTests
     }
 
     [Fact]
+    public void CreateLeaf_DoesNotLeaveAKeyContainerBehindOnWindows()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var rootNotBefore = DateTimeOffset.UtcNow.AddMinutes(-1);
+        using var root = CertificateAuthority.GenerateRoot(rootNotBefore, rootNotBefore.AddYears(5));
+
+        var leafNotBefore = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var leaf = LeafCertificateProvider.CreateLeaf(
+            root, "example.test", leafNotBefore, leafNotBefore.AddDays(7));
+
+        string keyName;
+        CngProvider provider;
+        using (var ecdsa = (ECDsaCng)leaf.GetECDsaPrivateKey()!)
+        {
+            keyName = ecdsa.Key.KeyName!;
+            provider = ecdsa.Key.Provider!;
+        }
+
+        // The key is a real, named container while the certificate lives
+        // (which Schannel needs), and gone once it's released.
+        Assert.True(CngKey.Exists(keyName, provider, CngKeyOpenOptions.UserKey));
+        leaf.Dispose();
+        Assert.False(CngKey.Exists(keyName, provider, CngKeyOpenOptions.UserKey));
+    }
+
+    [Fact]
     public void CreateLeaf_ReturnedCertificateHasAnImmediatelyUsablePrivateKey()
     {
         // Regression guard for PersistKey's warm-up step: the certificate

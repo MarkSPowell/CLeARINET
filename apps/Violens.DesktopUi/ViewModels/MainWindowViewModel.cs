@@ -96,9 +96,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly Func<Task<bool>>? _confirmMacOSCertificateTrust;
 
     /// <summary>
-    /// True while <see cref="Start"/> is waiting on the macOS trust
-    /// dialog or the certificate install, so a second click (or QuickExec's
-    /// <c>start</c>) can't begin a second start alongside it.
+    /// True while <see cref="Start"/> or <see cref="StopAsync"/> is waiting
+    /// on the macOS trust dialog, the certificate install or the system
+    /// proxy settings, so a second click (or QuickExec's <c>start</c>/
+    /// <c>stop</c>) can't begin another start or stop alongside it.
     /// </summary>
     private bool _starting;
 
@@ -825,6 +826,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand ExportViaExtensionCommand { get; }
     public RelayCommand OpenDocumentationCommand { get; }
 
+    /// <summary>Tools > Remove Root Certificate (see <see cref="RemoveRootCertificate"/>).</summary>
+    public RelayCommand RemoveRootCertificateCommand { get; }
+
     /// <summary>Edit > Remove Selected Session (also the Delete key in the session list).</summary>
     public RelayCommand RemoveSelectedSessionCommand { get; }
 
@@ -909,7 +913,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         StartCommand = new RelayCommand(
             Start, () => IsSupported && !IsRunning && !_starting && (UseAutomaticPort || PreferredPort is >= 1 and <= 65535));
-        StopCommand = new RelayCommand(Stop, () => IsRunning);
+        StopCommand = new RelayCommand(Stop, () => IsRunning && !_starting);
         SaveSazCommand = new RelayCommand(SaveSaz, () => Sessions.Count > 0);
         // The Importers/Exporters.Count half of each condition is a one-time
         // check against what Load() already found above -- extensions don't
@@ -921,6 +925,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         ImportViaExtensionCommand = new RelayCommand(ImportViaExtension, () => _extensionHost.Importers.Count > 0);
         ExportViaExtensionCommand = new RelayCommand(ExportViaExtension, () => _extensionHost.Exporters.Count > 0 && Sessions.Count > 0);
         OpenDocumentationCommand = new RelayCommand(OpenDocumentation);
+        RemoveRootCertificateCommand = new RelayCommand(RemoveRootCertificate);
         RemoveSelectedSessionCommand = new RelayCommand(
             () => { if (SelectedSessionRow is { } row) { _sessionStore.Remove([row.Id]); } },
             () => SelectedSessionRow is not null);
@@ -1122,9 +1127,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// <c>async void</c> because it's a command handler. Only the macOS
-    /// first run actually awaits anything (the trust dialog, then the
-    /// certificate install off the UI thread); on Windows, and on a Mac
-    /// once the certificate exists, it runs straight through as before.
+    /// first run awaits the trust dialog, and every Start on a Mac awaits
+    /// the system proxy settings (see <see cref="RunOffUiThreadOnMacAsync"/>);
+    /// on Windows it runs straight through as before.
     /// </summary>
     private async void Start()
     {
@@ -1133,6 +1138,44 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        SetStarting(true);
+        try
+        {
+            await StartCoreAsync();
+        }
+        finally
+        {
+            SetStarting(false);
+        }
+    }
+
+    private void SetStarting(bool starting)
+    {
+        _starting = starting;
+        StartCommand.RaiseCanExecuteChanged();
+        StopCommand.RaiseCanExecuteChanged();
+    }
+
+    /// <summary>
+    /// On macOS, reading and changing the system proxy runs
+    /// <c>networksetup</c> -- about a dozen processes per network service,
+    /// any of which can wait while macOS asks for a password -- so it runs
+    /// off the UI thread there, or the window freezes until it's done. On
+    /// Windows the same calls are quick registry reads and writes, kept on
+    /// the UI thread as before.
+    /// </summary>
+    private static Task<T> RunOffUiThreadOnMacAsync<T>(Func<T> work) =>
+        OperatingSystem.IsMacOS() ? Task.Run(work) : Task.FromResult(work());
+
+    private static Task RunOffUiThreadOnMacAsync(Action work) =>
+        RunOffUiThreadOnMacAsync(() =>
+        {
+            work();
+            return true;
+        });
+
+    private async Task StartCoreAsync()
+    {
         try
         {
             // Only relevant the very first time this runs on macOS (or
@@ -1149,39 +1192,27 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             // keeps each run's leaves independent of any that came before).
             if (_authority is null)
             {
-                _starting = true;
-                StartCommand.RaiseCanExecuteChanged();
-                try
+                if (OperatingSystem.IsMacOS())
                 {
-                    if (OperatingSystem.IsMacOS())
+                    var confirmed = _confirmMacOSCertificateTrust is not null
+                        && await _confirmMacOSCertificateTrust();
+                    if (!confirmed)
                     {
-                        var confirmed = _confirmMacOSCertificateTrust is not null
-                            && await _confirmMacOSCertificateTrust();
-                        if (!confirmed)
-                        {
-                            StatusText =
-                                "Not started -- installing the trusted root certificate was declined. VioLens can't " +
-                                "decrypt HTTPS traffic without it, so there's no way to proceed without installing it.";
-                            return;
-                        }
-
-                        StatusText = "Installing the root certificate -- macOS may ask for your password...";
+                        StatusText =
+                            "Not started -- installing the trusted root certificate was declined. VioLens can't " +
+                            "decrypt HTTPS traffic without it, so there's no way to proceed without installing it.";
+                        return;
                     }
 
-                    // On macOS, off the UI thread: the 'security' command
-                    // waits while macOS asks for the person's password, and
-                    // the window should keep drawing meanwhile. On Windows,
-                    // on the UI thread as before, so Windows' own "install
-                    // this certificate?" dialog stays in front of the app.
-                    _authority = OperatingSystem.IsMacOS()
-                        ? await Task.Run(() => CreateAuthority())
-                        : CreateAuthority();
+                    StatusText = "Installing the root certificate -- macOS may ask for your password...";
                 }
-                finally
-                {
-                    _starting = false;
-                    StartCommand.RaiseCanExecuteChanged();
-                }
+
+                // On macOS, off the UI thread: the 'security' command
+                // waits while macOS asks for the person's password, and
+                // the window should keep drawing meanwhile. On Windows,
+                // on the UI thread as before, so Windows' own "install
+                // this certificate?" dialog stays in front of the app.
+                _authority = await RunOffUiThreadOnMacAsync(CreateAuthority);
             }
 
             var leafProvider = new LeafCertificateProvider(_authority.RootCertificate);
@@ -1236,16 +1267,23 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
             // Before registering as the system proxy, while the system setting
             // still names the network's own proxy (if any).
-            var gatewayNote = StartGateway(_proxy);
-            var listeningOn = _proxy.AllowsRemoteClients
-                ? $"all network interfaces, port {_proxy.Port}"
-                : $"127.0.0.1:{_proxy.Port}";
+            if (OperatingSystem.IsMacOS())
+            {
+                StatusText = $"Listening on port {_proxy.Port} -- registering as the system proxy (macOS may ask for your password)...";
+            }
+
+            var proxy = _proxy;
+            var detected = await RunOffUiThreadOnMacAsync(() => SystemProxyController.DetectUpstream(proxy.Port));
+            var gatewayNote = StartGateway(proxy, detected);
+            var listeningOn = proxy.AllowsRemoteClients
+                ? $"all network interfaces, port {proxy.Port}"
+                : $"127.0.0.1:{proxy.Port}";
 
             // In Auto mode requestedPort is always 0, which _proxy.Port
             // (the real bound port) will never equal -- there's no
             // "preferred port was taken" collision to report in that mode
             // in the first place, so this note only ever applies to Specify.
-            var portNote = UseAutomaticPort || _proxy.Port == requestedPort
+            var portNote = UseAutomaticPort || proxy.Port == requestedPort
                 ? string.Empty
                 : $" (port {requestedPort} was already taken -- probably another VioLens process still running)";
 
@@ -1256,7 +1294,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             // system default.
             try
             {
-                SystemProxyController.Enable(_proxy.Port);
+                await RunOffUiThreadOnMacAsync(() => SystemProxyController.Enable(proxy.Port));
                 StatusText =
                     $"Listening on {listeningOn}{portNote} and registered as the system proxy -- " +
                     "browsers and most other apps on this machine will route through here automatically " +
@@ -1289,16 +1327,43 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         return authority;
     }
 
-    private void Stop()
+    /// <summary><c>async void</c> because it's a command handler; see <see cref="StopAsync"/>.</summary>
+    private async void Stop() => await StopAsync();
+
+    /// <summary>
+    /// Stops capturing and puts the system proxy back. On macOS that's
+    /// <c>networksetup</c> again, so it runs off the UI thread (see
+    /// <see cref="RunOffUiThreadOnMacAsync"/>), with Start held off until
+    /// it's done.
+    /// </summary>
+    private async Task StopAsync()
     {
-        if (_proxy is null)
+        if (_proxy is null || _starting)
         {
             return;
         }
 
         _proxy.Stop();
         _proxy = null;
-        SystemProxyController.Disable();
+        SetStarting(true);
+        try
+        {
+            if (OperatingSystem.IsMacOS())
+            {
+                StatusText = "Stopping -- putting the system proxy settings back...";
+            }
+
+            await RunOffUiThreadOnMacAsync(SystemProxyController.Disable);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[system-proxy] Couldn't put the system proxy settings back: {ex.Message}");
+        }
+        finally
+        {
+            SetStarting(false);
+        }
+
         IsRunning = false;
         StopGateway();
 
@@ -1319,6 +1384,36 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         StatusText = $"Stopped and released as the system proxy. {Sessions.Count} session(s) captured this run -- " +
                       "Start again to keep going, or File > Save SAZ to export what's here.";
+    }
+
+    /// <summary>
+    /// Tools > Remove Root Certificate: stops capturing (HTTPS can't be
+    /// decrypted without the root), then removes every VioLens root from
+    /// this account's certificate stores, key included. The next Start
+    /// creates and trusts a new one. <c>async void</c> because it's a
+    /// command handler; on macOS the removal shells out to <c>security</c>,
+    /// so it runs off the UI thread there, as CreateAuthority does.
+    /// </summary>
+    private async void RemoveRootCertificate()
+    {
+        if (_starting)
+        {
+            StatusText = "Wait for Start or Stop to finish, then remove the root certificate.";
+            return;
+        }
+
+        await StopAsync();
+        _authority = null;
+
+        var name = Violens.ProxyCore.ProxyEngine.Identity.RootCertificateName;
+        void Log(string message) => Console.WriteLine($"[certificates] {message}");
+        var removed = OperatingSystem.IsMacOS()
+            ? await Task.Run(() => CertificateAuthority.RemoveRoots(name, Log))
+            : CertificateAuthority.RemoveRoots(name, Log);
+
+        StatusText = removed > 0
+            ? $"Removed {removed} root certificate(s). Start again to create and trust a new one."
+            : "No root certificate was removed (none was trusted, or the removal was declined).";
     }
 
     /// <summary>

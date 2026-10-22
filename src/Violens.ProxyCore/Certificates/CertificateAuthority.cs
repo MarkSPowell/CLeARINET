@@ -213,9 +213,131 @@ public sealed class CertificateAuthority
     }
 
     /// <summary>
+    /// Removes every root whose name contains <paramref name="subjectPrefix"/>
+    /// -- current, expired, or left by an earlier install -- from the
+    /// trusted-root store and the personal store, deleting its private key
+    /// too. Doesn't need (or create) a root the way constructing this class
+    /// does, so it's what an uninstaller or a "Remove certificate" command
+    /// calls. On Windows each removal from the trusted-root store shows the
+    /// system's own confirmation; a "No" is respected, logged, and that
+    /// root's key kept so a later removal leaves nothing behind. Never
+    /// throws.
+    /// </summary>
+    /// <returns>How many roots were removed from the trust store.</returns>
+    public static int RemoveRoots(string subjectPrefix, Action<string>? log = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectPrefix);
+
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                using var rootStore = new X509Store(StoreName.Root, StoreLocation.CurrentUser);
+                using var myStore = new X509Store(StoreName.My, StoreLocation.CurrentUser);
+                return RemoveRootsFromStores(rootStore, myStore, subjectPrefix, log);
+            }
+
+            if (OperatingSystem.IsMacOS())
+            {
+                using var myStore = new X509Store(StoreName.My, StoreLocation.CurrentUser);
+                myStore.Open(OpenFlags.ReadWrite);
+                var removed = 0;
+                foreach (var root in FindRoots(myStore, subjectPrefix))
+                {
+                    try
+                    {
+                        // Deleting it from the keychain takes its trust
+                        // setting with it.
+                        MacOSCertificateTrust.Uninstall(root);
+                        removed++;
+                    }
+                    catch (CertificateTrustException ex)
+                    {
+                        log?.Invoke($"Couldn't remove the root certificate {root.Thumbprint}: {ex.Message}");
+                    }
+                }
+
+                return removed;
+            }
+
+            log?.Invoke("Removing root certificates is only implemented for Windows and macOS.");
+        }
+        catch (CryptographicException ex)
+        {
+            log?.Invoke($"Couldn't check for root certificates to remove: {ex.Message}");
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// <see cref="RemoveRoots"/>'s Windows half, with the stores passed in
+    /// so tests can use stores of their own rather than the real ones.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    internal static int RemoveRootsFromStores(X509Store trustStore, X509Store keyStore, string subjectPrefix, Action<string>? log)
+    {
+        trustStore.Open(OpenFlags.ReadWrite);
+        keyStore.Open(OpenFlags.ReadWrite);
+
+        var removed = 0;
+        foreach (var root in FindRoots(trustStore, subjectPrefix))
+        {
+            try
+            {
+                trustStore.Remove(root);
+                removed++;
+            }
+            catch (CryptographicException ex)
+            {
+                log?.Invoke($"The root certificate {root.Thumbprint} is still trusted: {ex.Message}");
+            }
+        }
+
+        foreach (var root in FindRoots(keyStore, subjectPrefix))
+        {
+            try
+            {
+                // Still trusted means the user said No above; keep the key
+                // so a later "Yes" leaves nothing behind.
+                if (trustStore.Certificates.Find(X509FindType.FindByThumbprint, root.Thumbprint, validOnly: false).Count > 0)
+                {
+                    continue;
+                }
+
+                keyStore.Remove(root);
+
+                // Removing a certificate from a store leaves its persisted
+                // key container on disk; delete that too.
+                using var key = root.GetECDsaPrivateKey();
+                (key as ECDsaCng)?.Key.Delete();
+            }
+            catch (CryptographicException ex)
+            {
+                log?.Invoke($"Couldn't remove the root certificate {root.Thumbprint}: {ex.Message}");
+            }
+        }
+
+        if (removed > 0)
+        {
+            log?.Invoke($"Removed {removed} root certificate(s) named {subjectPrefix}.");
+        }
+
+        return removed;
+    }
+
+    private static List<X509Certificate2> FindRoots(X509Store store, string subjectPrefix) =>
+        store.Certificates
+            .Find(X509FindType.FindBySubjectName, subjectPrefix, validOnly: false)
+            .Cast<X509Certificate2>()
+            .ToList();
+
+    /// <summary>
     /// Removes this root from both the personal and trusted-root stores.
-    /// Implements the design doc's "one-click removal" mechanics; not yet
-    /// wired to any UI or CLI command, on either platform.
+    /// Implements the design doc's "one-click removal" mechanics. The app's
+    /// own uninstall and "Remove Root Certificate" command use
+    /// <see cref="RemoveRoots"/> instead, which also catches roots left by
+    /// earlier installs.
     /// </summary>
     public void Uninstall()
     {

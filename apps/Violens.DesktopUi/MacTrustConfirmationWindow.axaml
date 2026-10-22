@@ -27,7 +27,7 @@
                Foreground="{DynamicResource AppAccentBrush}"
                TextWrapping="Wrap"
                Margin="0,0,0,10" />
-    <TextBlock Text="VioLens needs to add a certificate to your login keychain so it can decrypt this account's HTTPS traffic for inspection. It will only be trusted for your user account -- not system-wide -- and can be removed later from Keychain Access or VioLens's own uninstall."
+    <TextBlock Text="VioLens needs to add a certificate to your login keychain so it can decrypt this account's HTTPS traffic for inspection. It will only be trusted for your user account -- not system-wide -- and can be removed later with Tools > Remove Root Certificate, or from Keychain Access."
                FontSize="12"
                Foreground="{DynamicResource AppMutedTextBrush}"
                TextWrapping="Wrap"
