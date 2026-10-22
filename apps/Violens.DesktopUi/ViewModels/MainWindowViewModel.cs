@@ -156,6 +156,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly DispatcherTimer _captureFlashTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
 
     /// <summary>
+    /// How long newly captured sessions wait to be added to the lists
+    /// together -- short enough to read as immediate, long enough that a
+    /// burst of traffic becomes a handful of UI updates instead of hundreds.
+    /// </summary>
+    private static readonly TimeSpan SessionArrivalInterval = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// Sessions <see cref="SessionStore.SessionAdded"/> has reported that
+    /// aren't in <see cref="Sessions"/> yet; see the constructor, where it's
+    /// wired up, and <see cref="AddSessionRows"/>, which adds each batch.
+    /// </summary>
+    private readonly CoalescingQueue<Session> _sessionArrivals;
+
+    /// <summary>
     /// Every session captured this run, in capture order, regardless of
     /// <see cref="FilterText"/> -- still what <see cref="SaveSazCommand"/>
     /// exports from and what its can-execute check counts, since exporting
@@ -966,31 +980,25 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // when the closure actually runs, so referencing SaveSazCommand here
         // before its assignment line would (harmlessly, since the closure
         // only ever runs post-construction) still trip CS8602.
-        _sessionStore.SessionAdded += session => Dispatcher.UIThread.Post(() =>
-        {
-            var row = SessionRow.From(session, _fiddlerScriptRunner);
-            Sessions.Add(row);
-            // Only this one new row needs checking against the current
-            // filter -- everything already in FilteredSessions was already
-            // matched when it arrived (or by the last ApplyFilter() run),
-            // so there's no reason to re-scan the whole list per capture.
-            // ui-hide: an importer, extension or script asked for this
-            // session to be left out of the list (it's still captured and saved).
-            if (!row.Style.Hidden && _query.Matches(session))
-            {
-                FilteredSessions.Add(row);
-            }
-
-            SaveSazCommand.RaiseCanExecuteChanged();
-            ExportViaExtensionCommand.RaiseCanExecuteChanged();
-            RemoveAllSessionsCommand.RaiseCanExecuteChanged();
-            RaisePropertyChanged(nameof(HasSessions));
-            FlashCaptureIndicator();
-        });
+        //
+        // New sessions reach the lists in batches, at most one UI-thread
+        // update per SessionArrivalInterval (see CoalescingQueue) rather
+        // than one dispatcher post per captured session, which under heavy
+        // traffic -- a page load, a SAZ import -- floods the UI thread with
+        // hundreds of tiny updates a second. The delay happens off the UI
+        // thread; only the delivery is posted to it.
+        _sessionArrivals = new CoalescingQueue<Session>(
+            deliver => _ = Task.Delay(SessionArrivalInterval).ContinueWith(
+                _ => Dispatcher.UIThread.Post(deliver), TaskScheduler.Default),
+            AddSessionRows);
+        _sessionStore.SessionAdded += _sessionArrivals.Add;
 
         // Removed sessions leave both lists; the selection goes with them.
         _sessionStore.SessionsRemoved += ids => Dispatcher.UIThread.Post(() =>
         {
+            // Anything still waiting to be added goes in first, so a session
+            // removed before its batch arrived can't reappear afterwards.
+            _sessionArrivals.Flush();
             var removed = new HashSet<int>(ids);
             for (var i = Sessions.Count - 1; i >= 0; i--)
             {
@@ -1379,6 +1387,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Defensive rather than load-bearing -- SessionAdded can't fire
         // while stopped, so nothing would restart the timer from here on.
         // Still worth guaranteeing no flash state lingers into the next run.
+        // Sessions still waiting to be added go in first, so the count
+        // below includes them and their flash is cleared along with the rest.
+        _sessionArrivals.Flush();
         _captureFlashTimer.Stop();
         IsCaptureFlashing = false;
 
@@ -1827,11 +1838,41 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// One batch of newly captured sessions (see <see cref="_sessionArrivals"/>),
+    /// on the UI thread: each gets its row, and only these new rows need
+    /// checking against the current filter -- everything already in
+    /// <see cref="FilteredSessions"/> was already matched when it arrived
+    /// (or by the last <see cref="ApplyFilter"/> run), so there's no reason
+    /// to re-scan the whole list per batch. The commands, HasSessions and
+    /// the capture flash are updated once for the batch, not per session.
+    /// </summary>
+    private void AddSessionRows(IReadOnlyList<Session> arrived)
+    {
+        foreach (var session in arrived)
+        {
+            var row = SessionRow.From(session, _fiddlerScriptRunner);
+            Sessions.Add(row);
+            // ui-hide: an importer, extension or script asked for this
+            // session to be left out of the list (it's still captured and saved).
+            if (!row.Style.Hidden && _query.Matches(session))
+            {
+                FilteredSessions.Add(row);
+            }
+        }
+
+        SaveSazCommand.RaiseCanExecuteChanged();
+        ExportViaExtensionCommand.RaiseCanExecuteChanged();
+        RemoveAllSessionsCommand.RaiseCanExecuteChanged();
+        RaisePropertyChanged(nameof(HasSessions));
+        FlashCaptureIndicator();
+    }
+
+    /// <summary>
     /// Rebuilds <see cref="FilteredSessions"/> from scratch against
     /// <see cref="Sessions"/> and the current <see cref="_query"/> -- the
     /// only time a full rescan is warranted, since it's the query that
-    /// changed, not any one session (the SessionAdded handler above covers
-    /// that far cheaper, one row at a time).
+    /// changed, not any one session (<see cref="AddSessionRows"/> covers
+    /// that far cheaper, checking only the newly arrived rows).
     /// </summary>
     private void ApplyFilter()
     {
