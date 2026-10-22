@@ -331,6 +331,19 @@ It does build on some of his published open source work, under its own
 licences: the ported NetLog importer and the CSP Rule Collector fork
 (see above).
 
+## Credits
+
+Special thanks to:
+
+- **EJ Suter-Powell** and **Jose Gonzales**, for testing VioLens on
+  macOS.
+- **Eric Lawrence**, who created Fiddler, for the inspiration and for
+  laying the groundwork: two decades of Fiddler itself, and his
+  generous public writing about how it works and what he'd do
+  differently, which shaped much of VioLens's design. (Thanks here
+  doesn't mean he endorses VioLens; see
+  [Relationship to Fiddler](#relationship-to-fiddler).)
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
