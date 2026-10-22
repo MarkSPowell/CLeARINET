@@ -27,6 +27,12 @@ internal static class MacOSSystemProxy
 {
     // In the host app's data folder (see ProxyHostIdentity), read each time
     // so ProxyEngine.Configure can come before or after this class is first used.
+    /// <summary>
+    /// How long one <c>networksetup</c> run may take. Long enough for
+    /// someone to answer a password prompt it shows.
+    /// </summary>
+    private static readonly TimeSpan NetworkSetupTimeout = TimeSpan.FromMinutes(2);
+
     private static string BackupFilePath =>
         Path.Combine(ProxyEngine.Identity.ResolveDataFolder(), "system-proxy-backup-macos.json");
 
@@ -446,12 +452,31 @@ internal static class MacOSSystemProxy
         using var process = Process.Start(startInfo)
             ?? throw new SystemProxyCommandException("Failed to start the 'networksetup' process.", exitCode: -1, standardError: string.Empty);
 
-        // Same deadlock-avoidance shape as
-        // Certificates.MacOSCertificateTrust.RunSecurityCommand: both
-        // streams read to completion before WaitForExit, not after.
-        var standardOutput = process.StandardOutput.ReadToEnd();
-        var standardError = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        // Both streams are drained concurrently, so neither can fill and
+        // block the process. Bounded: a 'networksetup' that never finishes
+        // (a password prompt left unanswered, say) would otherwise hang
+        // Start or Stop for good.
+        var standardOutputRead = process.StandardOutput.ReadToEndAsync();
+        var standardErrorRead = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(NetworkSetupTimeout))
+        {
+            try
+            {
+                process.Kill();
+            }
+            catch (InvalidOperationException)
+            {
+                // It exited just now.
+            }
+
+            throw new SystemProxyCommandException(
+                $"'networksetup {string.Join(' ', arguments)}' didn't finish within {NetworkSetupTimeout.TotalSeconds:0} seconds.",
+                exitCode: -1,
+                standardError: string.Empty);
+        }
+
+        var standardOutput = standardOutputRead.GetAwaiter().GetResult();
+        var standardError = standardErrorRead.GetAwaiter().GetResult();
 
         if (process.ExitCode != 0)
         {

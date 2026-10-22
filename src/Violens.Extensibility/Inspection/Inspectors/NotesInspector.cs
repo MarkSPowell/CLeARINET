@@ -33,6 +33,8 @@ public sealed class NotesInspector : IInspector
         ["x-processinfo"] = "the program that made the request",
         ["x-transport"] = "the protocol the browser used",
         ["x-client-certificate-requested"] = "the server asked for a client certificate (mutual TLS) from these issuers; VioLens doesn't send one yet",
+        ["x-request-body-truncated"] = "the request body was too large to keep in full; it was sent on in full, but only its start was captured",
+        ["x-response-body-truncated"] = "the response body was too large to keep in full; it was passed on in full, but only its start was captured",
         ["ui-comments"] = "a comment attached by the importer or an extension",
         ["ui-backcolor"] = "the row colour the importer or an extension asked for",
         ["ui-color"] = "the text colour the importer or an extension asked for",

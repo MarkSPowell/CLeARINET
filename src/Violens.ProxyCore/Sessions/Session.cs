@@ -67,6 +67,17 @@ public sealed record Session(
     string Scheme = "https")
 {
     /// <summary>
+    /// The flag set on a session whose request body was larger than the
+    /// listener keeps (see <c>InterceptingProxyListener.MaxCapturedBodyBytes</c>):
+    /// it was relayed in full, but only its start is in
+    /// <see cref="CapturedRequest.Body"/>. Its value says how much. Shows in the Notes tab.
+    /// </summary>
+    public const string RequestBodyTruncatedFlag = "x-request-body-truncated";
+
+    /// <summary>As <see cref="RequestBodyTruncatedFlag"/>, for the response body.</summary>
+    public const string ResponseBodyTruncatedFlag = "x-response-body-truncated";
+
+    /// <summary>
     /// The original six-argument constructor, kept for binary compatibility:
     /// adding <see cref="Flags"/> changed the primary constructor's compiled
     /// signature, and an extension compiled before that which builds a

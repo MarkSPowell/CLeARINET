@@ -186,20 +186,34 @@ internal static class Http1MessageReader
     }
 
     /// <summary>
+    /// How much of a relayed body is kept for the session by default:
+    /// every byte is still relayed, but only this many are held in memory
+    /// (see <see cref="RelayedBody"/>). Keeps a multi-gigabyte download from
+    /// exhausting memory, or failing outright past the 2 GB array limit.
+    /// </summary>
+    public const long DefaultMaxCapturedBodyBytes = 64 * 1024 * 1024;
+
+    /// <summary>
     /// Reads a body the same way <see cref="ReadBodyAsync"/> does, except
     /// every byte is written to <paramref name="destination"/> as it
     /// arrives instead of only being accumulated. The returned bytes are
-    /// still the complete, decoded body -- built from the same bytes as
-    /// they're relayed, not read twice -- so session capture works
-    /// identically either way. See the class remarks for why this exists.
+    /// still the decoded body -- built from the same bytes as they're
+    /// relayed, not read twice -- so session capture works identically
+    /// either way, up to <paramref name="maxCapturedBytes"/>; past that the
+    /// rest is relayed but not kept. See the class remarks for why this
+    /// exists.
     /// </summary>
-    public static Task<byte[]> RelayBodyAsync(
-        Stream source, Stream destination, IReadOnlyList<(string Name, string Value)> headers, CancellationToken cancellationToken)
+    public static Task<RelayedBody> RelayBodyAsync(
+        Stream source,
+        Stream destination,
+        IReadOnlyList<(string Name, string Value)> headers,
+        CancellationToken cancellationToken,
+        long maxCapturedBytes = DefaultMaxCapturedBodyBytes)
     {
         var transferEncoding = FindHeader(headers, "Transfer-Encoding");
         if (transferEncoding is not null && transferEncoding.Contains("chunked", StringComparison.OrdinalIgnoreCase))
         {
-            return RelayChunkedBodyAsync(source, destination, cancellationToken);
+            return RelayChunkedBodyAsync(source, destination, new CaptureBuffer(maxCapturedBytes), cancellationToken);
         }
 
         var contentLengthText = FindHeader(headers, "Content-Length");
@@ -211,11 +225,11 @@ internal static class Http1MessageReader
             }
 
             return contentLength == 0
-                ? Task.FromResult(Array.Empty<byte>())
-                : RelayExactBytesAsync(source, destination, contentLength, cancellationToken);
+                ? Task.FromResult(RelayedBody.Empty)
+                : RelayExactBytesAsync(source, destination, contentLength, new CaptureBuffer(maxCapturedBytes), cancellationToken);
         }
 
-        return Task.FromResult(Array.Empty<byte>());
+        return Task.FromResult(RelayedBody.Empty);
     }
 
     /// <summary>
@@ -246,11 +260,15 @@ internal static class Http1MessageReader
     /// a response with no framing (see <see cref="IsCloseDelimited"/>) is
     /// relayed until the connection closes rather than treated as empty.
     /// </summary>
-    public static Task<byte[]> RelayResponseBodyAsync(
-        Stream source, Stream destination, IReadOnlyList<(string Name, string Value)> headers, CancellationToken cancellationToken) =>
+    public static Task<RelayedBody> RelayResponseBodyAsync(
+        Stream source,
+        Stream destination,
+        IReadOnlyList<(string Name, string Value)> headers,
+        CancellationToken cancellationToken,
+        long maxCapturedBytes = DefaultMaxCapturedBodyBytes) =>
         IsCloseDelimited(headers)
-            ? RelayToEndAsync(source, destination, cancellationToken)
-            : RelayBodyAsync(source, destination, headers, cancellationToken);
+            ? RelayToEndAsync(source, destination, new CaptureBuffer(maxCapturedBytes), cancellationToken)
+            : RelayBodyAsync(source, destination, headers, cancellationToken, maxCapturedBytes);
 
     private static async Task<byte[]> ReadToEndAsync(Stream source, CancellationToken cancellationToken)
     {
@@ -259,20 +277,20 @@ internal static class Http1MessageReader
         return body.ToArray();
     }
 
-    private static async Task<byte[]> RelayToEndAsync(Stream source, Stream destination, CancellationToken cancellationToken)
+    private static async Task<RelayedBody> RelayToEndAsync(
+        Stream source, Stream destination, CaptureBuffer capture, CancellationToken cancellationToken)
     {
-        using var body = new MemoryStream();
         var buffer = new byte[RelayBufferSize];
         while (true)
         {
             var read = await ReadOrEndAsync(source, buffer, cancellationToken);
             if (read == 0)
             {
-                return body.ToArray();
+                return capture.Build();
             }
 
             await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-            body.Write(buffer, 0, read);
+            capture.Append(buffer.AsSpan(0, read));
         }
     }
 
@@ -383,10 +401,9 @@ internal static class Http1MessageReader
     /// what a real client already expects from a chunked response, not a
     /// rebuilt approximation of it.
     /// </summary>
-    private static async Task<byte[]> RelayChunkedBodyAsync(
-        Stream source, Stream destination, CancellationToken cancellationToken)
+    private static async Task<RelayedBody> RelayChunkedBodyAsync(
+        Stream source, Stream destination, CaptureBuffer capture, CancellationToken cancellationToken)
     {
-        using var body = new MemoryStream();
         while (true)
         {
             var sizeLine = await ReadLineAsync(source, allowImmediateEof: false, cancellationToken);
@@ -414,9 +431,9 @@ internal static class Http1MessageReader
                 break;
             }
 
-            var chunk = await ReadExactAsync(source, size, cancellationToken);
-            await destination.WriteAsync(chunk, cancellationToken);
-            body.Write(chunk);
+            // In pieces, like a Content-Length body: a single chunk can be
+            // as large as the server likes.
+            await RelayExactBytesIntoAsync(source, destination, size, capture, cancellationToken);
 
             var terminator = await ReadLineAsync(source, allowImmediateEof: false, cancellationToken);
             await WriteLineAsync(destination, terminator ?? string.Empty, cancellationToken);
@@ -426,7 +443,7 @@ internal static class Http1MessageReader
             }
         }
 
-        return body.ToArray();
+        return capture.Build();
     }
 
     /// <summary>
@@ -435,10 +452,16 @@ internal static class Http1MessageReader
     /// of this method is that a large body still streams through instead
     /// of sitting entirely in memory before the first byte moves on.
     /// </summary>
-    private static async Task<byte[]> RelayExactBytesAsync(
-        Stream source, Stream destination, long count, CancellationToken cancellationToken)
+    private static async Task<RelayedBody> RelayExactBytesAsync(
+        Stream source, Stream destination, long count, CaptureBuffer capture, CancellationToken cancellationToken)
     {
-        using var body = new MemoryStream();
+        await RelayExactBytesIntoAsync(source, destination, count, capture, cancellationToken);
+        return capture.Build();
+    }
+
+    private static async Task RelayExactBytesIntoAsync(
+        Stream source, Stream destination, long count, CaptureBuffer capture, CancellationToken cancellationToken)
+    {
         var buffer = new byte[(int)Math.Min(count, RelayBufferSize)];
         var remaining = count;
 
@@ -452,11 +475,42 @@ internal static class Http1MessageReader
             }
 
             await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
-            body.Write(buffer, 0, read);
+            capture.Append(buffer.AsSpan(0, read));
             remaining -= read;
         }
+    }
 
-        return body.ToArray();
+    /// <summary>
+    /// A relayed body's bytes as far as they're kept, which for a body over
+    /// the capture limit is only its start. Every byte of it was relayed
+    /// either way.
+    /// </summary>
+    /// <param name="Captured">The decoded body, or its first bytes when <see cref="Truncated"/>.</param>
+    /// <param name="Length">How many bytes the whole decoded body had.</param>
+    public readonly record struct RelayedBody(byte[] Captured, long Length)
+    {
+        public static RelayedBody Empty { get; } = new([], 0);
+
+        public bool Truncated => Captured.Length < Length;
+    }
+
+    /// <summary>Keeps at most <c>limit</c> bytes of what's appended, while counting all of it.</summary>
+    private sealed class CaptureBuffer(long limit)
+    {
+        private readonly MemoryStream _kept = new();
+        private long _length;
+
+        public void Append(ReadOnlySpan<byte> bytes)
+        {
+            _length += bytes.Length;
+            var room = limit - _kept.Length;
+            if (room > 0)
+            {
+                _kept.Write(bytes[..(int)Math.Min(room, bytes.Length)]);
+            }
+        }
+
+        public RelayedBody Build() => new(_kept.ToArray(), _length);
     }
 
     private static ValueTask WriteLineAsync(Stream destination, string line, CancellationToken cancellationToken) =>

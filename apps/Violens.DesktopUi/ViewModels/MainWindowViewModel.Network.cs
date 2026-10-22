@@ -162,9 +162,9 @@ public sealed partial class MainWindowViewModel
     /// registers as the system proxy (so the system setting read is still the
     /// network's own). Returns a phrase for the status line.
     /// </summary>
-    private string StartGateway(InterceptingProxyListener listener)
+    private string StartGateway(InterceptingProxyListener listener, UpstreamProxyDetection detected)
     {
-        _detectedUpstream = SystemProxyController.DetectUpstream(listener.Port);
+        _detectedUpstream = detected;
         ApplyProxyCredential();
         if (_detectedUpstream.AutoConfig is { } autoConfig)
         {

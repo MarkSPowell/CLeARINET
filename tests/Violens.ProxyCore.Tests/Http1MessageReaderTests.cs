@@ -162,7 +162,7 @@ public class Http1MessageReaderTests
 
         var captured = await Http1MessageReader.RelayBodyAsync(source, destination, headers, CancellationToken.None);
 
-        Assert.Equal("hello", Encoding.ASCII.GetString(captured));
+        Assert.Equal("hello", Encoding.ASCII.GetString(captured.Captured));
         Assert.Equal("hello", Encoding.ASCII.GetString(destination.ToArray()));
     }
 
@@ -177,7 +177,7 @@ public class Http1MessageReaderTests
 
         // The decoded, logical body -- chunk framing stripped out, same as
         // ReadBodyAsync would return.
-        Assert.Equal("hello world", Encoding.ASCII.GetString(captured));
+        Assert.Equal("hello world", Encoding.ASCII.GetString(captured.Captured));
 
         // What actually went out the wire, though, keeps the original
         // chunk framing intact rather than being rebuilt -- that's what
@@ -195,8 +195,51 @@ public class Http1MessageReaderTests
 
         var captured = await Http1MessageReader.RelayBodyAsync(source, destination, headers, CancellationToken.None);
 
-        Assert.Empty(captured);
+        Assert.Empty(captured.Captured);
         Assert.Empty(destination.ToArray());
+    }
+
+    [Theory]
+    [InlineData("Content-Length", "11", "hello world")]
+    [InlineData("Transfer-Encoding", "chunked", "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")]
+    public async Task RelayBodyAsync_RelaysEverythingButKeepsOnlyUpToTheLimit(string header, string value, string wire)
+    {
+        var headers = new List<(string Name, string Value)> { (header, value) };
+        using var source = StreamOf(wire);
+        using var destination = new MemoryStream();
+
+        var captured = await Http1MessageReader.RelayBodyAsync(source, destination, headers, CancellationToken.None, maxCapturedBytes: 7);
+
+        Assert.Equal(wire, Encoding.ASCII.GetString(destination.ToArray()));
+        Assert.Equal("hello w", Encoding.ASCII.GetString(captured.Captured));
+        Assert.Equal(11, captured.Length);
+        Assert.True(captured.Truncated);
+    }
+
+    [Fact]
+    public async Task RelayResponseBodyAsync_KeepsOnlyUpToTheLimitOfACloseDelimitedBody()
+    {
+        using var source = StreamOf("until the server closes");
+        using var destination = new MemoryStream();
+
+        var captured = await Http1MessageReader.RelayResponseBodyAsync(source, destination, [], CancellationToken.None, maxCapturedBytes: 5);
+
+        Assert.Equal("until the server closes", Encoding.ASCII.GetString(destination.ToArray()));
+        Assert.Equal("until", Encoding.ASCII.GetString(captured.Captured));
+        Assert.Equal(23, captured.Length);
+    }
+
+    [Fact]
+    public async Task RelayBodyAsync_ABodyWithinTheLimitIsNotTruncated()
+    {
+        var headers = new List<(string Name, string Value)> { ("Content-Length", "5") };
+        using var source = StreamOf("hello");
+        using var destination = new MemoryStream();
+
+        var captured = await Http1MessageReader.RelayBodyAsync(source, destination, headers, CancellationToken.None, maxCapturedBytes: 5);
+
+        Assert.False(captured.Truncated);
+        Assert.Equal(5, captured.Length);
     }
 
     private static MemoryStream StreamOf(string text) => new(Encoding.ASCII.GetBytes(text));

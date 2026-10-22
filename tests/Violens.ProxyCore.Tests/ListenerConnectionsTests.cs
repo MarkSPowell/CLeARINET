@@ -172,6 +172,34 @@ public class ListenerConnectionsTests
     }
 
     [Fact]
+    public async Task KeepsOnlyTheStartOfABodyOverTheCaptureLimitButRelaysAllOfIt()
+    {
+        using var root = NewRoot();
+        await using var origin = UpstreamProxyTests.FakeProxy.Start("HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\nhello world");
+        var (store, recorded) = RecordingStore();
+        var listener = InterceptingProxyListener.StartOnAvailablePort(0, new LeafCertificateProvider(root), store);
+        listener.MaxCapturedBodyBytes = 5;
+        try
+        {
+            var response = await SendPlainAsync(
+                listener.Port,
+                $"POST http://127.0.0.1:{origin.Port}/ HTTP/1.1\r\nHost: 127.0.0.1:{origin.Port}\r\nContent-Length: 9\r\n\r\nsome data");
+
+            Assert.Equal("hello world", Encoding.ASCII.GetString(response.Body));
+
+            var session = await recorded.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Equal("hello", Encoding.ASCII.GetString(session.Response.Body));
+            Assert.Equal("some ", Encoding.ASCII.GetString(session.Request.Body));
+            Assert.Equal("kept the first 5 of 11 bytes", session.Flags![Session.ResponseBodyTruncatedFlag]);
+            Assert.Equal("kept the first 5 of 9 bytes", session.Flags[Session.RequestBodyTruncatedFlag]);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+    }
+
+    [Fact]
     public async Task AnswersBadGatewayWhenTheServerCantBeReached()
     {
         using var root = NewRoot();
