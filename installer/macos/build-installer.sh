@@ -25,9 +25,13 @@
 #     "can't be verified" prompt instead, which the user can get past once
 #     (System Settings > Privacy & Security > Open Anyway, or
 #     `xattr -dr com.apple.quarantine /Applications/VioLens.app`).
-#   - No custom app icon (no CFBundleIconFile below) -- matches
-#     installer/VioLens.iss's own precedent of shipping no standalone
-#     .ico today either; see that file's own remarks.
+#   - The app icon (VioLens.icns, CFBundleIconFile below) is made at build
+#     time from violens-icon-1024.png beside this script, with sips and
+#     iconutil, which come with macOS. That's the app's icon artwork
+#     (apps/Violens.DesktopUi/Assets/violens-icon.png, 256x256) redrawn
+#     at 1024x1024, the largest size macOS uses, so every size is scaled
+#     down and stays sharp. It lives here rather than in Assets, which
+#     are all embedded in the app, because only this build needs it.
 #
 # Usage: build-installer.sh <version> <bundleVersion> <publishDir> <outputDmgPath> [extensionsDir]
 #   version        Full version string, e.g. "0.1.1-preview.1" -- goes into
@@ -74,6 +78,12 @@ EXECUTABLE_NAME="Violens.DesktopUi"
 # app; its settings are carried over by the app itself, not by macOS.
 BUNDLE_IDENTIFIER="dev.violens.desktopui"
 
+ICON_SOURCE="$(cd "$(dirname "$0")" && pwd)/violens-icon-1024.png"
+if [[ ! -f "$ICON_SOURCE" ]]; then
+  echo "error: app icon artwork not found at '$ICON_SOURCE'" >&2
+  exit 1
+fi
+
 EXECUTABLE_PATH="$PUBLISH_DIR/$EXECUTABLE_NAME"
 if [[ ! -f "$EXECUTABLE_PATH" ]]; then
   echo "error: expected published executable not found at '$EXECUTABLE_PATH'" >&2
@@ -114,6 +124,19 @@ for entry in "$PUBLISH_DIR"/*; do
   cp -R "$entry" "$RESOURCES_DIR/$name"
 done
 
+# The app icon Finder, the Dock and Launchpad show. Without one (and
+# CFBundleIconFile pointing at it) macOS shows the generic app icon. An
+# .iconset folder holds each size under the names iconutil expects; each
+# @2x is the Retina version of the size before it.
+ICONSET_DIR="$WORK_DIR/$APP_NAME.iconset"
+mkdir -p "$ICONSET_DIR"
+for size in 16 32 128 256 512; do
+  sips -z "$size" "$size" "$ICON_SOURCE" --out "$ICONSET_DIR/icon_${size}x${size}.png" > /dev/null
+  double=$((size * 2))
+  sips -z "$double" "$double" "$ICON_SOURCE" --out "$ICONSET_DIR/icon_${size}x${size}@2x.png" > /dev/null
+done
+iconutil --convert icns --output "$RESOURCES_DIR/$APP_NAME.icns" "$ICONSET_DIR"
+
 # A minimal Info.plist -- just what an Avalonia app actually needs. No
 # NSPrincipalClass: that's an AppKit/Xcode-project convention for locating
 # the app's principal NSApplication subclass, and Avalonia manages its own
@@ -144,6 +167,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
     <string>$VERSION</string>
     <key>CFBundleExecutable</key>
     <string>$EXECUTABLE_NAME</string>
+    <key>CFBundleIconFile</key>
+    <string>$APP_NAME.icns</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleSignature</key>
