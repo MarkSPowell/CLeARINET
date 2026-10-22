@@ -11,6 +11,10 @@ VioLens was called CLeARINET until version 0.2. Settings, rules and
 extensions from a CLeARINET install carry over the first time VioLens
 runs (see the User Guide's "Upgrading from CLeARINET").
 
+![VioLens capturing a request to example.com, then showing its headers, the Composer and the Timing tab](https://violens.dev/assets/demo.gif)
+
+Downloads, the User Guide and more are at [violens.dev](https://violens.dev).
+
 ## Status
 
 Early, working MVP. Not yet 1.0 — expect rough edges, and see

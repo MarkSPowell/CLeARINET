@@ -64,9 +64,8 @@ the project exists; see the project plan for the full reasoning.
 
 Open a regular issue for a bug. For a security-sensitive issue (for
 example, anything involving the interception root certificate or private
-key handling), please do not open a public issue — a `SECURITY.md` with
-a private reporting channel will be added before 1.0; until then, contact
-a maintainer directly.
+key handling), please do not open a public issue: see
+[SECURITY.md](SECURITY.md) for how to report it privately.
 
 ## Code of conduct
 

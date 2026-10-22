@@ -86,12 +86,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     /// shelled-out <c>security</c> command VioLens's own
     /// <c>MacOSCertificateTrust</c> uses has no OS-level confirmation of
     /// its own. Supplied by <c>App.axaml.cs</c> (a real modal dialog,
-    /// synchronously blocked on -- see that class's own remarks); null
-    /// here means "always decline," which is the safe default for any
-    /// caller (tests, tooling) that never supplies one -- see
-    /// <see cref="Start"/>'s own use of it.
+    /// awaited, never blocked on: blocking the UI thread on a dialog that
+    /// needs the UI thread to run is a deadlock, which is exactly how
+    /// Start used to freeze on a Mac's first run); null here means
+    /// "always decline," which is the safe default for any caller (tests,
+    /// tooling) that never supplies one -- see <see cref="Start"/>'s own
+    /// use of it.
     /// </summary>
-    private readonly Func<bool>? _confirmMacOSCertificateTrust;
+    private readonly Func<Task<bool>>? _confirmMacOSCertificateTrust;
+
+    /// <summary>
+    /// True while <see cref="Start"/> is waiting on the macOS trust
+    /// dialog or the certificate install, so a second click (or QuickExec's
+    /// <c>start</c>) can't begin a second start alongside it.
+    /// </summary>
+    private bool _starting;
 
     /// <summary>
     /// Where every setting in <see cref="PreferenceKeys"/> is read from at
@@ -836,7 +845,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     /// </param>
     /// <param name="chooseFormat">See <see cref="_chooseFormat"/>. Optional.</param>
     public MainWindowViewModel(
-        Func<bool>? confirmMacOSCertificateTrust = null,
+        Func<Task<bool>>? confirmMacOSCertificateTrust = null,
         PreferenceStore? preferences = null,
         Func<string, IReadOnlyList<FormatChoice>, string?, Task<FormatChoice?>>? chooseFormat = null)
     {
@@ -899,7 +908,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 .Concat(_extensionHost.ResponseInspectors.Select(i => (IInspector)Inspector2Adapter.ForResponse(i))));
 
         StartCommand = new RelayCommand(
-            Start, () => IsSupported && !IsRunning && (UseAutomaticPort || PreferredPort is >= 1 and <= 65535));
+            Start, () => IsSupported && !IsRunning && !_starting && (UseAutomaticPort || PreferredPort is >= 1 and <= 65535));
         StopCommand = new RelayCommand(Stop, () => IsRunning);
         SaveSazCommand = new RelayCommand(SaveSaz, () => Sessions.Count > 0);
         // The Importers/Exporters.Count half of each condition is a one-time
@@ -1111,8 +1120,19 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private void Start()
+    /// <summary>
+    /// <c>async void</c> because it's a command handler. Only the macOS
+    /// first run actually awaits anything (the trust dialog, then the
+    /// certificate install off the UI thread); on Windows, and on a Mac
+    /// once the certificate exists, it runs straight through as before.
+    /// </summary>
+    private async void Start()
     {
+        if (_starting)
+        {
+            return;
+        }
+
         try
         {
             // Only relevant the very first time this runs on macOS (or
@@ -1123,27 +1143,44 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             // dialog X509Store.Add triggers, not this one -- see
             // _confirmMacOSCertificateTrust's own remarks and the design
             // doc's "silent-install tension" section.
-            if (_authority is null && OperatingSystem.IsMacOS() && _confirmMacOSCertificateTrust?.Invoke() != true)
-            {
-                StatusText =
-                    "Not started -- installing the trusted root certificate was declined. VioLens can't " +
-                    "decrypt HTTPS traffic without it, so there's no way to proceed without installing it.";
-                return;
-            }
-
             // Reused across Start/Stop/Start cycles within one run of the
             // app -- there's no reason to re-install a new trust-store
             // root every time, only a fresh leaf provider (cheap, and it
             // keeps each run's leaves independent of any that came before).
             if (_authority is null)
             {
-                _authority = new CertificateAuthority();
-
-                // CLeARINET's old root, now that VioLens's own is trusted.
-                // Only on a computer that had CLeARINET; see FormerRoots.
-                if (Program.Migration?.FoundFormerInstall == true)
+                _starting = true;
+                StartCommand.RaiseCanExecuteChanged();
+                try
                 {
-                    FormerRoots.Remove(log: message => Console.WriteLine($"[certificates] {message}"));
+                    if (OperatingSystem.IsMacOS())
+                    {
+                        var confirmed = _confirmMacOSCertificateTrust is not null
+                            && await _confirmMacOSCertificateTrust();
+                        if (!confirmed)
+                        {
+                            StatusText =
+                                "Not started -- installing the trusted root certificate was declined. VioLens can't " +
+                                "decrypt HTTPS traffic without it, so there's no way to proceed without installing it.";
+                            return;
+                        }
+
+                        StatusText = "Installing the root certificate -- macOS may ask for your password...";
+                    }
+
+                    // On macOS, off the UI thread: the 'security' command
+                    // waits while macOS asks for the person's password, and
+                    // the window should keep drawing meanwhile. On Windows,
+                    // on the UI thread as before, so Windows' own "install
+                    // this certificate?" dialog stays in front of the app.
+                    _authority = OperatingSystem.IsMacOS()
+                        ? await Task.Run(() => CreateAuthority())
+                        : CreateAuthority();
+                }
+                finally
+                {
+                    _starting = false;
+                    StartCommand.RaiseCanExecuteChanged();
                 }
             }
 
@@ -1236,6 +1273,20 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             StatusText = $"Failed to start the proxy: {ex.Message}";
         }
+    }
+
+    private static CertificateAuthority CreateAuthority()
+    {
+        var authority = new CertificateAuthority();
+
+        // CLeARINET's old root, now that VioLens's own is trusted. Only on
+        // a computer that had CLeARINET; see FormerRoots.
+        if (Program.Migration?.FoundFormerInstall == true)
+        {
+            FormerRoots.Remove(log: message => Console.WriteLine($"[certificates] {message}"));
+        }
+
+        return authority;
     }
 
     private void Stop()

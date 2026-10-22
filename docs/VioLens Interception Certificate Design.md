@@ -226,18 +226,18 @@ account's HTTPS traffic) and requires an explicit click before
 `CertificateAuthority`'s constructor is even called on macOS. This keeps
 the "never silent" principle intact by VioLens's own doing, rather than
 depending on the OS to provide it the way Windows' design happened to.
-One more honest flag: `MainWindowViewModel.Start()` is fully synchronous
-(see `LegacyExtensionHostLauncher`'s own remarks on why), and Avalonia's
-`Window.ShowDialog` is `Task`-returning, so the confirmation callback
-blocks on it synchronously
-(`ShowDialog<bool>(owner).GetAwaiter().GetResult()`) rather than
-restructuring `Start()` to be `async` for this one platform-specific
-step. Avalonia's own `ShowDialog` is built on a nested dispatcher frame
-(`Dispatcher.UIThread.PushFrame` under the hood) specifically so a
-synchronous wait on its `Task` from the UI thread keeps pumping the
-message loop instead of deadlocking — the same reason `AboutWindow`'s own
-`ShowDialog` call site elsewhere in this app doesn't need to be `async`
-either. Believed correct, not run on a real Mac to confirm.
+`Start()` awaits that dialog (`Window.ShowDialog<bool>` returns a `Task`),
+which makes `Start()` an `async void` command handler. An earlier version
+blocked on it instead (`ShowDialog<bool>(owner).GetAwaiter().GetResult()`),
+on the theory that `ShowDialog` keeps the message loop running underneath
+a synchronous wait. It doesn't: the first real Mac test froze the app on
+the first click of Start, because the dialog needed the UI thread that was
+waiting for it. The certificate install itself (`CertificateAuthority`'s
+constructor, which runs `security add-trusted-cert` and waits while macOS
+asks for the person's password) then runs on a background thread, so the
+window keeps drawing; Start is disabled until it finishes. On Windows,
+`CertificateAuthority` is still created on the UI thread, so Windows' own
+install dialog stays in front of the app.
 
 ### System proxy registration
 

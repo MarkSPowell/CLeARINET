@@ -60,8 +60,11 @@ public partial class App : Application
         MainWindow? mainWindow = null;
 
         var viewModel = new MainWindowViewModel(
+            // Awaited, never blocked on: the dialog needs the UI thread
+            // to run, so waiting for it on the UI thread would freeze the
+            // app (as it did on a Mac's first Start).
             confirmMacOSCertificateTrust: () =>
-                new MacTrustConfirmationWindow().ShowDialog<bool>(mainWindow!).GetAwaiter().GetResult(),
+                new MacTrustConfirmationWindow().ShowDialog<bool>(mainWindow!),
             // Import/Export via Extension's format picker. Awaited, not
             // blocked on: the view model's command handlers are async, so
             // this runs as an ordinary modal dialog on the UI thread.
