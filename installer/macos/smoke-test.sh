@@ -7,7 +7,8 @@
 #   2. The app's signature verifies the way macOS checks it (strict, and
 #      every nested file sealed), and Contents/MacOS holds only the
 #      executable (anything else there breaks the signature).
-#   3. The User Guide is in the bundle (Help > Documentation).
+#   3. The User Guide is in the bundle (Help > Documentation), and so is
+#      the app icon Info.plist names.
 #   4. The Optional Extensions folder has each extension, its licence, the
 #      notices file and the README.
 #   5. The app launches through Launch Services (the same path as
@@ -75,10 +76,18 @@ fi
 echo "  (Gatekeeper's view, expected to reject an ad-hoc signed app:)"
 spctl --assess --type execute --verbose=2 "$APP" 2>&1 | sed 's/^/    /' || true
 
-echo "3. Documentation"
+echo "3. Documentation and icon"
 [[ -f "$APP/Contents/Resources/Documentation/User Guide.md" ]] \
   && pass "User Guide is in Contents/Resources/Documentation" \
   || fail "User Guide is missing from Contents/Resources/Documentation"
+# The icon file, and Info.plist naming it -- either one missing means
+# Finder and the Dock show the generic app icon.
+icon_file="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$APP/Contents/Info.plist" 2>/dev/null || true)"
+if [[ -n "$icon_file" && -f "$APP/Contents/Resources/$icon_file" ]]; then
+  pass "app icon $icon_file is in Contents/Resources"
+else
+  fail "app icon is missing (CFBundleIconFile '${icon_file:-not set}')"
+fi
 
 echo "4. Optional Extensions"
 OPTIONAL_DIR="$MOUNT_POINT/Optional Extensions"
