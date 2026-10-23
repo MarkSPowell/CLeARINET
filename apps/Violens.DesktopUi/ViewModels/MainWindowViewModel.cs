@@ -658,6 +658,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         // Removed sessions leave both lists; the selection goes with them.
         _sessionStore.SessionsRemoved += ids => Dispatcher.UIThread.Post(() =>
         {
+            // Anything still waiting to be added goes in first, so a session
+            // removed before its batch arrived can't reappear afterwards.
+            _sessionArrivals.Flush();
             var removed = new HashSet<int>(ids);
             for (var i = Sessions.Count - 1; i >= 0; i--)
             {
