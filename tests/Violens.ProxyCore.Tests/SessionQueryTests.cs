@@ -49,9 +49,7 @@ public class SessionQueryTests
     [Fact]
     public void FreeText_NeverMatchesBodyContent()
     {
-        // Deliberate: bodies can be large and are whatever encoding the
-        // wire actually used, not decoded text -- see SessionQuery's own
-        // remarks. A phrase that appears only in a body must not match.
+        // Bodies aren't searched by the filter.
         var session = SampleSession(requestBody: "this-only-lives-in-the-body"u8.ToArray());
 
         Assert.False(SessionQuery.Parse("this-only-lives-in-the-body").Matches(session));

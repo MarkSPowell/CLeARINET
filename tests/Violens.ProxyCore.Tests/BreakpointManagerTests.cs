@@ -149,10 +149,7 @@ public class BreakpointManagerTests
 
         _ = manager.ApplyRequestBreakpointAsync("example.test", SampleRequest(), CancellationToken.None);
 
-        // No spaces at all, so it can't even shape-check as "METHOD /target
-        // HTTP/1.1" -- see HttpMessageTextTests for why a line merely
-        // containing nonsense words still parses (matches
-        // Http1MessageReader's own leniency about token content).
+        // No spaces, so not even shaped like a request line.
         var ok = seen!.TryEdit("malformed");
 
         Assert.False(ok);

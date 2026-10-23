@@ -3,33 +3,11 @@ using System.Text;
 namespace Violens.ProxyCore.Http;
 
 /// <summary>
-/// Converts a captured request/response to and from the raw-text form a
-/// breakpoint's editor shows -- the same interaction model Fiddler
-/// Classic's TextView uses: the whole message (start line, headers, body)
-/// as one editable blob, rather than separate fields per header. See
-/// Violens.ProxyCore.Breakpoints.PendingBreakpoint, which owns exactly
-/// one round trip through this class per edit.
-///
-/// <see cref="Format(CapturedRequest)"/> is built on <see cref="HttpMessageWriter"/>, so
-/// what a user sees already has Content-Length fixed up and
-/// Transfer-Encoding dropped, same as what would finally go on the wire.
-/// <see cref="TryParseRequest"/>/<see cref="TryParseResponse"/>
-/// deliberately do NOT re-fix Content-Length themselves -- whatever
-/// headers the user typed are kept as-is, and it's <see cref="HttpMessageWriter"/>,
-/// called later when the (possibly edited) message is actually sent, that
-/// has the final say on Content-Length. That split is what avoids Fiddler
-/// Classic's documented gotcha where an edit that left the raw text
-/// technically malformed got silently dropped on "Run to Completion" --
-/// here, a malformed edit is reported back as <c>error</c> instead, and
-/// the caller decides what to do about it (see PendingBreakpoint.TryEdit).
-///
-/// A body is only round-tripped correctly through this class when it's
-/// text (UTF-8 or a close enough ASCII subset) -- exactly the case raw-text
-/// editing is for. A binary body still round-trips byte-for-byte AS LONG
-/// AS it isn't edited (UTF-8 encode/decode is lossless for arbitrary bytes
-/// interpreted leniently), but editing binary content in a text box was
-/// never going to be practical; Hex-based breakpoint editing isn't in this
-/// pass.
+/// Converts a message to and from the raw text a breakpoint editor shows,
+/// like Fiddler Classic's TextView. Parsing keeps the headers as typed;
+/// <see cref="HttpMessageWriter"/> fixes Content-Length when sending, and a
+/// malformed edit is reported rather than dropped. Only text bodies are
+/// meant to be edited this way.
 /// </summary>
 public static class HttpMessageText
 {
@@ -131,10 +109,7 @@ public static class HttpMessageText
             i++;
         }
 
-        // lines[i], if it exists, is the blank line separating headers from
-        // the body -- everything after it, rejoined, is the body. Running
-        // off the end with no blank line at all (headers but no body, and
-        // no trailing blank line either) just means no body.
+        // Everything after the blank line is the body.
         bodyText = i + 1 < lines.Length ? string.Join('\n', lines[(i + 1)..]) : string.Empty;
         error = null;
         return true;

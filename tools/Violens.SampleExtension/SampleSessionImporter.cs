@@ -4,16 +4,8 @@ using Violens.ProxyCore.Http;
 namespace Violens.SampleExtension;
 
 /// <summary>
-/// An original <see cref="ISessionImporter"/> -- proffers one fixed,
-/// hardcoded format name and returns two fixed, hardcoded
-/// <see cref="ImportedSession"/> records rather than reading any real
-/// file. Deliberately has nothing to do with any real capture format: the
-/// only thing worth proving here is that <c>ExtensionHost</c> discovers
-/// this class, <c>MainWindowViewModel.ImportViaExtension</c> calls it, and
-/// the two sessions it returns actually land in the session grid through
-/// <c>SessionStore.Add</c> -- the same "prove it through the real call
-/// path" approach <c>samples/PhaseA2ValidationRules.js</c> uses for
-/// FiddlerScript, just for the import path instead.
+/// An original <see cref="ISessionImporter"/> that returns two fixed
+/// sessions, to show the import path working.
 /// </summary>
 [ProfferFormat(
     FormatName,
@@ -22,12 +14,7 @@ public sealed class SampleSessionImporter : ISessionImporter
 {
     public const string FormatName = "Sample Fixed Sessions";
 
-    /// <summary>
-    /// Ignores <paramref name="importFormat"/> and <paramref name="options"/>
-    /// entirely -- there's only one format here, and it needs no settings.
-    /// Still calls <paramref name="progress"/>, when given one, so a host
-    /// showing progress UI has something real to render.
-    /// </summary>
+    /// <summary>One format, no options; still reports progress.</summary>
     public IReadOnlyList<ImportedSession> ImportSessions(
         string importFormat, IReadOnlyDictionary<string, object> options, Action<ProgressCallbackEventArgs>? progress)
     {

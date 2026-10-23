@@ -3,15 +3,7 @@ using Avalonia.Data.Converters;
 
 namespace Violens.DesktopUi.Converters;
 
-/// <summary>
-/// Formats raw bytes as a classic hex + ASCII dump (16 bytes per line, an
-/// 8-digit offset prefix, unprintable bytes shown as '.') for the Hex
-/// inspector tab. Deliberately lives here, in the desktop app, rather than
-/// in Violens.Extensibility.Inspection.HexContent -- that record's job is
-/// just to hand back bytes; how they're laid out on screen is a rendering
-/// concern, which is the whole point of the inspector contract's "data in,
-/// rendering out" split (see IInspector's remarks).
-/// </summary>
+/// <summary>Hex + ASCII dump for the Hex tab: 16 bytes per line with an 8-digit offset.</summary>
 public sealed class HexDumpConverter : IValueConverter
 {
     public static readonly HexDumpConverter Instance = new();

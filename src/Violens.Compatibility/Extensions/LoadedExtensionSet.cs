@@ -5,32 +5,18 @@ using Violens.ProxyCore.Http;
 namespace Violens.Compatibility.Extensions;
 
 /// <summary>
-/// Implements <see cref="IExtensionAutoTamperHost"/> over a fixed list of
-/// already-constructed <see cref="IAutoTamper"/> instances -- the pure,
-/// testable half of the extension-host split (mirroring
-/// <see cref="Violens.Compatibility.FiddlerScript.FiddlerScriptRunner"/>'s
-/// own split from <c>FiddlerScriptHost</c>: that class owns Jint/script
-/// parsing, this one owns none of the disk/reflection/<c>AssemblyLoadContext</c>
-/// scanning <see cref="ExtensionHost"/> does -- it just runs hooks against
-/// whatever instances it's handed). Tests construct this directly with
-/// hand-written fake <see cref="IAutoTamper"/> implementations, with no need
-/// for a real compiled extension .dll anywhere in the test suite.
-///
-/// Builds one <see cref="Exchange"/> per call and runs every loaded
-/// extension's hook against that SAME instance in sequence -- so, exactly
-/// like real Fiddler running several loaded extensions' <c>AutoTamperRequestBefore</c>
-/// against one shared <c>oSession</c>, each extension sees the previous
-/// one's edits already applied. The final, possibly multiply-edited state is
-/// projected back to an immutable record only once, after every extension
-/// has run.
+/// Runs a fixed list of <see cref="IAutoTamper"/> extensions. Each call
+/// builds one <see cref="Exchange"/> and runs every extension on it in turn,
+/// as Fiddler does, so each sees the previous one's edits. Loading is
+/// <see cref="ExtensionHost"/>'s job, so tests can pass fakes here.
 /// </summary>
 public sealed class LoadedExtensionSet : IExtensionAutoTamperHost
 {
     private readonly IReadOnlyList<IAutoTamper> _tampers;
     private readonly Action<string> _log;
 
-    /// <param name="tampers">Every loaded extension that implements <see cref="IAutoTamper"/>, in discovery order -- see <see cref="ExtensionHost"/> for how that list gets built from disk.</param>
-    /// <param name="log">Where a hook that throws gets logged -- see <see cref="RunRequestBefore"/>'s own remarks. Defaults to a no-op.</param>
+    /// <param name="tampers">The extensions, in load order.</param>
+    /// <param name="log">Where a hook that throws is logged.</param>
     public LoadedExtensionSet(IReadOnlyList<IAutoTamper> tampers, Action<string>? log = null)
     {
         _tampers = tampers;
@@ -68,10 +54,7 @@ public sealed class LoadedExtensionSet : IExtensionAutoTamperHost
             return;
         }
 
-        // Fire-and-observe -- see this interface's own remarks on why the
-        // result is never projected back. Still built from the real, final
-        // request (not the pre-edit one) so an extension's *After hook sees
-        // what actually went out, matching real Fiddler's own timing.
+        // Built from the request as actually sent.
         var exchange = Exchange.ForRequest(sessionOrdinal, hostname, request);
         foreach (var tamper in _tampers)
         {
@@ -112,14 +95,8 @@ public sealed class LoadedExtensionSet : IExtensionAutoTamperHost
     }
 
     /// <summary>
-    /// Runs one extension's hook, isolating a throw to just that extension --
-    /// matching real Fiddler's own multi-extension posture (one badly-behaved
-    /// loaded extension doesn't take the others, or the connection, down with
-    /// it). Deliberately catches <see cref="Exception"/> broadly rather than a
-    /// narrower type: unlike <see cref="Violens.Compatibility.FiddlerScript.FiddlerScriptRunner"/>,
-    /// which only ever has Jint's own <see cref="FiddlerScriptException"/> to
-    /// worry about, an extension is arbitrary compiled .NET code and can
-    /// throw literally anything.
+    /// Runs one hook, so one extension throwing doesn't stop the others or the
+    /// connection. Catches everything: extensions can throw anything.
     /// </summary>
     private void RunSafely(IAutoTamper tamper, string hookName, Action run)
     {

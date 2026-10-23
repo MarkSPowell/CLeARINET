@@ -13,10 +13,8 @@ public class SessionStateTests
     [Fact]
     public void AllDocumentedStatesArePresent()
     {
-        // Mirrors the state names documented for Fiddler Classic's
-        // Session.state property (see the project plan). If this test
-        // starts failing because the enum changed, that's fine -- update
-        // the expected list along with the design note that changed it.
+        // Fiddler Classic's Session.state names. Update this list if the enum
+        // changes on purpose.
         var expected = new[]
         {
             "Created",

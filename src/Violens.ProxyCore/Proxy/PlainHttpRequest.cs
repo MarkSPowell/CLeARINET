@@ -3,16 +3,10 @@ using Violens.ProxyCore.Http;
 namespace Violens.ProxyCore.Proxy;
 
 /// <summary>
-/// The rules for plain (unencrypted) <c>http://</c> requests a client sends
-/// through VioLens as its proxy. Such a request names the whole URL in its
-/// request line (<c>GET http://example.com/a HTTP/1.1</c>, the "absolute
-/// form"), unlike a request inside an HTTPS tunnel, which names just the path.
-///
-/// VioLens stores and processes plain HTTP requests in the same shape as
-/// HTTPS ones -- a path-only target plus a Host header, with the scheme kept
-/// on the session -- so AutoResponder, breakpoints, FiddlerScript and
-/// extensions see the same thing either way. <see cref="ForUpstream"/> turns
-/// that back into what goes on the wire.
+/// Plain http:// proxy requests, which name the whole URL in the request
+/// line. They're stored like HTTPS ones (path-only target plus Host header)
+/// so everything downstream sees the same shape; <see cref="ForUpstream"/>
+/// converts back.
 /// </summary>
 internal static class PlainHttpRequest
 {

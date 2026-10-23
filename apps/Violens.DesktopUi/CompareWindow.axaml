@@ -11,11 +11,8 @@
         Icon="avares://Violens.DesktopUi/Assets/violens-icon.png"
         Background="{DynamicResource AppBackgroundBrush}">
 
-  <!-- Compare Sessions (Edit > Compare Sessions, Ctrl+W): two sessions'
-       requests and responses side by side, compared line by line (see
-       SessionComparison and TextDiff in Violens.AppCore). The rows are built off
-       the UI thread in CompareWindow.axaml.cs; each list virtualizes, so a
-       large body is fine. -->
+  <!-- Compare Sessions (Ctrl+W): two sessions compared line by line (see
+       SessionComparison and TextDiff). Rows are built off the UI thread. -->
   <Window.Resources>
     <DataTemplate x:Key="CompareRowTemplate" x:DataType="vm:CompareRow">
       <Grid ColumnDefinitions="48,*,48,*">

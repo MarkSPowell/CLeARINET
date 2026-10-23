@@ -4,16 +4,9 @@ using System.Text;
 namespace Violens.CompatShim;
 
 /// <summary>
-/// The compat shim's own standalone session model -- NOT the same type as
-/// <c>Violens.ProxyCore</c>'s real session type, and can't be, since this
-/// assembly targets net48 while the main app is net10.0. The session
-/// bridge (see the design doc's "The legacy host's session bridge --
-/// built" section) is what populates instances of this class from real
-/// proxied traffic for a loaded extension's <c>IAutoTamper</c> hooks --
-/// see <c>SessionMapping</c> (sibling <c>Violens.LegacyExtensionHost</c>
-/// project) for the wire-to-<c>Session</c> mapping itself. Every member
-/// below is confirmed by this project's metadata read of the five real
-/// extensions; which sample(s) reference which member is noted per-member.
+/// The shim's session (net48, so not ProxyCore's). The session bridge
+/// fills these from real traffic for extensions' <c>IAutoTamper</c> hooks;
+/// see <c>SessionMapping</c>. Each member notes which sample uses it.
 /// </summary>
 public sealed class Session
 {
@@ -35,7 +28,7 @@ public sealed class Session
     // metadata: Fiddler.Session.int get_responseCode() / set_responseCode(int) -- AustralianImages, JSFormat, Differ.
     public int responseCode { get; set; }
 
-    // metadata: Fiddler.Session.void set_state(Fiddler.SessionStates) -- ContentBlock. See SessionStates.cs's own remarks.
+    // Used by ContentBlock; see SessionStates.
     public SessionStates state { get; set; } = SessionStates.Automatic;
 
     // metadata: fields, not properties -- Fiddler.Session.Fiddler.ServerChatter oResponse / Fiddler.Session.Fiddler.ClientChatter oRequest.
@@ -70,14 +63,8 @@ public sealed class Session
     /// <summary>metadata: <c>Fiddler.Session.bool utilDecodeResponse()</c> -- AustralianImages, JSFormat.</summary>
     public bool utilDecodeResponse()
     {
-        // Still a placeholder, now that the session bridge is built and
-        // real proxied response bodies do flow through into
-        // responseBodyBytes: this method itself doesn't actually decode
-        // transfer/content encodings (chunked, gzip, etc.) -- it always
-        // reports success without touching the bytes. A loaded legacy
-        // extension calling this on a real encoded response gets no real
-        // decoding, not an error. Not flagged elsewhere as a known gap
-        // yet -- worth adding to the CompatShim README's own list.
+        // Doesn't decode anything yet; it reports success and leaves the bytes
+        // as they are.
         return true;
     }
 

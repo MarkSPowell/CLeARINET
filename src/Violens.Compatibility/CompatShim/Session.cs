@@ -60,19 +60,11 @@ public class ServerChatter
 }
 
 /// <summary>
-/// Fiddler's <c>Session</c>, for code ported from a Fiddler Classic
-/// extension. Today it's only produced by importers
-/// (<see cref="BuildFromData"/>) and converted into VioLens's own native
-/// session on the way into the session list; it isn't yet what live
-/// traffic hooks receive (those still get
-/// <c>Violens.Compatibility.FiddlerScript.Exchange</c> -- see the Extension
-/// Test Targets doc for when that changes).
-///
-/// Member names and meanings follow Telerik's published FiddlerCore API
-/// reference. <see cref="oFlags"/> is a <see cref="StringDictionary"/>, as in
-/// Fiddler, so flag names are case-insensitive (and come back lower-cased
-/// when enumerated). The string indexer reads and writes those flags and
-/// returns <see langword="null"/> for a missing one.
+/// Fiddler's <c>Session</c>, for code ported from Fiddler Classic
+/// extensions, following Telerik's published API reference.
+/// <see cref="oFlags"/> is a <see cref="StringDictionary"/>, as in Fiddler, so
+/// flag names are case-insensitive (and lower-cased when enumerated); the
+/// string indexer returns null for a missing flag.
 /// </summary>
 public class Session
 {

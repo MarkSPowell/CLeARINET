@@ -3,19 +3,9 @@ using Violens.ProxyCore.Http;
 namespace Violens.ProxyCore.Breakpoints;
 
 /// <summary>
-/// What to pause on, in the same shape as Fiddler Classic's QuickExec
-/// breakpoint commands: a global "break on everything" toggle per stage
-/// (<c>Rules -&gt; Automatic Breakpoints</c>), plus one active value per
-/// narrower condition (<c>bpu</c> URL-contains, <c>bpm</c> method,
-/// <c>bps</c> response status). Fiddler keeps exactly one active value per
-/// command rather than a list of rules; this mirrors that rather than
-/// building a general rule-list engine nobody's asked for yet.
-///
-/// Plain mutable state, not an <c>INotifyPropertyChanged</c> view model --
-/// this lives in Violens.ProxyCore, which has no UI-framework opinions
-/// (see the IInspector contract's remarks for the same reasoning applied
-/// to inspectors). Violens.DesktopUi's MainWindowViewModel wraps the
-/// properties it exposes as bindable ones.
+/// What to pause on, as in Fiddler Classic: break-on-everything per stage,
+/// plus one value each for <c>bpu</c>, <c>bpafter</c>, <c>bpm</c> and
+/// <c>bps</c>.
 /// </summary>
 public sealed class BreakpointRules
 {
@@ -35,11 +25,7 @@ public sealed class BreakpointRules
     /// <summary>Fiddler's <c>bps</c>: pause a response with this status code.</summary>
     public int? ResponseStatusCodeEquals { get; set; }
 
-    /// <summary>
-    /// Cheap short-circuit for <see cref="BreakpointManager"/>: when
-    /// nothing is configured, every call should cost one boolean check,
-    /// not a walk through five individually-false conditions.
-    /// </summary>
+    /// <summary>Whether any rule is set.</summary>
     public bool AnyActive =>
         BreakOnAllRequests || BreakOnAllResponses
         || !string.IsNullOrEmpty(RequestUrlContains)

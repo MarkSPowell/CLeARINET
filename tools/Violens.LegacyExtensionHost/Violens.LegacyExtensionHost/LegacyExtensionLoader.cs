@@ -8,28 +8,15 @@ using Violens.CompatShim;
 namespace Violens.LegacyExtensionHost;
 
 /// <summary>
-/// The net48 counterpart of <c>Violens.Compatibility.Extensions.ExtensionHost</c>
-/// -- same scanning/gating/registration shape (see that class's own
-/// remarks, which this mirrors deliberately for consistency across the
-/// project), adapted for the fact that .NET Framework has no
-/// <see cref="System.Runtime.Loader.AssemblyLoadContext"/>. Uses plain
-/// <see cref="Assembly.LoadFrom"/> into this process's one default
-/// AppDomain instead of one isolated load context per extension --
-/// acceptable here because isolation is already achieved one level up (a
-/// bad or malicious legacy extension can only take down this sacrificial
-/// helper process, never VioLens's own main app), not because per-
-/// extension isolation doesn't matter. A future pass could add real
-/// AppDomain-per-extension isolation if that trade-off changes.
+/// The net48 counterpart of <c>ExtensionHost</c>. .NET Framework has no
+/// AssemblyLoadContext, so extensions load with <see cref="Assembly.LoadFrom"/>
+/// into one AppDomain; the separate process is the isolation.
 /// </summary>
 public sealed class LegacyExtensionLoader
 {
     /// <summary>
-    /// The highest real Fiddler Classic version this shim's member surface
-    /// has actually been validated against (Differ/ContentBlock both
-    /// reference Fiddler v2.4.2.5 in their own metadata -- see the design
-    /// doc's version-spread finding). An extension declaring a HIGHER
-    /// RequiredVersion than this is gated out, since this shim's surface
-    /// hasn't been checked against anything newer.
+    /// The newest Fiddler version the shim has been checked against (Differ and
+    /// ContentBlock reference 2.4.2.5). Extensions requiring newer are skipped.
     /// </summary>
     public static readonly Version SupportedFiddlerVersion = new(2, 4, 2, 5);
 
@@ -51,21 +38,10 @@ public sealed class LegacyExtensionLoader
     public IReadOnlyList<IAutoTamper> AutoTampers => _autoTampers;
     public IReadOnlyList<IHandleExecAction> ExecActionHandlers => _execActionHandlers;
 
-    /// <summary>
-    /// Every registered <see cref="IFiddlerExtension"/> instance, regardless
-    /// of which of the narrower interfaces it also implements -- added for
-    /// test visibility (locking in "N extensions actually registered," not
-    /// just the AutoTamper/ExecActionHandler subsets already exposed above).
-    /// </summary>
+    /// <summary>Every registered extension.</summary>
     public IReadOnlyList<IFiddlerExtension> FiddlerExtensions => _fiddlerExtensions;
 
-    /// <summary>
-    /// Extensions whose own metadata expects a differently-named/versioned
-    /// Fiddler-compatible assembly than this host actually provides -- see
-    /// <see cref="AssemblyMismatch"/> and the design doc's "Don't get sued"
-    /// decision. Each one here was deliberately NOT run through
-    /// <see cref="Assembly.LoadFrom"/> at all; see <see cref="LoadOne"/>.
-    /// </summary>
+    /// <summary>Extensions built against the <c>Fiddler</c> assembly; these are never loaded.</summary>
     public IReadOnlyList<AssemblyMismatch> AssemblyMismatches => _assemblyMismatches;
 
     public void Load()
@@ -104,15 +80,8 @@ public sealed class LegacyExtensionLoader
     {
         var fileName = Path.GetFileName(dllPath);
 
-        // Checked BEFORE attempting to load at all: a pure metadata read,
-        // never loads or executes the candidate assembly (see
-        // FiddlerAssemblyReferenceInspector's own remarks). If this
-        // extension's own compiled metadata expects an assembly identity
-        // this host doesn't provide, report that specifically and stop --
-        // rather than let Assembly.LoadFrom (or, more likely,
-        // GetExportedTypes() further down, lazily, the first time it needs
-        // to resolve the missing dependency) fail with a generic CLR bind
-        // exception that doesn't say what to actually do about it.
+        // Read the metadata first, so a Fiddler-built extension is reported
+        // clearly instead of failing later with a generic bind error.
         if (FiddlerAssemblyReferenceInspector.TryFindFiddlerReference(dllPath, out var expectedName, out var expectedVersion))
         {
             var hostAssemblyName = typeof(FiddlerApplication).Assembly.GetName();

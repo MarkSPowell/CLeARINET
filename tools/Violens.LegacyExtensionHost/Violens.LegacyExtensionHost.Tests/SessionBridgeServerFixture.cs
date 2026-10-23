@@ -5,26 +5,15 @@ using Xunit;
 namespace Violens.LegacyExtensionHost.Tests;
 
 /// <summary>
-/// Starts <see cref="SessionBridgeServer"/> exactly once per test run, with
-/// one small, test-observable fake <see cref="IAutoTamper"/> loaded --
-/// shared across every <c>[Fact]</c> in the
-/// <see cref="SessionBridgeServerCollection"/> collection deliberately,
-/// unlike <see cref="RealExtensionLoadFixture"/>'s own reasons for doing
-/// the same thing: <see cref="SessionBridgeServer.Start"/> binds
-/// <see cref="Bridge.SessionBridgeProtocol.PipeName"/> with a fixed
-/// <c>maxNumberOfServerInstances</c> (see that class's own remarks) --
-/// calling it a second time from a second fixture instance would exceed
-/// that cap and throw, so this has to be the one place in the whole test
-/// assembly that calls it.
+/// Starts <see cref="SessionBridgeServer"/> once per test run with one fake
+/// extension. It's the only place that may: the pipe allows a fixed number
+/// of server instances, and a second start would exceed it.
 /// </summary>
 public sealed class SessionBridgeServerFixture
 {
     /// <summary>
-    /// A single tamper whose behavior every <see cref="SessionBridgeServerTests"/>
-    /// fact can rely on: echoes a marker request header into the response
-    /// (provable proof a request actually reached this extension and its
-    /// edit came back out), and rewrites any response body to a fixed,
-    /// recognizable string.
+    /// Echoes a marker request header into the response and replaces response
+    /// bodies with a fixed string.
     /// </summary>
     public sealed class EchoAutoTamper : IAutoTamper
     {

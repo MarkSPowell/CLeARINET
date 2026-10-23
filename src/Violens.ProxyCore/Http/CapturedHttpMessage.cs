@@ -1,10 +1,6 @@
 namespace Violens.ProxyCore.Http;
 
-/// <summary>
-/// A fully-read HTTP/1.1 request: the parsed start line and headers, plus
-/// the decoded body (chunked transfer-encoding already unwrapped, so this
-/// is always the logical content, never the wire framing around it).
-/// </summary>
+/// <summary>A fully-read HTTP/1.1 request, with any chunked encoding removed from the body.</summary>
 public sealed record CapturedRequest(
     string Method,
     string Target,
@@ -12,10 +8,7 @@ public sealed record CapturedRequest(
     IReadOnlyList<(string Name, string Value)> Headers,
     byte[] Body);
 
-/// <summary>
-/// A fully-read HTTP/1.1 response, decoded the same way as
-/// <see cref="CapturedRequest"/>.
-/// </summary>
+/// <summary>A fully-read HTTP/1.1 response, with any chunked encoding removed from the body.</summary>
 public sealed record CapturedResponse(
     string HttpVersion,
     int StatusCode,

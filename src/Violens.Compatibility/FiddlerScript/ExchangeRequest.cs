@@ -2,7 +2,7 @@ using Violens.ProxyCore.Http;
 
 namespace Violens.Compatibility.FiddlerScript;
 
-/// <summary>Fiddler's <c>oSession.oRequest</c> -- see <see cref="Exchange"/>'s own remarks for the naming/mutability rationale shared by every type in this folder.</summary>
+/// <summary>Fiddler's <c>oSession.oRequest</c>.</summary>
 public sealed class ExchangeRequest
 {
     private ExchangeRequest(string method, string pathAndQuery, string httpVersion, ExchangeHeaders headerCollection, byte[] body)

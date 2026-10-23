@@ -4,34 +4,17 @@ using System.Windows.Forms;
 namespace Violens.CompatShim;
 
 /// <summary>
-/// Real, working WinForms main window standing in for Fiddler Classic's own
-/// frmViewer -- see the design doc's "frmViewer/frmPrompt member-level
-/// findings" section: extensions reach directly into this window's live
-/// menu bar, context menu, status bar, and tab control as raw fields, so
-/// those all have to be REAL instances of the (removed-from-.NET-5+, still
-/// present here on net48) legacy WinForms control types for old compiled
-/// extensions to bind and actually do something when they touch them.
+/// A WinForms window standing in for Fiddler's main window. Extensions
+/// reach into its menus, status bar and tabs directly, so those are real
+/// WinForms controls (still available on net48).
 ///
-/// <b>This window's own session list is still a synthetic, in-process
-/// placeholder</b> (see <see cref="LoadDemoSessions"/>) -- <b>separately
-/// from</b> the session bridge (see the design doc's "The legacy host's
-/// session bridge -- built" section), which is built and does feed real
-/// proxied traffic through a loaded extension's <c>IAutoTamper</c> hooks.
-/// The two are unconnected: <c>SessionBridgeRunner</c> (sibling
-/// <c>Violens.LegacyExtensionHost</c> project) talks directly to loaded
-/// <c>IAutoTamper</c> instances and never touches this window's own
-/// session list, so <see cref="GetSelectedSessions"/> still only ever
-/// returns whatever's in <see cref="LoadDemoSessions"/> -- an extension
-/// that reads real live traffic via its own <c>IAutoTamper</c> hooks but
-/// then calls <c>GetSelectedSessions()</c> expecting to find that same
-/// traffic in this window's grid won't. Good enough to prove discovery/
-/// loading and exercise these five extensions' UI hooks for real, not to
-/// replace the main app's own session list.
+/// Its session list holds demo sessions only. Bridged traffic goes
+/// straight to extensions' <c>IAutoTamper</c> hooks and never appears here,
+/// so <see cref="GetSelectedSessions"/> returns demo sessions.
 /// </summary>
 public sealed class frmViewer : Form
 {
-    // Fields below are exactly what the five inspected extensions reach
-    // into directly -- see each field's own remarks for which sample(s).
+    // The fields the five sample extensions use directly.
 
     /// <summary>metadata: field on frmViewer -- AustralianImages, SAZClipboard.</summary>
     public MenuItem mnuTools;
@@ -91,11 +74,8 @@ public sealed class frmViewer : Form
         sessionsTab.Controls.Add(_sessionList);
         tabsViews.TabPages.Add(sessionsTab);
 
-        // Added so scan/load results are visible without a debugger or
-        // DebugView attached -- Debug.WriteLine alone (the original Phase 1
-        // approach) is invisible when the .exe is just double-clicked or
-        // run directly from a shell, which is exactly how this is normally
-        // going to be run. See AppendLog below and Program.cs's local Log function.
+        // A Log tab, since Debug.WriteLine isn't visible when the exe is run
+        // normally.
         _logBox = new TextBox
         {
             Multiline = true,
@@ -136,13 +116,7 @@ public sealed class frmViewer : Form
         return result.ToArray();
     }
 
-    /// <summary>
-    /// metadata: <c>Fiddler.frmViewer.void actDoCompareSessions(Fiddler.Session, Fiddler.Session)</c>
-    /// -- Differ. Real Fiddler's own diff-view behavior isn't reproduced
-    /// (unknown, and this project's clean-room policy doesn't read Differ's
-    /// IL to find out) -- shows a minimal, honest placeholder instead of
-    /// pretending to a real diff.
-    /// </summary>
+    /// <summary>Used by Differ. Shows a placeholder message rather than a real comparison.</summary>
     public void actDoCompareSessions(Session first, Session second)
     {
         MessageBox.Show(
@@ -153,14 +127,7 @@ public sealed class frmViewer : Form
             MessageBoxIcon.Information);
     }
 
-    /// <summary>
-    /// Appends a line to the on-screen "Log" tab so extension scan/load
-    /// results are visible without DebugView. Safe to call before the
-    /// window's handle exists yet (Program.cs logs during startup, before
-    /// <see cref="Application.Run(Form)"/>) and safe to call from a
-    /// non-UI thread, in case a future extension or IPC hook ever logs
-    /// from one.
-    /// </summary>
+    /// <summary>Adds a line to the Log tab. Safe before the window exists and from any thread.</summary>
     public void AppendLog(string line)
     {
         if (_logBox is null)
@@ -182,12 +149,7 @@ public sealed class frmViewer : Form
         _logBox.AppendText("[" + System.DateTime.Now.ToString("HH:mm:ss") + "] " + line + System.Environment.NewLine);
     }
 
-    /// <summary>
-    /// Switches to the "Log" tab -- called by Program.cs when there were
-    /// load errors, so a problem (e.g. an extension that failed to load) is
-    /// the first thing visible on startup rather than something Mark has to
-    /// go looking for.
-    /// </summary>
+    /// <summary>Shows the Log tab; used at startup when there were load errors.</summary>
     public void SelectLogTab()
     {
         if (tabsViews != null && _logTab != null)

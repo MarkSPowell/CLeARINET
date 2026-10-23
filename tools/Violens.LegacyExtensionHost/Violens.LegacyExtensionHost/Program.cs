@@ -7,28 +7,11 @@ using Violens.CompatShim;
 namespace Violens.LegacyExtensionHost;
 
 /// <summary>
-/// Entry point for the standalone legacy extension host process. Runs as
-/// its own separate window (still, always, its own top-level window -- see
-/// the README's unresolved UI-presentation question) with two synthetic
-/// demo sessions preloaded for local proving-out, discovery/gating/
-/// registration against real, unmodified extension binaries, and running
-/// real extension code -- including code reaching into
-/// now-removed-on-.NET-5+ WinForms menu/status-bar types -- against this
-/// shim for real, once an extension's own AssemblyRef metadata actually
-/// points at this shim's own assembly identity (see AssemblyMismatch, and
-/// the design doc's "Don't get sued" decision, for why that's no longer
-/// automatic for an extension compiled against the real Fiddler assembly,
-/// and what a user can do about it).
-///
-/// Since the session bridge (see <see cref="SessionBridgeServer"/> and the
-/// design doc's "Session bridge" section), loaded extensions'
-/// <c>IAutoTamper</c> hooks can also run against VioLens's own real,
-/// live proxied traffic -- not just the two synthetic demo sessions above
-/// -- whenever the main app is also running and able to reach this process
-/// over the session bridge's named pipe. Still no launch integration or UI
-/// merging with the main app: both processes have to already be running
-/// for the bridge to connect, and this stays a fully separate window
-/// either way.
+/// The legacy extension host: a separate WinForms process that loads
+/// Fiddler Classic extensions rebuilt against <c>Violens.CompatShim</c>,
+/// including ones using WinForms types removed from .NET 5+. Its window has
+/// two demo sessions; the session bridge runs extensions' IAutoTamper hooks
+/// on the main app's real traffic.
 /// </summary>
 internal static class Program
 {
@@ -45,10 +28,7 @@ internal static class Program
         // needs FiddlerApplication.UI to already point at the real window.
         FiddlerApplication.UI = mainForm;
 
-        // Log to both the on-screen "Log" tab (so this is visible when the
-        // .exe is just run directly, no debugger/DebugView needed -- see
-        // frmViewer.AppendLog) and Debug.WriteLine (still useful for anyone
-        // who does have a debugger attached).
+        // To the Log tab and to Debug.WriteLine.
         void Log(string message)
         {
             mainForm.AppendLog(message);
@@ -60,14 +40,8 @@ internal static class Program
         var loader = new LegacyExtensionLoader(new[] { DefaultExtensionsFolder }, Log);
         loader.Load();
 
-        // Starts the session bridge's pipe listener (see SessionBridgeServer
-        // and the design doc's "Session bridge" section) regardless of
-        // whether anything mismatched or loaded cleanly above -- the main
-        // app's own bridge client probes this on every proxy Start() and
-        // treats "reachable but zero AutoTampers loaded" as a clean no-op,
-        // the same way it treats "not reachable at all." Started after
-        // loader.Load() so AutoTampers already reflects whatever actually
-        // loaded (or didn't) by the time the first bridge call can arrive.
+        // Started even if nothing loaded: the app treats "no AutoTampers" the
+        // same as "no host". After Load(), so AutoTampers is complete.
         SessionBridgeServer.Start(loader.AutoTampers, Log);
 
         if (loader.LoadErrors.Count > 0)
@@ -77,8 +51,8 @@ internal static class Program
                 Log(error);
             }
 
-            // Surface the problem immediately rather than leaving it for
-            // Mark to notice the Tools menu is empty and go hunting.
+            // Show the problem straight away, rather than leave an empty Tools
+            // menu to puzzle over.
             mainForm.SelectLogTab();
         }
         else
@@ -86,19 +60,8 @@ internal static class Program
             Log("No load errors.");
         }
 
-        // A pop-up dialog specifically for assembly-identity mismatches
-        // (see AssemblyMismatch and the design doc's "Don't get sued"
-        // decision) -- explaining why an extension didn't load is more
-        // useful surfaced here than buried in the Log tab as one more
-        // generic load error, so this category gets its own dialog. See
-        // AssemblyMismatch.ToDiagnosticMessage's own remarks for why its
-        // wording is deliberately restrained (states what's wrong and the
-        // one remediation this host stands behind -- recompiling from
-        // source -- without walking through retargeting a compiled
-        // binary's own metadata). Shown once, after the whole scan, rather
-        // than once per mismatched extension, so a folder with several
-        // unmodified real extensions in it doesn't stack up a wall of
-        // dialogs the person has to click through one at a time.
+        // Mismatches get one dialog after the scan, since they're the likeliest
+        // reason an extension didn't load.
         if (loader.AssemblyMismatches.Count > 0)
         {
             var summary = string.Join(Environment.NewLine + Environment.NewLine, loader.AssemblyMismatches.Select(m => m.ToDiagnosticMessage()));
@@ -124,12 +87,8 @@ internal static class Program
     }
 
     /// <summary>
-    /// VioLens-branded folder, matching the naming convention
-    /// <c>Violens.Compatibility.Extensions.ExtensionHost.DefaultExtensionsFolder</c>
-    /// already uses for the main app's own (source-compatible) extensions
-    /// folder -- kept separate ("LegacyExtensions", not "Extensions") since
-    /// a .NET 10 extension dropped in this folder by mistake would fail to
-    /// load here (wrong runtime entirely), and vice versa.
+    /// "LegacyExtensions" in Documents\VioLens, kept apart from the main app's
+    /// "Extensions", since each host's extensions can't load in the other.
     /// </summary>
     private static string DefaultExtensionsFolder =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "VioLens", "LegacyExtensions");

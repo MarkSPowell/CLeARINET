@@ -2,13 +2,7 @@ using Violens.ProxyCore.Sessions;
 
 namespace Violens.Extensibility.Inspection;
 
-/// <summary>
-/// What an inspector gets to look at: one side of one captured session.
-/// Deliberately narrower than handing over the whole <see cref="Session"/>
-/// -- a request-side inspector has no business reading the response body,
-/// and this makes that structural rather than a convention every inspector
-/// author has to remember and honor.
-/// </summary>
+/// <summary>One side of one session: all an inspector gets, so a request inspector can't read the response.</summary>
 public sealed class InspectorContext
 {
     public InspectorContext(Session session, InspectorSide side)
@@ -27,12 +21,7 @@ public sealed class InspectorContext
     public byte[] Body =>
         Side == InspectorSide.Request ? Session.Request.Body : Session.Response.Body;
 
-    /// <summary>
-    /// First matching header value, case-insensitive per RFC 9110, or null
-    /// if absent. A convenience most inspectors need (Content-Type,
-    /// Content-Encoding) without re-implementing the case-insensitive scan
-    /// themselves.
-    /// </summary>
+    /// <summary>The first header with this name (case-insensitive), or null.</summary>
     public string? FindHeader(string name)
     {
         foreach (var (headerName, value) in Headers)

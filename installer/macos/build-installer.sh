@@ -1,62 +1,30 @@
 #!/usr/bin/env bash
 #
-# Assembles a `dotnet publish -r osx-arm64` output into a real VioLens.app
-# bundle, then packages that bundle into a .dmg -- the macOS equivalent of
-# what installer/VioLens.iss (Inno Setup) does for the Windows installer.
-# There's no push-button "ISCC.exe" for macOS the way there is for Windows,
-# so this is a plain script instead of a config file for some other tool --
-# see .github/workflows/release-macos.yml, the only caller, for how this is
-# invoked in CI. Runnable by hand too (on a real Mac) for local testing;
-# nothing here is CI-specific.
+# Builds VioLens.app from a `dotnet publish -r osx-arm64` output and packages
+# it as a .dmg: the macOS counterpart of installer/VioLens.iss. Called by
+# .github/workflows/release-macos.yml, and runs the same on a Mac by hand.
 #
-# Deliberately narrow in scope, matching this project's macOS work so far
-# (see the Interception Certificate Design doc's own "Testing scope,
-# deliberately narrow" note for the same posture elsewhere):
-#   - arm64 only, no universal/x64 build -- see the Project Plan's own
-#     "macOS release pipeline" update paragraph for why.
-#   - Ad-hoc signed only: not Developer ID signed, not notarized -- no
-#     Apple Developer account is available to this project. The .NET SDK
-#     ad-hoc-signs the published executable itself (arm64 binaries must be
-#     signed to run at all), but copying it into a hand-built bundle and
-#     adding Info.plist leaves a signature that doesn't match the bundle.
-#     A downloaded (quarantined) app in that state is reported by macOS as
-#     "damaged" (the likely cause of the first real Mac test reporting
-#     "damaged"). So the finished bundle is ad-hoc signed as a whole below. Gatekeeper then shows its ordinary
-#     "can't be verified" prompt instead, which the user can get past once
+#   - arm64 only.
+#   - Ad-hoc signed, not notarized: there's no Apple Developer account.
+#     Copying the SDK-signed executable into a hand-built bundle breaks its
+#     signature, and macOS calls such a downloaded app "damaged", so the
+#     whole bundle is ad-hoc signed below. Gatekeeper then asks once
 #     (System Settings > Privacy & Security > Open Anyway, or
 #     `xattr -dr com.apple.quarantine /Applications/VioLens.app`).
-#   - The app icon (VioLens.icns, CFBundleIconFile below) is made at build
-#     time from violens-icon-1024.png beside this script, with sips and
-#     iconutil, which come with macOS. That's the app's icon artwork
-#     (apps/Violens.DesktopUi/Assets/violens-icon.png, 256x256) redrawn
-#     at 1024x1024, the largest size macOS uses, so every size is scaled
-#     down and stays sharp. It lives here rather than in Assets, which
-#     are all embedded in the app, because only this build needs it.
+#   - The icon (VioLens.icns) is made at build time with sips and iconutil
+#     from violens-icon-1024.png beside this script, the app icon at the
+#     largest size macOS uses.
 #
 # Usage: build-installer.sh <version> <bundleVersion> <publishDir> <outputDmgPath> [extensionsDir]
-#   version        Full version string, e.g. "0.1.1-preview.1" -- goes into
-#                   CFBundleShortVersionString (Finder's "Get Info" version)
-#                   and the .app bundle's own display name is left as plain
-#                   "VioLens", matching the Windows installer's own
-#                   MyAppName/MyAppVersion split (installer/VioLens.iss).
-#   bundleVersion  Purely numeric X.X.X.X derivative of the above (no
-#                   prerelease suffix), e.g. "0.1.1.0" -- goes into
-#                   CFBundleVersion. Same reasoning as the Windows release
-#                   workflow's own $fileVersion: Inno Setup's
-#                   VersionInfoVersion can't take a "-preview.1" suffix,
-#                   and neither should a well-formed CFBundleVersion.
+#   version        Full version, e.g. "0.1.1-preview.1", for
+#                   CFBundleShortVersionString.
+#   bundleVersion  Numeric form, e.g. "0.1.1.0", for CFBundleVersion.
 #   publishDir     The `dotnet publish -r osx-arm64 --self-contained
-#                   -p:PublishSingleFile=true` output directory -- expects
-#                   to find the Violens.DesktopUi executable directly
-#                   inside it (see Violens.DesktopUi.csproj's own remarks
-#                   on PublishSingleFile for why nothing else needs
-#                   flattening here the way the legacy-host build does on
-#                   the Windows side).
-#   outputDmgPath  Where to write the finished .dmg.
-#   extensionsDir  Optional: installer/build-extensions.ps1's output. Put in
-#                   the .dmg as an "Optional Extensions" folder beside the
-#                   app, with a README on copying them in. (A .dmg has no
-#                   install-time choices, unlike the Windows installer.)
+#                   -p:PublishSingleFile=true` output, with the
+#                   Violens.DesktopUi executable directly inside.
+#   outputDmgPath  Where to write the .dmg.
+#   extensionsDir  Optional: installer/build-extensions.ps1's output, put in
+#                   the .dmg as an "Optional Extensions" folder with a README.
 
 set -euo pipefail
 
@@ -101,21 +69,15 @@ RESOURCES_DIR="$CONTENTS_DIR/Resources"
 
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-# The executable itself goes straight into Contents/MacOS, matching every
-# other Mac app bundle's own layout, under its own actual name --
-# CFBundleExecutable below points at this same name, not "VioLens", so
-# the two stay in sync without needing a rename.
+# The executable goes in Contents/MacOS under its own name, which
+# CFBundleExecutable names.
 cp "$EXECUTABLE_PATH" "$MACOS_DIR/$EXECUTABLE_NAME"
 chmod +x "$MACOS_DIR/$EXECUTABLE_NAME"
 
-# Everything else PublishSingleFile left loose beside the executable (the
-# Documentation/User Guide.md folder -- see Violens.DesktopUi.csproj's
-# None/Link entry for it) goes into Resources only. Contents/MacOS must
-# hold nothing but code: codesign treats every file there as a code
-# subcomponent, and a non-code file (a .pdb, a .md) fails verification with
-# "code object is not signed at all". OpenDocumentation looks in
-# ../Resources when the guide isn't beside the executable. Debug symbols
-# (.pdb) aren't shipped at all.
+# Everything else PublishSingleFile left beside the executable (the
+# Documentation folder) goes in Resources. Contents/MacOS may hold only
+# code, or codesign fails with "code object is not signed at all". .pdb
+# files aren't shipped.
 for entry in "$PUBLISH_DIR"/*; do
   name="$(basename "$entry")"
   if [[ "$name" == "$EXECUTABLE_NAME" || "$name" == *.pdb ]]; then
@@ -137,19 +99,9 @@ for size in 16 32 128 256 512; do
 done
 iconutil --convert icns --output "$RESOURCES_DIR/$APP_NAME.icns" "$ICONSET_DIR"
 
-# A minimal Info.plist -- just what an Avalonia app actually needs. No
-# NSPrincipalClass: that's an AppKit/Xcode-project convention for locating
-# the app's principal NSApplication subclass, and Avalonia manages its own
-# native macOS window/application lifecycle internally rather than relying
-# on Info.plist to wire one up, so there's nothing here for it to point at.
-# No comments inside the plist body itself, even though XML comments are
-# technically legal there -- unconfirmed whether every plist reader this
-# build might meet tolerates them, and there's nothing to gain by risking
-# it. LSMinimumSystemVersion is set to 11.0 (the first macOS release that
-# runs on Apple Silicon at all) purely for documentation purposes -- this
-# build is arm64-only in the first place (see this script's own header
-# remarks), so nothing older than that could run it regardless of what
-# this key says.
+# A minimal Info.plist. Avalonia runs its own application lifecycle, so
+# there's no NSPrincipalClass. LSMinimumSystemVersion 11.0 is the first
+# release on Apple Silicon.
 cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -196,12 +148,8 @@ codesign --verify --verbose=2 "$APP_BUNDLE"
 mkdir -p "$(dirname "$OUTPUT_DMG_PATH")"
 rm -f "$OUTPUT_DMG_PATH"
 
-# UDZO = compressed, read-only -- the same format every ordinary
-# drag-to-Applications .dmg distribution uses. The Applications symlink
-# alongside the .app in the staged volume is what makes Finder show the
-# familiar "drag VioLens.app onto Applications" arrangement when the
-# .dmg is opened; nothing generates that automatically just from
-# -srcfolder containing only the .app itself.
+# A compressed, read-only .dmg with an Applications link beside the app,
+# for the usual drag-to-install window.
 DMG_STAGING_DIR="$WORK_DIR/dmg-staging"
 mkdir -p "$DMG_STAGING_DIR"
 cp -R "$APP_BUNDLE" "$DMG_STAGING_DIR/"

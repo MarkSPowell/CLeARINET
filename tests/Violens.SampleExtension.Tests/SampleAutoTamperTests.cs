@@ -6,14 +6,9 @@ using Xunit;
 namespace Violens.SampleExtension.Tests;
 
 /// <summary>
-/// Calls every method <see cref="SampleAutoTamper"/> implements directly,
-/// including the three <c>InterceptingProxyListener</c> doesn't call yet
-/// (<c>OnBeforeReturningError</c>, <c>OnPeekAtResponseHeaders</c>,
-/// <c>OnPeekAtRequestHeaders</c>) -- this is the fast, no-desktop-app,
-/// no-dropped-.dll check that the interface contract itself is fully
-/// implemented and does what its own doc comments say;
-/// <c>tools/Violens.SampleExtension/README.md</c> covers the slower,
-/// manual checks that prove the wiring around it.
+/// Calls every <see cref="SampleAutoTamper"/> method directly. The manual
+/// checks in tools/Violens.SampleExtension/README.md cover loading it into
+/// the app.
 /// </summary>
 public class SampleAutoTamperTests
 {

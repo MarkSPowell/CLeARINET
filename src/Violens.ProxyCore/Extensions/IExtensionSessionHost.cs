@@ -3,24 +3,10 @@ using Violens.ProxyCore.Http;
 namespace Violens.ProxyCore.Extensions;
 
 /// <summary>
-/// Runs Fiddler-shaped extension hooks (<c>OnPeekAtRequestHeaders</c>,
-/// <c>AutoTamperRequestBefore</c> and the rest) against live traffic, with
-/// <b>one session object per request</b> that lives from the first hook to
-/// the last. That's what ported Fiddler Classic extensions expect: flags an
-/// extension sets in one hook are still there in the next, and a response it
-/// creates in <c>AutoTamperRequestBefore</c> is sent instead of contacting
-/// the server.
-///
-/// It sits beside <see cref="IExtensionAutoTamperHost"/>, which it doesn't
-/// replace. That older contract is stateless (a fresh object per hook) and
-/// is still what VioLens-native extensions and the legacy host's session
-/// bridge use.
-///
-/// Lives in ProxyCore for the same reason <see cref="IExtensionAutoTamperHost"/>
-/// does: the listener can't reference <c>Violens.Compatibility</c>, so
-/// the composition root hands it the real implementation
-/// (<c>Violens.Compatibility.Extensions.ShimAutoTamperSet</c>) through
-/// this interface.
+/// Runs Fiddler-style extension hooks with one session object per request,
+/// from the first hook to the last, so flags persist between hooks and a
+/// response created in <c>AutoTamperRequestBefore</c> replaces the server's.
+/// <see cref="IExtensionAutoTamperHost"/> is the older, stateless contract.
 /// </summary>
 public interface IExtensionSessionHost
 {

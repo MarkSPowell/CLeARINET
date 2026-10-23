@@ -5,18 +5,9 @@ using Violens.Compatibility.FiddlerScript;
 namespace Violens.SampleExtension;
 
 /// <summary>
-/// The response-side twin of <see cref="SampleRequestInspector"/> -- see
-/// that class's own remarks. Kept as a separate class rather than one type
-/// implementing both <see cref="IRequestInspector2"/> and
-/// <see cref="IResponseInspector2"/>: <c>ExtensionHost</c> would register a
-/// dual-implementing instance into both
-/// <c>ExtensionHost.RequestInspectors</c> and
-/// <c>ExtensionHost.ResponseInspectors</c>, and the two
-/// <c>Inspector2Adapter</c>-wrapped tabs that produces would then share one
-/// mutable <see cref="body"/>/<see cref="headers"/> pair across what's
-/// supposed to be two independent inspections -- two small, separate
-/// classes avoid that shared-state trap entirely, at the cost of a little
-/// duplication that's fine for a sample this size.
+/// The response-side copy of <see cref="SampleRequestInspector"/>. A
+/// separate class, since one instance registered on both sides would share
+/// its body between two tabs.
 /// </summary>
 public sealed class SampleResponseInspector : IResponseInspector2
 {

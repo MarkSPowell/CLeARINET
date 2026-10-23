@@ -5,26 +5,10 @@ using System.Text.Json;
 namespace Violens.ProxyCore.Preferences;
 
 /// <summary>
-/// The JSON-file-backed <see cref="IPreferenceStore"/> -- see the
-/// Preferences Design doc for the full reasoning; the short version of
-/// each design choice is repeated next to the code that implements it.
-///
-/// <b>Same behavior on Windows and macOS.</b> Nothing in this class
-/// branches on the operating system: the folder comes from
-/// <see cref="ProxyHostIdentity.ResolveDataFolder"/>, the file bytes are fixed (UTF-8, no BOM,
-/// <c>\n</c>, sorted keys), every number is culture-invariant, and the
-/// atomic-replace and cross-process-lock primitives used here
-/// (<see cref="File.Move(string, string, bool)"/>,
-/// <see cref="FileShare.None"/>) are the ones .NET implements on both.
-///
-/// <b>Deadlock safety</b> (the Fiddler lesson the Project Plan records):
-/// reads take no lock at all (an immutable snapshot, swapped atomically);
-/// writes hold <see cref="_writeLock"/> only long enough to compute and
-/// swap the new snapshot -- never across I/O, never across a watcher
-/// callback, never while taking any other lock; disk I/O runs under its
-/// own separate <see cref="_ioLock"/>, off the caller's thread. At most one
-/// of this class's locks is ever held at a time, so no lock-ordering cycle
-/// can exist.
+/// Preferences in a JSON file, the same on Windows and macOS.
+/// Deadlock-safe: reads take no lock; writes hold a lock only to swap in a
+/// new snapshot, never across I/O or watcher callbacks; saving runs under a
+/// separate lock off the caller's thread.
 /// </summary>
 public sealed class PreferenceStore : IPreferenceStore, IDisposable
 {
@@ -51,12 +35,8 @@ public sealed class PreferenceStore : IPreferenceStore, IDisposable
     private ImmutableDictionary<string, string> _values;
 
     /// <summary>
-    /// Names this process changed since its last successful save, with
-    /// <see langword="null"/> meaning "removed". Only ever touched under
-    /// <see cref="_writeLock"/>. A save applies exactly these on top of a
-    /// fresh read of the file -- see "More than one VioLens running" in
-    /// the design doc -- so another process's changes to other names
-    /// survive.
+    /// Names changed since the last save (null means removed). Saving applies
+    /// these over a fresh read, so another process's changes survive.
     /// </summary>
     private Dictionary<string, string?> _pendingChanges = new(NameComparer);
 
@@ -87,10 +67,7 @@ public sealed class PreferenceStore : IPreferenceStore, IDisposable
 
         _saveTimer = new Timer(_ => OnSaveTimer(), null, Timeout.Infinite, Timeout.Infinite);
 
-        // Belt and braces alongside the host's own Dispose() on shutdown:
-        // ProcessExit runs on a normal exit on both Windows and macOS, so a
-        // host that forgets (or never reaches) Dispose still gets its last
-        // changes saved. Unhooked again in Dispose().
+        // In case the host never reaches Dispose.
         AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
     }
 
@@ -372,7 +349,7 @@ public sealed class PreferenceStore : IPreferenceStore, IDisposable
             }
         }
 
-        // Outside the lock, on purpose -- see this class's own remarks.
+        // Outside the lock, so handlers can use the store.
         NotifyWatchers(raised);
     }
 
@@ -409,10 +386,7 @@ public sealed class PreferenceStore : IPreferenceStore, IDisposable
 
     private void OnSaveTimer()
     {
-        // A timer callback's unhandled exception would take the whole
-        // process down; Flush() already catches the I/O failures it
-        // expects, so anything reaching here is a bug worth logging, not a
-        // reason to crash a debugging tool.
+        // An unhandled exception on a timer thread would end the process.
         try
         {
             Flush();
@@ -439,8 +413,7 @@ public sealed class PreferenceStore : IPreferenceStore, IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Exists but can't be read -- don't risk overwriting something
-            // we couldn't even look at.
+            // Unreadable: don't risk overwriting it.
             _log($"Couldn't read preferences from {_filePath} ({ex.Message}); using defaults, and not saving changes this run.");
             return (empty, true);
         }

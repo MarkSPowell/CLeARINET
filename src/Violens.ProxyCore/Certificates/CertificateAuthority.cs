@@ -4,24 +4,15 @@ using System.Security.Cryptography.X509Certificates;
 namespace Violens.ProxyCore.Certificates;
 
 /// <summary>
-/// Owns the per-install, per-user VioLens root certificate authority:
-/// generating it, persisting its private key with a non-exportable storage
-/// flag, and installing it into the current user's trusted-root store. See
-/// the "VioLens Interception Certificate Design" doc for the reasoning
-/// behind these choices, including "Platform status" for the macOS half
-/// (<see cref="MacOSCertificateTrust"/>) built alongside the original,
-/// validated-on-a-real-browser Windows half below.
+/// The per-user VioLens root: created once, its key stored non-exportable,
+/// and trusted in the user's root store (see the Interception Certificate
+/// Design).
 /// </summary>
 public sealed class CertificateAuthority
 {
     /// <summary>
-    /// The common-name prefix VioLens's own root uses (the default
-    /// <see cref="ProxyHostIdentity.RootCertificateName"/>), so a stale or
-    /// foreign copy is recognizable in a trust store at a glance. Named after
-    /// Fiddler Classic's own long-standing convention
-    /// (<c>DO_NOT_TRUST_FiddlerRoot</c>). An app with its own
-    /// <see cref="ProxyHostIdentity"/> gets its own name instead; see
-    /// <see cref="RootCertificateName"/>.
+    /// VioLens's root name prefix, after Fiddler's <c>DO_NOT_TRUST_FiddlerRoot</c>.
+    /// Hosts with their own <see cref="ProxyHostIdentity"/> use their own name.
     /// </summary>
     public const string SubjectPrefix = "DO_NOT_TRUST_ViolensRoot";
 
@@ -29,18 +20,12 @@ public sealed class CertificateAuthority
 
     public X509Certificate2 RootCertificate { get; }
 
-    /// <summary>
-    /// The root's common-name prefix: <see cref="ProxyEngine.Identity"/>'s
-    /// <see cref="ProxyHostIdentity.RootCertificateName"/> when this was created.
-    /// </summary>
+    /// <summary>The root's name prefix, from <see cref="ProxyEngine.Identity"/> at creation.</summary>
     public string RootCertificateName { get; }
 
     /// <param name="installToTrustStore">
-    /// When true (the default), ensures the root is present in the current
-    /// user's trusted-root store, which is what triggers the native
-    /// Windows "Do you want to install this certificate?" prompt the first
-    /// time. Tests and tooling that only need the certificate object
-    /// itself should pass false to avoid touching the trust store.
+    /// Trust the root (on Windows, the OS asks the user the first time). Tests
+    /// pass false to leave the trust store alone.
     /// </param>
     public CertificateAuthority(bool installToTrustStore = true)
     {
@@ -53,27 +38,17 @@ public sealed class CertificateAuthority
         }
     }
 
-    /// <summary>
-    /// Generates a fresh, self-signed VioLens root certificate. This is
-    /// pure certificate math with no store or OS interaction, which is why
-    /// it's the part of this class that's actually unit-testable.
-    /// </summary>
+    /// <summary>Creates a self-signed root without touching any store.</summary>
     public static X509Certificate2 GenerateRoot(DateTimeOffset notBefore, DateTimeOffset notAfter) =>
         GenerateRoot(notBefore, notAfter, ProxyEngine.Identity.RootCertificateName);
 
-    /// <summary>
-    /// The same, with the common name starting <paramref name="rootCertificateName"/>
-    /// rather than the configured identity's.
-    /// </summary>
+    /// <summary>The same, with a given name prefix.</summary>
     public static X509Certificate2 GenerateRoot(DateTimeOffset notBefore, DateTimeOffset notAfter, string rootCertificateName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootCertificateName);
 
-        // Built with X500DistinguishedNameBuilder rather than the
-        // string-parsing X500DistinguishedName constructor: the common
-        // name below contains a comma, which the string form treats as an
-        // RDN separator unless escaped. The builder adds it as a single
-        // attribute value, no escaping needed.
+        // The builder, because the common name contains a comma, which the
+        // string form would read as a separator.
         var subjectBuilder = new X500DistinguishedNameBuilder();
         subjectBuilder.AddCommonName(
             $"{rootCertificateName} ({Environment.MachineName}, generated {DateTime.UtcNow:yyyy-MM-dd})");
@@ -126,12 +101,8 @@ public sealed class CertificateAuthority
 
     private static X509Certificate2 PersistNonExportable(X509Store store, X509Certificate2 certWithKey)
     {
-        // .NET only lets you choose the storage flags (PersistKeySet,
-        // deliberately without Exportable) on *import*, not on the
-        // certificate CreateSelfSigned just handed back. So: export to a
-        // PFX in memory, then immediately re-import with the flags we
-        // actually want. The password only protects the bytes for the
-        // instant they exist inside this method.
+        // Storage flags can only be set on import, so round-trip through an
+        // in-memory PFX to persist the key without Exportable.
         var password = Guid.NewGuid().ToString("N");
         var pfxBytes = certWithKey.Export(X509ContentType.Pfx, password);
 
@@ -151,17 +122,6 @@ public sealed class CertificateAuthority
         }
     }
 
-    /// <summary>
-    /// Platform dispatch lives here, not spread across call sites -- see
-    /// the design doc's "Platform status" section for the reasoning behind
-    /// each platform's own approach. Previously unguarded entirely (always
-    /// ran the Windows-only <c>X509Store(StoreName.Root, ...)</c> path
-    /// regardless of platform) -- a latent bug on anything but Windows,
-    /// since that call throws an unhelpful native
-    /// <see cref="CryptographicException"/> there rather than a clear
-    /// "unsupported platform" message. Fixed here alongside adding the
-    /// macOS path itself.
-    /// </summary>
     private static void EnsureTrusted(X509Certificate2 rootCert)
     {
         if (OperatingSystem.IsWindows())
@@ -170,12 +130,7 @@ public sealed class CertificateAuthority
         }
         else if (OperatingSystem.IsMacOS())
         {
-            // No "already trusted" short-circuit here the way Windows has
-            // one -- MacOSCertificateTrust.Install always runs
-            // `security add-trusted-cert`, which is itself already
-            // idempotent (re-adding an already-trusted cert is a no-op,
-            // not an error), so there's no correctness reason to duplicate
-            // that check on this side too.
+            // security add-trusted-cert is idempotent, so no "already trusted" check.
             MacOSCertificateTrust.Install(rootCert);
         }
         else
@@ -198,32 +153,18 @@ public sealed class CertificateAuthority
 
         if (!alreadyTrusted)
         {
-            // On Windows this is what triggers the native "Do you want to
-            // install this certificate?" dialog -- the same prompt
-            // Fiddler Classic's own docs walk users through. Installation
-            // should never be silent; this relies on that OS behavior
-            // rather than trying to suppress or replace it. macOS has no
-            // equivalent OS-level prompt for the shelled-out `security`
-            // command this project's own MacOSCertificateTrust uses
-            // instead -- see the design doc's "silent-install tension"
-            // section for how that's resolved on that side (VioLens's
-            // own confirmation dialog, not an OS one).
+            // On Windows this shows the OS's "install this certificate?" prompt.
+            // macOS has none, so the app asks first.
             store.Add(rootCert);
         }
     }
 
     /// <summary>
-    /// Removes every root whose name contains <paramref name="subjectPrefix"/>
-    /// -- current, expired, or left by an earlier install -- from the
-    /// trusted-root store and the personal store, deleting its private key
-    /// too. Doesn't need (or create) a root the way constructing this class
-    /// does, so it's what an uninstaller or a "Remove certificate" command
-    /// calls. On Windows each removal from the trusted-root store shows the
-    /// system's own confirmation; a "No" is respected, logged, and that
-    /// root's key kept so a later removal leaves nothing behind. Never
-    /// throws.
+    /// Removes every root whose name contains <paramref name="subjectPrefix"/>,
+    /// including old ones, from the trusted-root and personal stores, with
+    /// their keys. On Windows the user confirms each removal; a "No" keeps that
+    /// root's key. Never throws.
     /// </summary>
-    /// <returns>How many roots were removed from the trust store.</returns>
     public static int RemoveRoots(string subjectPrefix, Action<string>? log = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(subjectPrefix);
@@ -246,8 +187,7 @@ public sealed class CertificateAuthority
                 {
                     try
                     {
-                        // Deleting it from the keychain takes its trust
-                        // setting with it.
+                        // Deleting it from the keychain removes its trust setting too.
                         MacOSCertificateTrust.Uninstall(root);
                         removed++;
                     }
@@ -270,10 +210,7 @@ public sealed class CertificateAuthority
         return 0;
     }
 
-    /// <summary>
-    /// <see cref="RemoveRoots"/>'s Windows half, with the stores passed in
-    /// so tests can use stores of their own rather than the real ones.
-    /// </summary>
+    /// <summary>The Windows half of <see cref="RemoveRoots"/>, with stores passed in for tests.</summary>
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     internal static int RemoveRootsFromStores(X509Store trustStore, X509Store keyStore, string subjectPrefix, Action<string>? log)
     {
@@ -333,11 +270,8 @@ public sealed class CertificateAuthority
             .ToList();
 
     /// <summary>
-    /// Removes this root from both the personal and trusted-root stores.
-    /// Implements the design doc's "one-click removal" mechanics. The app's
-    /// own uninstall and "Remove Root Certificate" command use
-    /// <see cref="RemoveRoots"/> instead, which also catches roots left by
-    /// earlier installs.
+    /// Removes this root from the personal and trusted-root stores.
+    /// <see cref="RemoveRoots"/> also catches roots from earlier installs.
     /// </summary>
     public void Uninstall()
     {
@@ -358,11 +292,7 @@ public sealed class CertificateAuthority
                 "-- see the Interception Certificate Design doc's 'Platform status' section.");
         }
 
-        // The personal ("My") store, unlike the trust store above, is
-        // already cross-platform in .NET's own X509Store implementation
-        // (it's how the macOS half of LoadOrCreateRoot's own store access
-        // already works too, with no platform split needed there either)
-        // -- no per-platform dispatch needed for this half.
+        // X509Store's personal store works on every platform.
         using var myStore = new X509Store(StoreName.My, StoreLocation.CurrentUser);
         myStore.Open(OpenFlags.ReadWrite);
         myStore.Remove(RootCertificate);

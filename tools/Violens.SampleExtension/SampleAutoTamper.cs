@@ -4,23 +4,9 @@ using Violens.Compatibility.FiddlerScript;
 namespace Violens.SampleExtension;
 
 /// <summary>
-/// An original, from-scratch <see cref="IAutoTamper3"/> implementation --
-/// not a port of <c>SAZClipboard.dll</c> or any other real Fiddler Classic
-/// extension, the same clean-room posture as
-/// <c>samples/PhaseA2ValidationRules.js</c>. Exercises every method
-/// <see cref="Violens.Compatibility.Extensions.IFiddlerExtension"/>/
-/// <see cref="IAutoTamper"/>/<see cref="IAutoTamper2"/>/<see cref="IAutoTamper3"/>
-/// declare -- the four wired into real proxied traffic today
-/// (<see cref="AutoTamperRequestBefore"/>/<see cref="AutoTamperRequestAfter"/>/
-/// <see cref="AutoTamperResponseBefore"/>/<see cref="AutoTamperResponseAfter"/>,
-/// via <c>LoadedExtensionSet</c>) are each individually observable by eye
-/// once this .dll is loaded and VioLens is used to browse; the other
-/// three (<see cref="OnBeforeReturningError"/>/<see cref="OnPeekAtResponseHeaders"/>/
-/// <see cref="OnPeekAtRequestHeaders"/>) aren't called by anything yet (see
-/// the .NET Extension Compatibility Design doc's own "what's not built
-/// yet") and are exercised only by
-/// <c>Violens.SampleExtension.Tests.SampleAutoTamperTests</c>, calling
-/// each one directly.
+/// An original <see cref="IAutoTamper3"/>. The four request/response hooks
+/// run on real traffic; the other three aren't called by the app yet and
+/// are covered by SampleAutoTamperTests.
 /// </summary>
 public sealed class SampleAutoTamper : IAutoTamper3
 {
@@ -41,13 +27,7 @@ public sealed class SampleAutoTamper : IAutoTamper3
 
     public int PeekRequestHeadersCount { get; private set; }
 
-    /// <summary>
-    /// Fired once by <c>ExtensionHost.Load()</c> -- flips <see cref="Loaded"/>
-    /// and writes a console line (the same established diagnostic channel
-    /// <c>InterceptingProxyListener</c>/<c>FiddlerScriptRunner</c> already
-    /// use) so this extension's presence is visible the moment the desktop
-    /// app starts, before any traffic has even been proxied.
-    /// </summary>
+    /// <summary>Sets <see cref="Loaded"/> and writes a console line, so it's clear the extension loaded.</summary>
     public void OnLoad()
     {
         Loaded = true;
@@ -62,26 +42,15 @@ public sealed class SampleAutoTamper : IAutoTamper3
     }
 
     /// <summary>
-    /// Sets a real request header -- projected back onto the actual wire
-    /// request (see <c>LoadedExtensionSet.RunRequestBefore</c>'s own
-    /// remarks), so it reaches the real server and is visible in whatever
-    /// that server echoes back. Point a request at
-    /// https://httpbin.org/post (the same trick
-    /// <c>samples/PhaseA2ValidationRules.js</c> uses) and look for this
-    /// header in the echoed request.
+    /// Adds a request header that reaches the server. Send a request to
+    /// https://httpbin.org/post and look for it in the echo.
     /// </summary>
     public void AutoTamperRequestBefore(Exchange oSession)
     {
         oSession.oRequest.headers[MarkerHeaderName] = "AutoTamperRequestBefore-ran";
     }
 
-    /// <summary>
-    /// Also wired into real traffic, but fire-and-observe: nothing set on
-    /// <paramref name="oSession"/> here is ever projected back onto the
-    /// wire (see <c>IExtensionAutoTamperHost.RunRequestAfter</c>'s own
-    /// remarks), so the only observable effects are this console line and
-    /// the bumped counter -- not a header a browser could ever see.
-    /// </summary>
+    /// <summary>Logs and counts; the request has already been sent.</summary>
     public void AutoTamperRequestAfter(Exchange oSession)
     {
         RequestAfterCount++;
@@ -101,27 +70,21 @@ public sealed class SampleAutoTamper : IAutoTamper3
         Console.WriteLine($"[SampleExtension] AutoTamperResponseAfter: #{oSession.id} {oSession.responseCode} {oSession.url}");
     }
 
-    /// <summary>
-    /// Not called by anything yet -- <c>InterceptingProxyListener</c> has no
-    /// synthetic-error-response code path to hang this off (see the design
-    /// doc's own "what's not built yet"). Implemented fully so the
-    /// interface contract itself is proven; exercised directly by
-    /// <c>SampleAutoTamperTests</c>.
-    /// </summary>
+    /// <summary>Not called by the app yet; covered by SampleAutoTamperTests.</summary>
     public void OnBeforeReturningError(Exchange oSession)
     {
         BeforeReturningErrorCount++;
         Console.WriteLine($"[SampleExtension] OnBeforeReturningError: #{oSession.id} {oSession.url}");
     }
 
-    /// <summary>Not called by anything yet either -- see <see cref="OnBeforeReturningError"/>'s own remarks.</summary>
+    /// <summary>Not called by the app yet.</summary>
     public void OnPeekAtResponseHeaders(Exchange oSession)
     {
         PeekResponseHeadersCount++;
         Console.WriteLine($"[SampleExtension] OnPeekAtResponseHeaders: #{oSession.id} {oSession.responseCode}");
     }
 
-    /// <summary>Not called by anything yet either -- see <see cref="OnBeforeReturningError"/>'s own remarks.</summary>
+    /// <summary>Not called by the app yet.</summary>
     public void OnPeekAtRequestHeaders(Exchange oSession)
     {
         PeekRequestHeadersCount++;

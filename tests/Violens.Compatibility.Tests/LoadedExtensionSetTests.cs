@@ -7,19 +7,9 @@ using Xunit;
 namespace Violens.Compatibility.Tests;
 
 /// <summary>
-/// Exercises <see cref="LoadedExtensionSet"/> through its
-/// <see cref="IExtensionAutoTamperHost"/> surface specifically -- the same
-/// narrow contract <c>InterceptingProxyListener</c> actually calls -- the
-/// same reasoning <see cref="FiddlerScriptRunnerTests"/>' own remarks give
-/// for testing <c>FiddlerScriptRunner</c> through <c>IScriptRunner</c>
-/// rather than <c>FiddlerScriptHost</c> directly.
-///
-/// Every <see cref="IAutoTamper"/> here is a small, purpose-built fake
-/// (<see cref="ScriptedAutoTamper"/>) rather than a real compiled extension
-/// .dll -- exactly the point of splitting <see cref="ExtensionHost"/>'s
-/// disk/reflection/<c>AssemblyLoadContext</c> scanning out from this pure
-/// class, per its own remarks: no real extension assembly is needed
-/// anywhere in this test suite.
+/// <see cref="LoadedExtensionSet"/> through <see cref="IExtensionAutoTamperHost"/>,
+/// with fake extensions (<see cref="ScriptedAutoTamper"/>) rather than
+/// compiled .dlls.
 /// </summary>
 public class LoadedExtensionSetTests
 {
@@ -56,12 +46,8 @@ public class LoadedExtensionSetTests
     [Fact]
     public void AnyTamperLoaded_HasFlagsAreTrue_EvenOneThatOnlyDefinesOtherHooks()
     {
-        // Unlike IScriptRunner's per-handler HasOnBeforeRequest/
-        // HasOnBeforeResponse (a FiddlerScript file can define just one of
-        // the two), a C# class implementing IAutoTamper must implement
-        // every method on the interface -- so LoadedExtensionSet's flags
-        // are gated on "is anything loaded at all," not on which hook a
-        // given tamper actually does something in.
+        // A C# extension implements every IAutoTamper method, so the flags only
+        // say whether anything is loaded.
         IExtensionAutoTamperHost host = new LoadedExtensionSet([new ScriptedAutoTamper()]);
 
         Assert.True(host.HasAnyRequestBeforeHandlers);

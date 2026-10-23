@@ -6,30 +6,15 @@ using Microsoft.Win32;
 namespace Violens.ProxyCore.SystemProxy;
 
 /// <summary>
-/// Registers VioLens as the current user's Windows system proxy, the same
-/// way Fiddler Classic's Start/Stop capture toggle does: writing the
-/// WinINET registry values under <c>...\Internet Settings</c> and
-/// broadcasting <c>INTERNET_OPTION_SETTINGS_CHANGED</c>/<c>_REFRESH</c> so
-/// already-running WinINET-aware processes (Internet Explorer, Chromium
-/// browsers via their own IE-proxy-config reader, .NET's default proxy
-/// resolution, and so on) pick it up immediately, no logoff required.
+/// Sets the current user's Windows proxy the way Fiddler Classic does:
+/// the WinINET registry values, then a settings-changed broadcast so running
+/// apps pick it up. The machine-wide WinHTTP proxy is left alone, which
+/// keeps services out of the capture.
 ///
-/// This only affects applications that consult that particular registry
-/// store in the first place -- a separate, machine-wide WinHTTP proxy store
-/// (configured via <c>netsh winhttp</c>, used by services and some system
-/// components) is deliberately left untouched, which is a large part of why
-/// this doesn't drag unrelated background processes through the proxy too.
-///
-/// The other half of the design is crash safety: <see cref="Enable"/>
-/// backs up whatever was there before to a small JSON file under the local
-/// app-data folder *before* overwriting anything, and <see cref="Disable"/>
-/// restores from it and deletes it. If VioLens's process dies before
-/// Disable ever runs -- a crash, a kill, Windows tearing it down without
-/// warning -- that backup file survives on disk. <see cref="RecoverFromCrash"/>
-/// is meant to be called once, early, on the next launch: finding the file
-/// still there is exactly the signal that the previous run never cleaned up
-/// after itself, so it restores from it before this run touches the
-/// registry at all.
+/// <see cref="Enable"/> backs up the previous settings to a file first and
+/// <see cref="Disable"/> restores and deletes it. A backup still there at
+/// launch means the last run crashed; <see cref="RecoverFromCrash"/>
+/// restores it.
 /// </summary>
 internal static class WinInetSystemProxy
 {
@@ -43,12 +28,8 @@ internal static class WinInetSystemProxy
         Path.Combine(ProxyEngine.Identity.ResolveDataFolder(), "system-proxy-backup.json");
 
     /// <summary>
-    /// Points the system proxy at <c>127.0.0.1:port</c>. A no-op on
-    /// anything but Windows. Safe to call more than once in a row without
-    /// an intervening <see cref="Disable"/> -- only the first call in such
-    /// a run writes a backup, so a second Enable (e.g. Start clicked twice
-    /// through some UI race) can never overwrite the real pre-VioLens
-    /// settings with VioLens's own.
+    /// Points the system proxy at <c>127.0.0.1:port</c>. Calling it twice
+    /// doesn't overwrite the first backup with VioLens's own settings.
     /// </summary>
     public static void Enable(int port)
     {
@@ -94,14 +75,11 @@ internal static class WinInetSystemProxy
     }
 
     /// <summary>
-    /// The proxy Windows is set to use right now, for VioLens to forward
-    /// through (see <see cref="Proxy.UpstreamProxy"/>). Call before
-    /// <see cref="Enable"/> replaces the setting with VioLens itself.
-    /// Ignores a setting that points at VioLens's own
-    /// <paramref name="ownPort"/>. With "Automatically detect settings" or
-    /// "Use setup script" on, returns a <see cref="Proxy.AutoConfig.ProxyAutoConfig"/>
-    /// that starts looking for and loading the script straight away, with
-    /// the manual proxy (if any) as its fallback, as Windows itself uses them.
+    /// The proxy Windows uses now, to forward through. Call before
+    /// <see cref="Enable"/>. A setting pointing at VioLens itself is ignored.
+    /// With automatic detection or a setup script on, returns a
+    /// <see cref="Proxy.AutoConfig.ProxyAutoConfig"/> that starts loading the
+    /// script, with any manual proxy as the fallback.
     /// </summary>
     public static UpstreamProxyDetection DetectUpstream(int ownPort)
     {
@@ -151,12 +129,9 @@ internal static class WinInetSystemProxy
     }
 
     /// <summary>
-    /// Restores whatever the system proxy was set to before <see cref="Enable"/>
-    /// last ran, and deletes the backup file. A no-op on anything but
-    /// Windows. If no backup file exists -- Disable called without a
-    /// matching Enable, or the file was already cleaned up -- the safe
-    /// fallback is just turning the proxy off, rather than risking it stay
-    /// pointed at a port nothing is listening on any more.
+    /// Restores the backed-up settings and deletes the backup. Without a
+    /// backup, turns the proxy off rather than leave it pointing at a dead
+    /// port.
     /// </summary>
     public static void Disable()
     {
@@ -204,14 +179,7 @@ internal static class WinInetSystemProxy
         DeleteBackupFile();
     }
 
-    /// <summary>
-    /// Call once, early, on every launch, before anything else in this
-    /// class runs. A leftover backup file is exactly the signature of a
-    /// previous run that never reached its own <see cref="Disable"/> call
-    /// -- this restores from it immediately. A clean previous shutdown
-    /// leaves no file behind, so an ordinary cold start is a cheap
-    /// <see cref="File.Exists(string)"/> check and nothing more.
-    /// </summary>
+    /// <summary>Call once at launch: restores a backup left by a run that didn't stop cleanly.</summary>
     public static void RecoverFromCrash()
     {
         if (!OperatingSystem.IsWindows() || !File.Exists(BackupFilePath))
@@ -222,13 +190,7 @@ internal static class WinInetSystemProxy
         Disable();
     }
 
-    // Neither of these has its own OperatingSystem.IsWindows() guard --
-    // the platform-compatibility analyzer only recognizes that pattern
-    // within the guarded method itself, and both of these are private
-    // helpers only ever reached from Enable/Disable, which already guard
-    // before calling them. [SupportedOSPlatform] here is what tells the
-    // analyzer these two are Windows-only by contract instead, which is
-    // enough for it to stop warning at those (already-guarded) call sites.
+    // Only called from guarded methods; the attribute tells the analyzer so.
     [SupportedOSPlatform("windows")]
     private static WinInetConnectionOptions.Settings? TryReadConnectionOptions()
     {
@@ -247,13 +209,7 @@ internal static class WinInetSystemProxy
         Registry.CurrentUser.OpenSubKey(InternetSettingsKeyPath, writable: true)
             ?? throw new InvalidOperationException($"Could not open registry key '{InternetSettingsKeyPath}'.");
 
-    /// <summary>
-    /// Internal rather than private purely so
-    /// <c>Violens.ProxyCore.Tests.WinInetSystemProxyTests</c> can exercise
-    /// this one pure, no-registry-touching piece of the class directly --
-    /// see that test file's remarks on why the rest of this class isn't
-    /// unit-tested the same way.
-    /// </summary>
+    /// <summary>Internal for tests.</summary>
     internal static string MergeBypassList(string? existing)
     {
         if (string.IsNullOrEmpty(existing))
@@ -293,11 +249,8 @@ internal static class WinInetSystemProxy
         }
         catch
         {
-            // A corrupt or partially-written backup file is exactly the
-            // kind of thing a crash could leave behind. Treating it as "no
-            // backup" falls through to Disable's safe fallback (turn the
-            // proxy off) instead of throwing during what's meant to be
-            // cleanup.
+            // A crash can leave a corrupt backup; treat it as none, so Disable
+            // turns the proxy off instead of throwing.
             return null;
         }
     }
@@ -316,10 +269,8 @@ internal static class WinInetSystemProxy
         }
         catch
         {
-            // Best-effort -- a leftover (harmless, still-deletable) file
-            // here just means the next RecoverFromCrash re-applies the
-            // same restore it already just performed. Not worth failing
-            // Disable over.
+            // Best effort: a leftover file just means the same restore runs again
+            // next launch.
         }
     }
 
@@ -329,29 +280,13 @@ internal static class WinInetSystemProxy
         InternetSetOption(0, InternetOptionRefresh, 0, 0);
     }
 
-    // EntryPoint pinned explicitly: wininet.dll exports InternetSetOptionA
-    // and InternetSetOptionW, not a plain "InternetSetOption" symbol --
-    // classic DllImport marshaling resolves that automatically when
-    // ExactSpelling is left false, but naming the real W export directly
-    // removes any doubt. No strings actually cross this boundary (every
-    // argument here is 0/null), so A-vs-W has no behavioral effect either
-    // way; W is just the unambiguous choice. DllImport rather than the
-    // newer LibraryImport source generator specifically because
-    // LibraryImport's generated marshaling stub needs unsafe code, which
-    // would mean turning on AllowUnsafeBlocks for this whole project just
-    // for one P/Invoke that doesn't marshal anything unsafe in the first
-    // place.
+    // The W export named explicitly. DllImport rather than LibraryImport,
+    // which would need AllowUnsafeBlocks for the whole project.
     [DllImport("wininet.dll", EntryPoint = "InternetSetOptionW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool InternetSetOption(nint hInternet, int dwOption, nint lpBuffer, int dwBufferLength);
 
-    /// <summary>
-    /// Plain-property shape on purpose -- the safest one for
-    /// <see cref="JsonSerializer"/> to round-trip without depending on
-    /// constructor-parameter matching. Internal rather than private so
-    /// there's no question of System.Text.Json's default reflection-based
-    /// (de)serializer being able to see it.
-    /// </summary>
+    /// <summary>Settable properties, so System.Text.Json round-trips it simply.</summary>
     internal sealed class ProxyBackup
     {
         public bool ProxyEnable { get; set; }

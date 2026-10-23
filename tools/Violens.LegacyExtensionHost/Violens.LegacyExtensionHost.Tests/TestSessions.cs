@@ -4,15 +4,8 @@ using Violens.CompatShim;
 namespace Violens.LegacyExtensionHost.Tests;
 
 /// <summary>
-/// Builds well-formed synthetic <see cref="Session"/> instances for tests
-/// that exercise real extension behavior (not just loading). Deliberately
-/// gives every session a Content-Type on both request and response by
-/// default -- the confirmed-real gap this project found (a session
-/// genuinely missing Content-Type crashes <c>Differ.dll</c>'s own code,
-/// not this shim -- see the design doc's "Root cause found" entry) is a
-/// property of specific real captured traffic, not something a synthetic
-/// smoke-test session needs to reproduce to usefully check that an
-/// extension's hooks run without throwing.
+/// Well-formed synthetic sessions, with a Content-Type on both sides
+/// (Differ.dll crashes without one, which isn't what these tests check).
 /// </summary>
 internal static class TestSessions
 {

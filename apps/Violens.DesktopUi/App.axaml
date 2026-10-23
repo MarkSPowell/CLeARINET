@@ -4,13 +4,7 @@
              RequestedThemeVariant="Dark">
   <Application.Resources>
     <ResourceDictionary>
-      <!-- Overriding FluentTheme's accent keys is how the built-in Button /
-           CheckBox / DataGrid-selection / focus-ring styling picks up
-           VioLens's cyan instead of stock Fluent blue, without having to
-           hand-write ControlThemes for every control that reads them. The
-           three Light/Dark steps are FluentTheme's own convention (hover,
-           pressed, disabled states); values here are just even steps
-           lightened/darkened from the base accent below. -->
+      <!-- Fluent's accent keys, so built-in controls use VioLens's cyan. -->
       <Color x:Key="SystemAccentColor">#2DD4E8</Color>
       <Color x:Key="SystemAccentColorLight1">#5EE2F0</Color>
       <Color x:Key="SystemAccentColorLight2">#8CEBF5</Color>
@@ -19,11 +13,7 @@
       <Color x:Key="SystemAccentColorDark2">#1897A8</Color>
       <Color x:Key="SystemAccentColorDark3">#0E7685</Color>
 
-      <!-- App-specific brushes for the panels/borders/text FluentTheme's
-           accent system doesn't drive on its own, used directly in
-           MainWindow.axaml, matching the dark navy + cyan look of
-           violens.webp so the splash screen and the window it hands off
-           to feel like the same app. -->
+      <!-- Panel, border and text colours matching the splash screen. -->
       <SolidColorBrush x:Key="AppBackgroundBrush" Color="#0B0E1A" />
       <SolidColorBrush x:Key="AppPanelBrush" Color="#131826" />
       <SolidColorBrush x:Key="AppBorderBrush" Color="#232A3D" />

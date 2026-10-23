@@ -1,10 +1,4 @@
 using System.Runtime.CompilerServices;
 
-// Lets Violens.LegacyExtensionHost.Tests exercise SessionBridgeServer/
-// SessionBridgeRunner/SessionMapping directly -- these stay `internal`
-// (genuine implementation details of this host, not part of any public
-// surface either the CompatShim or another project needs) rather than
-// widened to `public` just so tests can reach them. See
-// SessionBridgeRunnerTests and SessionBridgeServerTests for what this
-// enables.
+// The tests use the bridge's internal classes.
 [assembly: InternalsVisibleTo("Violens.LegacyExtensionHost.Tests")]

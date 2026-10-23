@@ -4,13 +4,8 @@ using Xunit;
 namespace Violens.Compatibility.Tests;
 
 /// <summary>
-/// Pure string-in, data-out tests against <see cref="FiddlerScriptDirectiveScanner"/>
-/// directly -- no Jint, no <see cref="FiddlerScriptHost"/>, the same
-/// "test the transform in isolation" posture <c>FiddlerScriptPreprocessorTests</c>
-/// already takes for the sibling regex pass this one runs alongside. Every
-/// snippet here is original, written for this test suite -- not copied from
-/// any real <c>CustomRules.js</c> or cookbook sample, matching this
-/// project's clean-room policy.
+/// <see cref="FiddlerScriptDirectiveScanner"/> on its own, string in, data
+/// out. Every snippet is original.
 /// </summary>
 public class FiddlerScriptDirectiveScannerTests
 {
@@ -117,9 +112,7 @@ public class FiddlerScriptDirectiveScannerTests
         Assert.Equal("violens.example.spoofExample", binding.PrefName);
         Assert.Equal(FieldValueKind.Boolean, binding.Kind);
 
-        // Also still scanned as a RulesOption -- one field, two attributes,
-        // two descriptors (see BindPrefBinding's own remarks on this being
-        // the shape that actually round-trips end to end).
+        // Also a RulesOption: one field, two attributes, two descriptors.
         Assert.Single(directives.RulesMenuOptions);
     }
 
@@ -198,11 +191,8 @@ public class FiddlerScriptDirectiveScannerTests
     [Fact]
     public void AnAttributeNotImmediatelyAboveADeclarationIsNotScanned()
     {
-        // A comment (or blank line) wedged between the attribute and its
-        // declaration is a documented gap -- see this scanner's own
-        // remarks. The script still loads and runs fine either way
-        // (FiddlerScriptPreprocessor strips the attribute regardless); it
-        // just doesn't get a Rules-menu entry.
+        // A comment between the attribute and its declaration isn't supported
+        // (see the scanner's remarks): no menu entry, but the script still loads.
         const string script = """
             class Handlers {
                 [RulesOption("Spoof &Example Header")]

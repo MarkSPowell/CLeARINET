@@ -1,21 +1,12 @@
-// VioLens FiddlerScript smoke test -- a small, standalone way to see the
-// Jint-based FiddlerScript engine (Violens.Compatibility.FiddlerScript)
-// actually do something, without needing your own CustomRules.js or
-// InterceptingProxyListener wired up yet (that wiring doesn't exist yet --
-// see the FiddlerScript Compatibility Design doc's "Phase A2").
-//
-// This tool doesn't touch the network at all: it builds a synthetic
-// request and response entirely in memory, runs a script's
-// OnBeforeRequest/OnBeforeResponse against them, and prints what changed.
-// Throwaway tooling, same spirit as Violens.DevHost -- not a preview of
-// product UI or CLI.
+// FiddlerScript demo: runs a script's OnBeforeRequest/OnBeforeResponse
+// against a made-up request and response in memory, and prints what
+// changed. No network.
 //
 // Usage:
 //   dotnet run --project tools\Violens.FiddlerScriptDemo
-//     Runs the bundled SampleCustomRules.js (an original demo script
-//     written for this tool -- see that file's own header comment).
+//     Runs the bundled SampleCustomRules.js.
 //   dotnet run --project tools\Violens.FiddlerScriptDemo -- path\to\CustomRules.js
-//     Runs a script of your own instead.
+//     Runs your own script.
 
 using Violens.Compatibility.FiddlerScript;
 using Violens.ProxyCore.Http;
@@ -52,11 +43,7 @@ Console.WriteLine($"  Defines OnBeforeResponse:         {host.HasHandler("OnBefo
 Console.WriteLine($"  Defines OnPeekAtResponseHeaders:  {host.HasHandler("OnPeekAtResponseHeaders")}");
 Console.WriteLine();
 
-// A made-up request -- nothing about this came off a real wire. Deliberately
-// shaped to trip the bundled sample script's "slow-endpoint" check; if
-// you're running your own script instead, this is a reasonable generic
-// request to react to, but feel free to edit it to match what your script
-// actually looks for.
+// Made up to trigger the sample script's "slow-endpoint" rule.
 var request = new CapturedRequest(
     "GET",
     "/api/slow-endpoint?id=42",
@@ -146,12 +133,7 @@ static void PrintExchangeResponseState(Exchange exchange)
 
 static void PrintFlags(Exchange exchange)
 {
-    // oFlags/the indexer only expose "does this name have a value", not
-    // "list every name that's been set" -- real Fiddler's own oFlags has
-    // the same shape (see ExchangeFlags's own remarks). Checking a fixed
-    // list of the flag names this demo's sample script and the cookbook
-    // patterns it's modeled on actually use is the pragmatic way to show
-    // what changed without needing a full enumerable flags bag.
+    // Flags can't be listed, so check the names the sample script uses.
     string[] flagNames = ["ui-color", "ui-customcolumn", "ui-hide", "ui-bold", "x-breakrequest", "x-breakresponse"];
     foreach (var name in flagNames)
     {

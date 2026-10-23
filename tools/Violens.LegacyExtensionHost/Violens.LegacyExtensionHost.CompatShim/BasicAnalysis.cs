@@ -4,19 +4,15 @@ using System.Text;
 namespace Violens.CompatShim;
 
 /// <summary>
-/// metadata: <c>Fiddler.BasicAnalysis.static string ComputeBasicStatistics(
-/// Fiddler.Session[], bool, ref System.Collections.Generic.Dictionary`2&lt;string, long&gt;, ref long)</c>
-/// -- Differ. Parameter/return semantics beyond the confirmed types
-/// (presumably: sessions to analyze, some grouping flag, an
-/// out-by-convention breakdown dictionary, an out-by-convention total) are
-/// a reasonable reading of the shape, not confirmed from metadata alone.
+/// <c>ComputeBasicStatistics(Session[], bool, ref Dictionary&lt;string, long&gt;, ref long)</c>,
+/// used by Differ. Only the signature is known; the meaning of each
+/// parameter is a guess.
 /// </summary>
 public static class BasicAnalysis
 {
     public static string ComputeBasicStatistics(Session[] sessions, bool groupByHost, ref Dictionary<string, long> breakdown, ref long total)
     {
-        // Diagnostic only -- see this class's own visibility note in the
-        // design doc while chasing the Differ.dll NullReferenceException.
+        // Diagnostic only.
         FiddlerApplication.Log.LogFormat(
             "BasicAnalysis.ComputeBasicStatistics: called with {0} session(s), groupByHost={1}.",
             new object[] { sessions?.Length ?? -1, groupByHost });

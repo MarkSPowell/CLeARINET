@@ -2,19 +2,7 @@ using Violens.Extensibility.Inspection.Inspectors;
 
 namespace Violens.Extensibility.Inspection;
 
-/// <summary>
-/// Holds the inspectors available to inspect with and picks the ones
-/// applicable to a given context, in display order.
-///
-/// Only first-party, in-process inspectors for now. Loading third-party
-/// inspector plugins from an Inspectors folder into isolated
-/// <c>AssemblyLoadContext</c>s -- the way Fiddler Classic's "Extension
-/// loading" worked -- is Beta-tier (see the Fiddler Feature Inventory
-/// doc's Extensibility table and the project plan's Milestones), not part
-/// of this MVP slice. <see cref="IInspector"/> itself is written so that
-/// extending this registry to also discover and load external assemblies
-/// later doesn't require changing the interface -- only this class.
-/// </summary>
+/// <summary>The available inspectors; picks the ones that apply to a context, in display order.</summary>
 public sealed class InspectorRegistry
 {
     private readonly List<IInspector> _inspectors;
@@ -26,17 +14,7 @@ public sealed class InspectorRegistry
 
     public static InspectorRegistry CreateDefault() => CreateDefault(additional: null);
 
-    /// <summary>
-    /// Same three built-ins as the parameterless overload, plus whatever
-    /// <paramref name="additional"/> inspectors a caller has on hand --
-    /// exactly the seam this class's own remarks anticipated for loading
-    /// third-party inspectors later. Used by <c>Violens.DesktopUi.ViewModels.MainWindowViewModel</c>
-    /// to fold in <c>Violens.Compatibility.Extensions.Inspector2Adapter</c>-wrapped
-    /// compiled-extension inspectors, discovered separately by
-    /// <c>Violens.Compatibility.Extensions.ExtensionHost</c> -- this class
-    /// itself stays unaware of extensions, .NET assemblies, or
-    /// <c>AssemblyLoadContext</c> entirely, only of <see cref="IInspector"/>.
-    /// </summary>
+    /// <summary>The built-in inspectors plus <paramref name="additional"/> ones, such as extensions' inspectors.</summary>
     public static InspectorRegistry CreateDefault(IEnumerable<IInspector>? additional)
     {
         IInspector[] builtins =

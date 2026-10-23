@@ -5,12 +5,9 @@ using Violens.ProxyCore.Http;
 namespace Violens.ProxyCore.Proxy;
 
 /// <summary>
-/// The page the listener serves about itself -- the equivalent of
-/// Fiddler Classic's "echo service" page -- so a phone or another computer
-/// using VioLens as its proxy can download and install the root
-/// certificate: browse to <c>http://violens/</c> (with the proxy set) or
-/// <c>http://&lt;this computer's address&gt;:&lt;port&gt;/</c>. The host
-/// name, file name and wording come from <see cref="ProxyEngine.Identity"/>.
+/// The proxy's own page, like Fiddler Classic's echo page, where a phone or
+/// another computer downloads the root certificate (<c>http://violens/</c>
+/// through the proxy, or this computer's address and port).
 /// </summary>
 internal static class ProxyHomePage
 {

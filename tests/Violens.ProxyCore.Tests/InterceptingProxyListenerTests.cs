@@ -51,13 +51,8 @@ public class InterceptingProxyListenerTests
 
     private static int ReserveAndReleaseAFreePort()
     {
-        // Ask the OS for a free port, then let it go immediately -- the
-        // same "port 0" trick StartOnAvailablePort itself uses for its
-        // fallback. There's an inherent, accepted race between releasing
-        // it here and the test binding it again a moment later, but that's
-        // the standard way to get an assuredly-free ephemeral port to test
-        // against without hardcoding one that might collide on a shared
-        // CI machine.
+        // Get a free port from the OS and release it. Something could take it
+        // before the test binds it, but that's the usual trade-off.
         using var probe = new TcpListener(IPAddress.Loopback, 0);
         probe.Start();
         var port = ((IPEndPoint)probe.LocalEndpoint).Port;
@@ -67,12 +62,7 @@ public class InterceptingProxyListenerTests
 
     private static LeafCertificateProvider CreateLeafProvider()
     {
-        // Deliberately not disposed: LeafCertificateProvider just holds
-        // this reference, and disposing it here (the way single-test
-        // helpers elsewhere do with a local `using`) would leave that
-        // reference pointing at a disposed certificate for the rest of
-        // this provider's lifetime -- harmless for these tests, which
-        // never sign a leaf, but a landmine for whoever extends them next.
+        // Not disposed: the provider keeps using it.
         var notBefore = DateTimeOffset.UtcNow.AddDays(-1);
         var root = CertificateAuthority.GenerateRoot(notBefore, notBefore.AddYears(5));
         return new LeafCertificateProvider(root);

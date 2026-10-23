@@ -1,31 +1,15 @@
 name: Release macOS Installer
 
-# The macOS counterpart to release-windows.yml: publishes a self-contained
-# osx-arm64 build of the desktop app, assembles it into a real VioLens.app
-# bundle and packages that into a .dmg (installer/macos/build-installer.sh
-# does the actual assembly -- there's no macOS equivalent of Inno Setup to
-# hand this off to), and attaches that .dmg to the GitHub Release for the
-# pushed tag. Separate from release-windows.yml for the same reason that
-# one is separate from ci.yml: this only runs on an actual version tag (or
-# by hand), and its whole job is producing a release artifact, not
-# verifying the code -- ci.yml's own macos-latest leg already does that.
+# The macOS counterpart of release-windows.yml: publishes a self-contained
+# osx-arm64 build, packages it as a .dmg with
+# installer/macos/build-installer.sh, and attaches it to the GitHub Release
+# for the pushed tag. ci.yml already tests on macOS.
 #
-# Three deliberate scope decisions here, all made with the repo owner
-# rather than assumed -- see the Project Plan doc's own "macOS release
-# pipeline" update paragraph for the full reasoning behind each:
-#   - Unsigned. No Apple Developer account was available to wire up
-#     signing/notarization with. Gatekeeper will warn on first launch;
-#     see build-installer.sh's own header remarks for exactly what that
-#     means and the one open question it leaves (whether a real Mac
-#     refuses to launch this at all, as "damaged," rather than just
-#     warning -- genuinely unconfirmed).
-#   - .dmg, not a bare .zip of the .app -- the standard drag-to-
-#     Applications Mac install experience.
-#   - arm64 only, no Intel/universal build.
+#   - Ad-hoc signed, not notarized (see build-installer.sh).
+#   - A .dmg, for the usual drag-to-Applications install.
+#   - arm64 only.
 #
-# Also runnable by hand (workflow_dispatch) for a test build without
-# cutting a real tag/Release -- see release-windows.yml's own remarks on
-# this, which apply here unchanged.
+# Can also be run by hand (workflow_dispatch) for a test build.
 
 on:
   push:
@@ -54,9 +38,7 @@ jobs:
       - name: Determine version
         id: version
         run: |
-          # A tag push always wins over the workflow_dispatch input -- see
-          # release-windows.yml's own remarks on this, which apply
-          # unchanged here.
+          # A tag push wins over the manual input.
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             version="${GITHUB_REF#refs/tags/v}"
           else
@@ -66,28 +48,15 @@ jobs:
             fi
           fi
 
-          # Strip a leading v/V if one snuck in -- most commonly from a
-          # manual workflow_dispatch run where someone typed the version
-          # the same way a real tag names it ("v0.1.1-preview.1"), which
-          # is a very natural thing to type but not valid SemVer for
-          # -p:Version/CFBundleShortVersionString. The tag-push branch
-          # above already strips this from the ref itself, but stripping
-          # it again here too (a harmless no-op there) keeps this one
-          # rule in one place instead of splitting it across both
-          # branches.
+          # Drop a leading "v", in case one was typed into the manual input.
           version="${version#v}"
           version="${version#V}"
 
           echo "Building installer version $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-          # A separate, strictly-numeric X.X.X.X derivative of the version
-          # above, for the two places downstream that can't take a
-          # prerelease suffix like "-preview.1" at all: dotnet publish's
-          # own AssemblyVersion/FileVersion and build-installer.sh's own
-          # CFBundleVersion -- see release-windows.yml's own remarks on
-          # this, which apply unchanged here, just for CFBundleVersion
-          # instead of Inno Setup's VersionInfoVersion.
+          # A numeric X.X.X.X form for AssemblyVersion/FileVersion and
+          # CFBundleVersion, which reject "-preview.1".
           versionCore="${version%%-*}"
           IFS='.' read -r -a parts <<< "$versionCore"
           while [[ ${#parts[@]} -lt 4 ]]; do
@@ -105,15 +74,8 @@ jobs:
       - name: Restore
         run: dotnet restore VioLens.sln
 
-      # Self-contained, single-file, arm64 only -- see this workflow's own
-      # header remarks on the arm64-only decision. Publishing only the
-      # desktop app project, not the whole solution, matches
-      # release-windows.yml's own reasoning (DevHost/FiddlerScriptDemo/
-      # SampleExtension and the test projects are developer-only tools).
-      # No legacy extension host build here: that tool is net48-only
-      # (Windows Forms, .NET Framework), so it has nothing to contribute
-      # to a macOS build -- see its own README's "Windows-only by nature"
-      # remarks.
+      # Self-contained, single-file, arm64. Only the desktop app is published.
+      # The legacy extension host is Windows-only, so it isn't built here.
       - name: Publish self-contained osx-arm64 build
         run: >-
           dotnet publish apps/Violens.DesktopUi/Violens.DesktopUi.csproj
@@ -153,8 +115,7 @@ jobs:
           path: installer/Output/VioLens-*-macos-arm64.dmg
           if-no-files-found: error
 
-      # Only on a real tag push -- see release-windows.yml's own remarks
-      # on this, which apply unchanged here.
+      # Only for a tag push.
       - name: Attach installer to the GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

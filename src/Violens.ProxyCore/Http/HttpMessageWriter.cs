@@ -4,31 +4,10 @@ using System.Text;
 namespace Violens.ProxyCore.Http;
 
 /// <summary>
-/// Serializes a <see cref="CapturedRequest"/>/<see cref="CapturedResponse"/>
-/// back onto the wire (or into a byte array). Extracted out of
-/// Violens.Sessions.SazWriter, which had this exact header-rebuilding
-/// logic for its own reasons (a SAZ file needs a plain HTTP/1.x message per
-/// entry, not the original wire framing);
-/// <c>Violens.ProxyCore.Proxy.InterceptingProxyListener</c> needs the
-/// identical rebuild for a different reason -- see
-/// <see cref="Http1MessageReader"/>'s remarks on why messages are read and
-/// re-serialized as two separate steps now instead of relayed live.
-///
-/// Always rebuilds Content-Length from the body actually being sent and
-/// always drops Transfer-Encoding, regardless of what the original message
-/// (or a breakpoint edit) claimed: the body here is already fully decoded,
-/// so there's no chunked framing left to preserve, and trusting a
-/// possibly-stale or hand-edited Content-Length is exactly the kind of
-/// thing that produces a message the receiving side hangs on.
-///
-/// That rebuild only makes sense once the whole body is already known,
-/// though -- exactly the case <see cref="Http1MessageReader.RelayBodyAsync"/>
-/// exists to avoid for an exchange nothing is going to pause. For that
-/// path, <see cref="WriteRequestPreambleAsync"/>/<see cref="WriteResponsePreambleAsync"/>
-/// write the original headers through completely unchanged (original
-/// Content-Length or Transfer-Encoding: chunked, whichever it was), since
-/// the body bytes that follow are about to be relayed with that exact same
-/// original framing, not rebuilt.
+/// Writes a request or response. Content-Length is rebuilt from the body and
+/// Transfer-Encoding dropped, since the body is already decoded and may have
+/// been edited. The preamble methods write headers unchanged, for bodies
+/// relayed with their original framing.
 /// </summary>
 internal static class HttpMessageWriter
 {
@@ -45,16 +24,13 @@ internal static class HttpMessageWriter
         destination.WriteAsync(BuildResponseBytes(response), cancellationToken).AsTask();
 
     /// <summary>
-    /// Writes a request's start line and headers exactly as given -- no
-    /// Content-Length/Transfer-Encoding rewriting. Only meaningful paired
-    /// with <see cref="Http1MessageReader.RelayBodyAsync"/> immediately
-    /// after: this only writes what the preamble claims, so whatever body
-    /// framing it declares has to be honored by whatever's sent next.
+    /// Writes the request line and headers unchanged. The body that follows
+    /// must use the framing they declare.
     /// </summary>
     public static Task WriteRequestPreambleAsync(Stream destination, CapturedRequest request, CancellationToken cancellationToken) =>
         WritePreambleAsync(destination, $"{request.Method} {request.Target} {request.HttpVersion}", request.Headers, cancellationToken);
 
-    /// <summary>Same idea as <see cref="WriteRequestPreambleAsync"/>, for the response stage.</summary>
+    /// <summary>Writes the status line and headers unchanged.</summary>
     public static Task WriteResponsePreambleAsync(Stream destination, CapturedResponse response, CancellationToken cancellationToken)
     {
         var reason = string.IsNullOrEmpty(response.ReasonPhrase) ? string.Empty : $" {response.ReasonPhrase}";

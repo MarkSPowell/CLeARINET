@@ -6,13 +6,8 @@ using Violens.Compatibility.Extensions;
 namespace Violens.DesktopUi;
 
 /// <summary>
-/// Asks which format File &gt; Import/Export via Extension should use when
-/// the loaded extensions offer more than one. Closes with the chosen
-/// <see cref="FormatChoice"/>, or null if cancelled. Shown by
-/// <c>App.axaml.cs</c> on behalf of <see cref="ViewModels.MainWindowViewModel"/>,
-/// which never references this window directly -- the same pattern as
-/// <see cref="MacTrustConfirmationWindow"/>. Avalonia, so it looks and
-/// behaves the same on Windows and macOS.
+/// Asks which format Import/Export via Extension should use when there's
+/// more than one. Closes with the choice, or null if cancelled.
 /// </summary>
 public partial class FormatPickerWindow : Window
 {

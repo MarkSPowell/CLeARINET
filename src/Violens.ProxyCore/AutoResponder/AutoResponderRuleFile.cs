@@ -4,12 +4,8 @@ using System.Text.Json.Serialization;
 namespace Violens.ProxyCore.AutoResponder;
 
 /// <summary>
-/// Saves AutoResponder rules between runs, in their own file
-/// (<c>autoresponder-rules.json</c> in VioLens's app-data folder) rather
-/// than the preferences file -- see the Preferences Design doc. Each rule's
-/// match, action and own enabled checkbox are kept, in order. The
-/// AutoResponder's on/off switch deliberately isn't: it always starts off,
-/// for the reason the design doc gives.
+/// Saves AutoResponder rules between runs in <c>autoresponder-rules.json</c>.
+/// The on/off switch isn't saved; the AutoResponder always starts off.
 /// </summary>
 internal static class AutoResponderRuleFile
 {
@@ -24,15 +20,13 @@ internal static class AutoResponderRuleFile
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
 
-    /// <summary><c>autoresponder-rules.json</c> in the host app's data folder (<see cref="ProxyHostIdentity.ResolveDataFolder"/>).</summary>
+    /// <summary><c>autoresponder-rules.json</c> in the host's data folder.</summary>
     public static string DefaultPath => Path.Combine(ProxyEngine.Identity.ResolveDataFolder(), FileName);
 
     /// <summary>
-    /// Reads the rules saved at <paramref name="path"/>: none when there's
-    /// no file yet. A file that can't be read is set aside as
-    /// <c>autoresponder-rules.json.unreadable</c> (so the next save doesn't
-    /// overwrite rules someone may want back) and <paramref name="error"/>
-    /// says why; the result is then empty.
+    /// Reads saved rules (none if there's no file). An unreadable file is
+    /// renamed to <c>.unreadable</c> so the next save doesn't overwrite it, and
+    /// <paramref name="error"/> says why.
     /// </summary>
     public static IReadOnlyList<AutoResponderRule> Load(string path, out string? error)
     {
@@ -78,10 +72,7 @@ internal static class AutoResponderRuleFile
         }
     }
 
-    /// <summary>
-    /// Writes <paramref name="rules"/> to <paramref name="path"/>, replacing
-    /// the file in one step so a crash mid-write can't leave half a file.
-    /// </summary>
+    /// <summary>Writes the rules, replacing the file in one step.</summary>
     public static void Save(string path, IEnumerable<AutoResponderRule> rules)
     {
         var saved = new SavedRules

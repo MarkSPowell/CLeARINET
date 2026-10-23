@@ -1,27 +1,10 @@
 namespace Violens.Compatibility.FiddlerScript;
 
 /// <summary>
-/// Fiddler's <c>FiddlerObject</c> helper, global to every script (not
-/// per-exchange, unlike <see cref="Exchange"/>) -- named <c>AppObject</c>
-/// here for the same reason <see cref="Exchange"/> isn't called
-/// <c>Session</c>: it's what <c>ericlaw1979/Clearinet</c>'s own sample
-/// script already calls it (<c>AppObject.ReloadScript()</c>,
-/// <c>AppObject.StatusText</c>, <c>AppObject.Log.LogString()</c>), and
-/// nothing in script text needs to spell the .NET type name for this to
-/// work -- a script just references a global named <c>FiddlerObject</c> or
-/// <c>AppObject</c>, whichever <see cref="FiddlerScriptHost"/> binds it as
-/// (both, in fact -- see that class's remarks).
-///
-/// Deliberately thin for this first pass: only what's cheap to implement
-/// host-side without any UI or networking dependency. <see cref="prompt"/>
-/// and <c>utilIssueRequest</c> (Fiddler's own way to have a script issue a
-/// brand-new HTTP request, e.g. for the "Crawl Sequential URLs"/"Find Page
-/// Containing Search String" cookbook patterns) need a modal-dialog host
-/// and an outbound HTTP client respectively, neither of which this phase
-/// wires up -- both throw <see cref="NotSupportedException"/> rather than
-/// silently no-op, so a script relying on either fails loudly instead of
-/// behaving as if the prompt were always cancelled or the request always
-/// failed.
+/// Fiddler's <c>FiddlerObject</c>, global to every script; scripts can use
+/// either name. <see cref="prompt"/> and <c>utilIssueRequest</c> aren't
+/// implemented and throw <see cref="NotSupportedException"/>, so scripts
+/// that need them fail visibly.
 /// </summary>
 public sealed class AppObject
 {
@@ -51,7 +34,7 @@ public sealed class AppObject
     /// <summary>Fiddler's <c>FiddlerObject.ReloadScript()</c> -- invokes whatever the host passed as its reload callback; a no-op if none was given.</summary>
     public void ReloadScript() => _reloadScript();
 
-    /// <summary>Fiddler's <c>FiddlerObject.prompt(sMessage, sDefault)</c> -- see this type's own remarks on why this isn't implemented yet.</summary>
+    /// <summary>Fiddler's <c>FiddlerObject.prompt</c>. Not implemented.</summary>
     public string prompt(string message, string? defaultValue = null) =>
         throw new NotSupportedException("FiddlerObject.prompt() isn't implemented yet -- see AppObject's own remarks.");
 }

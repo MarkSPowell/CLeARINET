@@ -1,16 +1,6 @@
 namespace Violens.ProxyCore.SystemProxy;
 
-/// <summary>
-/// Thrown when a shelled-out <c>networksetup</c> invocation (the macOS half
-/// of system proxy registration; nothing on Windows throws this, since
-/// <see cref="WinInetSystemProxy"/> talks to the registry directly with no
-/// subprocess involved) exits non-zero. Carries the exit code and captured
-/// stderr rather than just a generic message, matching
-/// <c>Certificates.CertificateTrustException</c>'s own shape for the
-/// equivalent situation on the Keychain side -- see that class's remarks for
-/// why this project surfaces shelled-out command failures rather than
-/// swallowing them.
-/// </summary>
+/// <summary>A <c>networksetup</c> command failed (macOS); carries its exit code and stderr.</summary>
 public sealed class SystemProxyCommandException : Exception
 {
     public int ExitCode { get; }

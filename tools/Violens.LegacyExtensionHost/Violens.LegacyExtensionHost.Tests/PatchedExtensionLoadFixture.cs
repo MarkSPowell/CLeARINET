@@ -5,12 +5,7 @@ using Xunit;
 
 namespace Violens.LegacyExtensionHost.Tests;
 
-/// <summary>
-/// Same shape and sequencing as <see cref="RealExtensionLoadFixture"/> --
-/// see that class's own remarks for why setup runs once per test run, on a
-/// dedicated STA thread -- pointed at <see cref="PatchedExtensionEnvironment"/>
-/// instead of the fixed five real samples.
-/// </summary>
+/// <summary>As <see cref="RealExtensionLoadFixture"/>, for <see cref="PatchedExtensionEnvironment"/>.</summary>
 public sealed class PatchedExtensionLoadFixture
 {
     public bool IsAvailable { get; }

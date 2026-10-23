@@ -53,11 +53,8 @@ public class HttpMessageTextTests
     [Fact]
     public void TryParseRequest_FailsOnAMalformedStartLine()
     {
-        // Fewer than the two spaces a "METHOD /target HTTP/1.1" line needs
-        // -- Split(' ', 3) can't even produce three parts from this, unlike
-        // (deliberately, to match Http1MessageReader's own leniency about
-        // what appears inside the target or version token) a line with
-        // enough spaces but nonsense content.
+        // Too few spaces to split into method, target and version. (A line with
+        // enough spaces but nonsense words parses, like Http1MessageReader.)
         var ok = HttpMessageText.TryParseRequest("malformed\r\nHost: h\r\n\r\n", out var request, out var error);
 
         Assert.False(ok);

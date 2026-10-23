@@ -11,11 +11,7 @@ namespace Violens.DesktopUi;
 
 public partial class App : Application
 {
-    // How long violens.webp's splash stays up before MainWindow takes
-    // over. There's no real startup work to wait on (MainWindowViewModel's
-    // constructor doesn't touch the network or disk), so this is purely a
-    // deliberate beat -- long enough to register as a splash screen, short
-    // enough not to feel like a delay.
+    // No startup work to wait on; just long enough to register as a splash.
     private static readonly TimeSpan SplashDuration = TimeSpan.FromMilliseconds(1600);
 
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
@@ -27,10 +23,8 @@ public partial class App : Application
             var splash = new SplashWindow();
             splash.Show();
 
-            // Fire-and-forget is deliberate: OnFrameworkInitializationCompleted
-            // has to return for Avalonia's own message loop to start pumping,
-            // which is what makes the splash window actually paint. Nothing
-            // here can be awaited from this method.
+            // Not awaited: this method has to return before Avalonia's message loop
+            // runs and the splash can paint.
             _ = ShowMainWindowAfterSplashAsync(desktop, splash);
         }
 
@@ -42,53 +36,31 @@ public partial class App : Application
     {
         await Task.Delay(SplashDuration);
 
-        // Forward-declared and assigned below, rather than the other way
-        // around: MainWindowViewModel's constructor needs a
-        // confirmMacOSCertificateTrust callback that can own a
-        // MacTrustConfirmationWindow by the real MainWindow (so it centers
-        // and blocks correctly), but MainWindow itself can't be
-        // constructed until after the view model that becomes its
-        // DataContext exists. The lambda captures this local by reference,
-        // not by value, so it sees the real MainWindow once the assignment
-        // a few lines down runs -- and since the callback is only ever
-        // invoked later, from MainWindowViewModel.Start() after the user
-        // clicks Start (well after mainWindow.Show() below), it's never
-        // actually called while still null. See the Interception
-        // Certificate Design doc's "silent-install tension" section and
-        // MacTrustConfirmationWindow's own remarks for why this dialog
-        // exists at all.
+        // Declared before the view model, which needs callbacks that own dialogs
+        // by the main window. They only run after the user clicks Start, by
+        // which time this is set.
         MainWindow? mainWindow = null;
 
         var viewModel = new MainWindowViewModel(
-            // Awaited, never blocked on: the dialog needs the UI thread
-            // to run, so waiting for it on the UI thread would freeze the
-            // app (as it did on a Mac's first Start).
+            // Awaited, never blocked on: the dialog needs the UI thread.
             confirmMacOSCertificateTrust: () =>
                 new MacTrustConfirmationWindow().ShowDialog<bool>(mainWindow!),
-            // Import/Export via Extension's format picker. Awaited, not
-            // blocked on: the view model's command handlers are async, so
-            // this runs as an ordinary modal dialog on the UI thread.
+            // Import/Export via Extension's format picker.
             chooseFormat: (heading, choices, rememberedKey) =>
                 new FormatPickerWindow(heading, choices, rememberedKey)
                     .ShowDialog<Violens.Compatibility.Extensions.FormatChoice?>(mainWindow!));
 
         mainWindow = new MainWindow { DataContext = viewModel };
 
-        // The two compatibility-layer hooks that need a real window: a
-        // ported extension asking the user for a file
-        // (Utilities.ObtainOpenFilename) or telling them something
-        // (FiddlerApplication.DoNotifyUser). Both use Avalonia, so they
-        // behave the same on Windows and macOS. The VM already set the
-        // preferences and log hooks.
+        // Compatibility-layer hooks that need a window: asking for a file
+        // (Utilities.ObtainOpenFilename) and notifying the user
+        // (FiddlerApplication.DoNotifyUser).
         var owner = mainWindow;
         CompatShimHost.PromptForOpenFile = (title, filter) => PromptForOpenFile(owner, title, filter);
         CompatShimHost.NotifyUser = (message, title) =>
             Dispatcher.UIThread.Post(() => viewModel.ShowExtensionNotice(title, message));
 
-        // The proxy listener and its TcpListener socket need an explicit
-        // Stop() -- there's no window "closed" event that would run this
-        // for us for free, so it's wired up here rather than left to
-        // finalization.
+        // The listener's socket needs an explicit Stop().
         desktop.ShutdownRequested += (_, _) => viewModel.Dispose();
 
         desktop.MainWindow = mainWindow;

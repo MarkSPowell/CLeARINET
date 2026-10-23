@@ -20,11 +20,10 @@ namespace Violens.ProxyCore.Proxy;
 public static class ComposerClient
 {
     /// <summary>
-    /// Works out where a composed request goes. <paramref name="request"/> is
-    /// as typed: its target may be an absolute http:// or https:// URL, or a
-    /// path with a Host header (sent as HTTPS). Returns the URL and the request to send (path-only
-    /// target, Host header matching the URL), or false with an
-    /// <paramref name="error"/> a person can act on.
+    /// Works out where a composed request goes. The target may be an absolute
+    /// URL, or a path with a Host header (sent as HTTPS). Returns the URL and a
+    /// request with a path-only target, or false with an
+    /// <paramref name="error"/>.
     /// </summary>
     public static bool TryResolve(CapturedRequest request, out Uri? url, out CapturedRequest? toSend, out string? error)
     {

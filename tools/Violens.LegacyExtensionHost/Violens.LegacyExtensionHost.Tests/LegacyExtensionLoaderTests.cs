@@ -52,19 +52,11 @@ public sealed class SelfContainedLoaderTests
 }
 
 /// <summary>
-/// Exercises <see cref="LegacyExtensionLoader"/> against the five real,
-/// UNMODIFIED extension DLLs (skipped gracefully when they aren't present
-/// locally -- see <see cref="RealExtensionEnvironment"/>). Since the
-/// design doc's "Don't get sued" decision, this shim's own assembly
-/// identity is deliberately no longer named `Fiddler` (see
-/// <see cref="AssemblyMismatch"/>), so every one of these five -- all
-/// compiled against the real `Fiddler` assembly -- is now EXPECTED to be
-/// reported as a mismatch rather than loaded. That's the thing these tests
-/// actually lock in: not "these five load clean" (that milestone belonged
-/// to the retired approach -- see <see cref="PatchedExtensionTests"/> for
-/// its replacement), but "an unmodified real extension is detected and
-/// explained clearly, never silently ignored or left to a confusing CLR
-/// exception."
+/// The five real, unmodified sample DLLs (skipped when not present; see
+/// <see cref="RealExtensionEnvironment"/>). They're built against the
+/// <c>Fiddler</c> assembly, which this shim isn't, so each should be
+/// reported as a mismatch with a clear explanation, not loaded. See
+/// <see cref="PatchedExtensionTests"/> for loading retargeted ones.
 /// </summary>
 [Collection(RealExtensionsCollection.Name)]
 public sealed class RealExtensionLoadingTests
@@ -86,10 +78,7 @@ public sealed class RealExtensionLoadingTests
             return;
         }
 
-        // Confirmed on Mark's machine: all five real samples' own metadata
-        // references assembly "Fiddler" (RequiredVersion 2.4.2.5 across the
-        // board -- see the design doc's version-spread finding), which no
-        // longer matches this host's own compat assembly identity.
+        // All five reference assembly "Fiddler" (RequiredVersion 2.4.2.5).
         Assert.Equal(5, _fixture.Loader.AssemblyMismatches.Count);
         Assert.All(_fixture.Loader.AssemblyMismatches, m => Assert.Equal("Fiddler", m.ExpectedAssemblyName));
 
@@ -109,10 +98,7 @@ public sealed class RealExtensionLoadingTests
             return;
         }
 
-        // Nothing here was ever run through Assembly.LoadFrom (see
-        // LegacyExtensionLoader.LoadOne's own remarks) -- a mismatched
-        // extension is detected and stopped before that point, so none of
-        // these should have anything in them.
+        // Mismatches are caught before Assembly.LoadFrom, so nothing loads.
         Assert.Empty(_fixture.Loader.FiddlerExtensions);
         Assert.Empty(_fixture.Loader.AutoTampers);
         Assert.Empty(_fixture.Loader.ExecActionHandlers);
@@ -128,20 +114,10 @@ public sealed class RealExtensionLoadingTests
             return;
         }
 
-        // Not just "detected" -- the whole point of building this instead
-        // of just letting the CLR's own bind failure happen is that the
-        // message actually tells a technical user (or the extension's own
-        // author) what to do about it. Loosely worded assertions on
-        // purpose (not pinning the exact sentence), since the message text
-        // itself isn't the regression-sensitive part -- these specific
-        // pieces of information being present is.
-        //
-        // The message deliberately stops at "recompile against this host's
-        // own assembly" and does NOT walk a reader through retargeting a
-        // compiled third-party binary's own metadata (see
-        // AssemblyMismatch.ToDiagnosticMessage's own remarks, and Mark's
-        // liability/professionalism call on this) -- so this also locks in
-        // that omission as intentional, not just checks what's present.
+        // The message must say what to do, so check for its key pieces (not
+        // the exact wording). It stops at "recompile against this host's
+        // assembly" and deliberately doesn't explain how to patch someone
+        // else's binary, so check that too.
         foreach (var mismatch in _fixture.Loader.AssemblyMismatches)
         {
             var message = mismatch.ToDiagnosticMessage();

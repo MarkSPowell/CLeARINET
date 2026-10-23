@@ -4,51 +4,30 @@ using Violens.ProxyCore.Http;
 namespace Violens.ProxyCore.Sessions;
 
 /// <summary>
-/// A small text query language for narrowing a session list -- closer to
-/// Chrome DevTools' Network-panel filter box than to Fiddler Classic's
-/// QuickExec (whose single-character sigils like <c>@host</c>/<c>=200</c>/
-/// <c>&gt;1000</c> read as unfamiliar shorthand rather than something a
-/// user already knows). This lives in <c>Violens.ProxyCore</c> rather
-/// than the desktop app so every host application (tenet 4) gets the same
-/// query behavior for free instead of reimplementing it against its own
-/// session list.
-///
-/// Grammar: space-separated tokens, ANDed together. A double-quoted run
-/// (anywhere inside a token, not just wrapping the whole thing) is taken
-/// literally, including any whitespace inside it, so
-/// <c>host:"my site" status:200</c> is two tokens, not three.
+/// The session filter's query language, modelled on Chrome DevTools'
+/// Network filter rather than QuickExec's sigils. Space-separated tokens are
+/// ANDed; double quotes keep spaces in a value (<c>host:"my site"</c>).
 /// <list type="bullet">
-/// <item><description>plain text -- substring match (case-insensitive)
-/// against the request URL, or any request/response header's name or
-/// value. Deliberately never searches body content: that can be large and
-/// -- per <see cref="CapturedRequest"/>/<see cref="CapturedResponse"/>'s
-/// Body -- is whatever encoding the wire actually used, not decoded text
-/// (see <c>Violens.Extensibility.Inspection.Inspectors.RawTextInspector</c>
-/// for where that decoding happens, on demand, for one selected session).</description></item>
-/// <item><description><c>method:GET</c> -- exact match against the
-/// request method; <c>method:GET,POST</c> matches either (OR within the
-/// token, same as Chrome DevTools' comma-separated values).</description></item>
-/// <item><description><c>host:example.com</c> -- substring match
-/// (case-insensitive) against <see cref="Session.Host"/>.</description></item>
-/// <item><description><c>status:200</c> (exact), <c>status:4xx</c> (status
-/// class), <c>status:&gt;=400</c> / <c>status:&lt;500</c> / <c>status:&gt;400</c> /
-/// <c>status:&lt;=499</c> (comparison), <c>status:400-499</c> (inclusive
-/// range). A <c>status:</c> value that parses as none of these matches no
-/// session -- a typo should read as "no results", not silently as "no
-/// filter".</description></item>
+/// <item><description>plain text: case-insensitive substring of the URL or any header name
+/// or value. Bodies aren't searched (that's what Find is for).</description></item>
+/// <item><description><c>method:GET</c>, or <c>method:GET,POST</c> for either.</description></item>
+/// <item><description><c>host:example.com</c>: substring of <see cref="Session.Host"/>.</description></item>
+/// <item><description><c>status:200</c>, <c>status:4xx</c>, <c>status:&gt;=400</c> (also
+/// <c>&gt;</c>, <c>&lt;</c>, <c>&lt;=</c>) or <c>status:400-499</c>. An unreadable value
+/// matches nothing, so a typo shows no results rather than everything.</description></item>
 /// </list>
-/// An empty or whitespace-only query matches every session.
+/// An empty query matches every session.
 /// </summary>
 internal sealed class SessionQuery
 {
-    /// <summary>The parsed form of an empty query -- matches everything, and is what <see cref="Parse"/> returns for one.</summary>
+    /// <summary>The empty query, which matches everything.</summary>
     public static readonly SessionQuery MatchAll = new([]);
 
     private readonly IReadOnlyList<Func<Session, bool>> _predicates;
 
     private SessionQuery(IReadOnlyList<Func<Session, bool>> predicates) => _predicates = predicates;
 
-    /// <summary>Whether this is <see cref="MatchAll"/> in substance (parsed from empty/whitespace text).</summary>
+    /// <summary>Whether the query was empty.</summary>
     public bool IsEmpty => _predicates.Count == 0;
 
     public bool Matches(Session session)
@@ -76,13 +55,8 @@ internal sealed class SessionQuery
     }
 
     /// <summary>
-    /// Splits on whitespace, except inside a double-quoted run -- which can
-    /// start and end mid-token (<c>host:"my site"</c> is one token whose
-    /// quotes are simply removed, not "host:\"my" split from "site\"").
-    /// An unterminated quote runs to the end of the text rather than
-    /// throwing; there's nothing a caller could usefully do to correct it
-    /// mid-keystroke anyway, and a live filter box gets re-parsed on every
-    /// change as the user keeps typing.
+    /// Splits on whitespace outside double quotes, which may start mid-token.
+    /// An unclosed quote runs to the end, since the user may still be typing.
     /// </summary>
     private static List<string> Tokenize(string text)
     {
@@ -146,9 +120,7 @@ internal sealed class SessionQuery
             }
         }
 
-        // Not a recognized "key:value" token (no colon, colon at the very
-        // start/end, or an unrecognized key like a URL's "http:") -- fall
-        // back to matching the token as free text, whole, colon included.
+        // Not a known key:value token (a URL's "http:", say): match it as text.
         return FreeTextPredicate(token);
     }
 
@@ -217,9 +189,7 @@ internal sealed class SessionQuery
             return session => session.Response.StatusCode == exact;
         }
 
-        // Unparseable -- match nothing, so "status:abc" reads as "no
-        // results, check your filter" instead of silently behaving like no
-        // filter was applied at all.
+        // Unreadable: match nothing.
         return _ => false;
     }
 }

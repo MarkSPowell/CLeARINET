@@ -3,16 +3,9 @@ using System;
 namespace Violens.LegacyExtensionHost;
 
 /// <summary>
-/// Reports that a scanned extension `.dll`'s own metadata references an
-/// assembly it expects to be able to bind to (by the project's own
-/// convention, always named literally "Fiddler" for a real Fiddler
-/// Classic extension -- see <see cref="FiddlerAssemblyReferenceInspector"/>)
-/// that doesn't match this host's own compat assembly identity
-/// (<c>Violens.CompatShim</c>, not <c>Fiddler</c> -- see the design doc's
-/// "Don't get sued" decision for why). Surfaced instead of just letting the
-/// CLR's own bind failure happen and produce a generic
-/// <see cref="System.IO.FileNotFoundException"/>-flavored message deep
-/// inside a stack trace.
+/// An extension DLL that references the <c>Fiddler</c> assembly, which this
+/// host's shim (<c>Violens.CompatShim</c>) isn't. Reported plainly rather
+/// than left to a confusing CLR bind error.
 /// </summary>
 public sealed class AssemblyMismatch
 {
@@ -41,20 +34,10 @@ public sealed class AssemblyMismatch
     public Version ActualAssemblyVersion { get; }
 
     /// <summary>
-    /// A complete, human-readable explanation of what's wrong and why --
-    /// deliberately restrained about what to do next. States the one
-    /// remediation this host actually stands behind (recompiling against
-    /// this host's own compatibility assembly, for whoever holds the
-    /// extension's source) and stops there, rather than walking a reader
-    /// through retargeting a compiled third-party binary's own metadata
-    /// (the earlier version of this message did, e.g. naming
-    /// <c>ildasm</c>/<c>ilasm</c>/dnSpy directly) -- see the VioLens
-    /// .NET Extension Compatibility Design doc's "Don't get sued" decision,
-    /// which this message exists to reflect: the whole point of dropping
-    /// this host's assembly identity was to stop presenting itself as the
-    /// genuine Fiddler assembly, and a diagnostic that then hands out
-    /// step-by-step instructions for making a third-party binary bind to
-    /// it anyway sits uncomfortably close to undoing that on its own.
+    /// Explains the problem and the fix we support: recompiling against this
+    /// host's assembly. It deliberately doesn't explain how to patch someone
+    /// else's binary, which would undo the point of not calling ourselves
+    /// Fiddler.
     /// </summary>
     public string ToDiagnosticMessage() =>
         $"{FileName}: this extension expects an assembly named \"{ExpectedAssemblyName}\" " +

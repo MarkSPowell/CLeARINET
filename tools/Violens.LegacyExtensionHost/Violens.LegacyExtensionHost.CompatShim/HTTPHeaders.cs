@@ -5,15 +5,9 @@ using System.Text;
 namespace Violens.CompatShim;
 
 /// <summary>
-/// Base class for <see cref="HTTPRequestHeaders"/>/<see cref="HTTPResponseHeaders"/>.
-/// Members confirmed by metadata across the five samples inspected for this
-/// shim: <c>ExistsAndContains(string,string)</c> (AustralianImages,
-/// ContentBlock, JSFormat), indexer get/set (ContentBlock, JSFormat), and
-/// <c>Exists(string)</c> (ContentBlock). Backed by a simple ordered,
-/// case-insensitive name/value store -- real Fiddler's own internal storage
-/// shape is not reproduced here (unknown, and irrelevant to binary
-/// compatibility, which only depends on the public member signatures these
-/// extensions actually call).
+/// Base of the request and response header classes: <c>ExistsAndContains</c>,
+/// the indexer and <c>Exists</c>, as the samples use them. An ordered,
+/// case-insensitive list underneath.
 /// </summary>
 public class HTTPHeaders
 {
@@ -29,14 +23,7 @@ public class HTTPHeaders
     /// <summary>metadata: <c>Fiddler.HTTPHeaders.bool Exists(string)</c> -- ContentBlock.</summary>
     public bool Exists(string headerName) => this[headerName] != null;
 
-    /// <summary>
-    /// metadata: <c>get_Item(string)</c>/<c>set_Item(string, string)</c> --
-    /// ContentBlock, JSFormat. Confirmed against real Fiddler's own public
-    /// API documentation: the getter returns <c>null</c>, not an empty
-    /// string, when the header doesn't exist -- this matches that, so a
-    /// caller not null-checking a missing header's own bug, not a
-    /// divergence from real Fiddler here.
-    /// </summary>
+    /// <summary>Returns null for a missing header, as Fiddler's documentation says.</summary>
     public string this[string headerName]
     {
         get
@@ -49,13 +36,8 @@ public class HTTPHeaders
                 }
             }
 
-            // Diagnostic only -- doesn't change behavior (still returns
-            // null, matching real Fiddler). Added while chasing a real
-            // NullReferenceException inside Differ.dll's own code with no
-            // shim-method frames in the stack: a caller dereferencing a
-            // null header value straight off this indexer would look
-            // exactly like that, and this makes the last such miss before
-            // a crash visible on the Log tab without reading Differ's IL.
+            // Diagnostic only: makes a null that a caller then dereferences visible
+            // on the Log tab.
             FiddlerApplication.Log.LogFormat("HTTPHeaders[\"{0}\"]: not found, returning null.", new object[] { headerName });
             return null;
         }
@@ -73,17 +55,7 @@ public class HTTPHeaders
         }
     }
 
-    /// <summary>
-    /// Not part of the binary-compatibility surface either (no sample's
-    /// metadata calls anything with this shape) -- added for the session
-    /// bridge (see the design doc's "Session bridge" section): projecting a
-    /// <see cref="Session"/> back into a <c>WireRequest</c>/<c>WireResponse</c>
-    /// after an extension's <c>IAutoTamper</c> hook has possibly added,
-    /// changed, or left alone any header needs a way to read the whole
-    /// current set back out, which the name-keyed indexer above can't do by
-    /// itself. Returns the same ordered pairs <see cref="ToString"/> already
-    /// renders, just structured instead of formatted.
-    /// </summary>
+    /// <summary>Every header in order, for sending sessions back over the bridge.</summary>
     public IReadOnlyList<KeyValuePair<string, string>> AllHeaders => _headers;
 
     /// <summary>

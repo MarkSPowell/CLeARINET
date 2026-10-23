@@ -8,15 +8,8 @@ using Violens.ProxyCore.Sessions;
 namespace Violens.DesktopUi.Models;
 
 /// <summary>
-/// A UI-friendly, already-formatted projection of a captured <see cref="Session"/>
-/// for display in the session list. Deliberately not the domain type itself:
-/// the list binds to plain strings/ints it can show as-is, and formatting
-/// choices (time zone, byte units) live here rather than leaking into
-/// <see cref="Session"/>, which other consumers (SazWriter, inspectors)
-/// need untouched. <see cref="Session"/> is still carried along -- not
-/// projected into strings -- because the detail pane's inspectors need the
-/// real headers and body bytes once a row is selected, not their grid
-/// display text.
+/// A session formatted for the session list. Keeps the <see cref="Session"/>
+/// itself for the inspectors.
 /// </summary>
 public sealed class SessionRow
 {
@@ -32,17 +25,8 @@ public sealed class SessionRow
     public required Session Session { get; init; }
 
     /// <summary>
-    /// One entry per <c>[BindUIColumn]</c> method the loaded script (if any)
-    /// declared at the moment this row was built, keyed by
-    /// <see cref="UIColumnDescriptor.ColumnTitle"/> -- what
-    /// <c>MainWindow.axaml.cs</c>'s dynamically-added
-    /// <c>DataGridTextColumn</c>s bind to via an indexer
-    /// (<c>{Binding ScriptColumns[Title]}</c>). Computed once, here, at row
-    /// creation -- a session added before a script (re)loaded a new column,
-    /// or before one was removed, keeps whatever this dictionary held at
-    /// capture time rather than being recomputed retroactively; see
-    /// <see cref="From"/>'s own remarks on why that's an accepted,
-    /// documented simplification rather than a hidden gap.
+    /// Values for script-defined columns, keyed by title. Computed once when the
+    /// row is built; reloading a script doesn't update existing rows.
     /// </summary>
     public required IReadOnlyDictionary<string, string> ScriptColumns { get; init; }
 
@@ -74,16 +58,8 @@ public sealed class SessionRow
     private static readonly IBrush HeavyBloatForeground = new ImmutableSolidColorBrush(Colors.Black);
 
     /// <param name="scriptRunner">
-    /// The currently-loaded FiddlerScript's own runner, if any -- when it
-    /// declares one or more <c>[BindUIColumn]</c> methods,
-    /// <see cref="ScriptColumns"/> is computed against THIS session right
-    /// now, once. <see langword="null"/> (or a runner with no loaded script,
-    /// or no <c>BindUIColumn</c> methods) leaves <see cref="ScriptColumns"/>
-    /// empty -- there's deliberately no "recompute every row when the
-    /// script reloads" pass; a script that adds/changes a custom column
-    /// only affects sessions captured from that point on, the same way
-    /// changing <c>OnBeforeResponse</c> logic doesn't retroactively re-edit
-    /// already-captured responses either.
+    /// When the loaded script has <c>[BindUIColumn]</c> methods, they're run
+    /// against this session to fill <see cref="ScriptColumns"/>.
     /// </param>
     public static SessionRow From(Session session, FiddlerScriptRunner? scriptRunner = null)
     {
@@ -97,8 +73,6 @@ public sealed class SessionRow
         return new SessionRow
         {
             Id = session.Id,
-            // Local time: this is a desktop app showing what just happened on
-            // this machine, not a log file where UTC would matter more.
             Time = session.StartedAt.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture),
             StatusCode = session.Response.StatusCode,
             Method = session.Request.Method,

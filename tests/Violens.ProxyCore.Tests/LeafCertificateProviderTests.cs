@@ -94,15 +94,9 @@ public class LeafCertificateProviderTests
     [Fact]
     public async Task GetCertificateFor_ConcurrentCallsForANewHostShareOneSigningOperation()
     {
-        // Simulates what a browser's burst of parallel preconnects to a
-        // brand-new host looks like: many callers racing GetCertificateFor
-        // before anything is cached yet. CreateLeaf generates a fresh key
-        // and a fresh CNG-backed certificate every time it runs, so if the
-        // race isn't handled, this comes back with several distinct
-        // certificate instances instead of everyone sharing one -- which is
-        // exactly the bug behind the intermittent "unknown error processing
-        // the certificate" failures reproduced against real, bursty browser
-        // traffic.
+        // A browser's burst of parallel connections to a new host. Without
+        // single-flight signing each caller gets its own certificate, which is
+        // what caused the intermittent handshake failures.
         var rootNotBefore = DateTimeOffset.UtcNow.AddDays(-1);
         using var root = CertificateAuthority.GenerateRoot(rootNotBefore, rootNotBefore.AddYears(5));
         var provider = new LeafCertificateProvider(root);
@@ -118,12 +112,8 @@ public class LeafCertificateProviderTests
     [Fact]
     public void GetCertificateFor_CachesByHost()
     {
-        // GetCertificateFor backdates its leaf's notBefore by 5 minutes
-        // for clock-skew tolerance, so the root here needs a wider margin
-        // than the other tests' -1 minute -- otherwise the leaf's
-        // notBefore can land earlier than the issuer's own notBefore,
-        // exactly like production's real root (backdated a full day) is
-        // never at risk of.
+        // Leaves are backdated five minutes, so the root needs a wider margin
+        // than the other tests' one minute.
         var rootNotBefore = DateTimeOffset.UtcNow.AddDays(-1);
         using var root = CertificateAuthority.GenerateRoot(rootNotBefore, rootNotBefore.AddYears(5));
 

@@ -5,32 +5,14 @@ using ZstdSharp;
 namespace Violens.ProxyCore.Http;
 
 /// <summary>
-/// Undoes a message body's Content-Encoding and turns it into text: shared
-/// by the inspectors (Raw, JSON, WebForms, ImageView) and by HAR export,
-/// which both need the body as the application sees it rather than as it
-/// crossed the wire.
-///
-/// Handles every Content-Encoding actually seen on the modern web: gzip
-/// (and its rare "x-gzip" alias), deflate, br (Brotli, via .NET's own
-/// System.IO.Compression), and zstd (via ZstdSharp.Port, a pure managed
-/// port -- .NET doesn't ship a built-in zstd decoder until .NET 11). "deflate"
-/// is decoded as zlib-wrapped data (RFC 1950) first, falling back to raw
-/// DEFLATE (RFC 1951), since both exist in the wild under that one name. A
-/// Content-Encoding header can list more than one coding applied in
-/// sequence (RFC 9110 section 8.4, e.g. "gzip, br"); those are undone in
-/// reverse, most recently applied first.
-///
-/// A few codings are recognized by name but never decoded -- see
-/// <see cref="KnownUnsupportedEncodings"/> for which and why. Anything else
-/// unrecognized is treated as undeclared and passed through as-is.
+/// Undoes Content-Encoding and decodes text, for the inspectors and HAR
+/// export. Handles gzip, deflate (zlib or raw), br and zstd (ZstdSharp,
+/// until .NET 11 has one), and stacked codings such as "gzip, br", undone in
+/// reverse. Unknown codings pass through unchanged.
 /// </summary>
 public static class ContentDecoder
 {
-    /// <summary>
-    /// Content-Encoding tokens recognized by name but never decoded, each
-    /// paired with the reason a user sees if they hit one. Checked
-    /// case-insensitively.
-    /// </summary>
+    /// <summary>Codings recognised but not decoded, with the reason shown to the user.</summary>
     private static readonly IReadOnlyDictionary<string, string> KnownUnsupportedEncodings =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -182,9 +164,7 @@ public static class ContentDecoder
         }
         catch (Exception ex)
         {
-            // Deliberately broad: ZstdSharp doesn't document a closed set of
-            // exception types for malformed input. Most likely causes: the
-            // body claims an encoding it isn't in, or it's truncated.
+            // ZstdSharp doesn't document which exceptions bad input throws.
             output = input;
             error = $"Couldn't decompress the body as \"{token}\": {ex.Message}";
             return false;

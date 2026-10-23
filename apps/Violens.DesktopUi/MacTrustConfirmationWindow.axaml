@@ -10,16 +10,8 @@
         Icon="avares://Violens.DesktopUi/Assets/violens-icon.png"
         Background="{DynamicResource AppBackgroundBrush}">
 
-  <!-- No bindings, no DataContext, same reasoning as AboutWindow.axaml:
-       this dialog has exactly one job (get an explicit yes/no before
-       CertificateAuthority ever touches the login keychain on macOS) and
-       nothing here is state that changes while it's open. See the
-       Interception Certificate Design doc's "silent-install tension"
-       section for why this dialog exists at all. On Windows, adding to
-       CurrentUser\Root is what triggers the OS's own install-certificate
-       prompt; `security add-trusted-cert` on macOS has no equivalent, so
-       this dialog is what keeps that same "never silent" guarantee, as
-       VioLens's own doing rather than the OS's. -->
+  <!-- macOS's security add-trusted-cert has no prompt of its own, so VioLens
+       asks here before touching the login keychain. -->
   <StackPanel Margin="24" Spacing="4">
     <TextBlock Text="Install VioLens's root certificate?"
                FontSize="16"

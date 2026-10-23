@@ -10,52 +10,14 @@ using System.Xml.Linq;
 namespace Violens.CompatShim;
 
 /// <summary>
-/// Real .saz (Fiddler Session Archive Zip) read/write, replacing the earlier
-/// Phase 1 placeholder that <see cref="Utilities"/> used to implement
-/// directly (both members just returned empty/false). Unlike everything
-/// else in this shim, the .saz format itself is not something this
-/// project's clean-room policy had to stay away from: it's Fiddler's own
-/// long-published, generic archive format, documented independently of any
-/// of the five extension DLLs this project inspected (see the sources
-/// below) -- so implementing a real reader/writer for it doesn't touch that
-/// boundary at all, the way reading an extension's IL would.
-///
-/// <b>Format</b> (confirmed against public documentation -- fiddler.wikidot.com's
-/// "SAZ Files" page and Progress/Telerik's own Fiddler Everywhere docs --
-/// not by reading any extension's IL): a .saz file is a plain ZIP. Each
-/// captured session <c>N</c> is stored as up to three entries under a
-/// <c>raw/</c> folder: <c>raw/N_c.txt</c> (the raw client request, exact
-/// wire bytes), <c>raw/N_s.txt</c> (the raw server response, exact wire
-/// bytes), and <c>raw/N_m.xml</c> (metadata -- an outer
-/// <c>&lt;Session&gt;</c> element containing <c>&lt;SessionFlags&gt;</c>
-/// with one <c>&lt;SessionFlag N="..." V="..." /&gt;</c> per flag, and
-/// <c>&lt;SessionTimers&gt;</c>). An optional <c>_index.htm</c> (a
-/// human-readable session list, not parsed back in) and
-/// <c>[Content_Types.xml]</c> (Open Packaging Conventions metadata some
-/// tools expect) round out the archive; this writer emits minimal versions
-/// of both for compatibility. <c>raw/N_w.txt</c> (WebSocket messages) and
-/// <c>raw/N_g.txt</c> (gRPC messages) entries are recognized while scanning
-/// but not parsed into <see cref="Session"/> this pass.
-///
-/// <b>Not modeled yet:</b> <c>&lt;SessionTimers&gt;</c> is read past but
-/// discarded -- this shim's own <see cref="Session"/> type has no timing
-/// fields to put it in (a reasonable-effort call, not a confirmed decision
-/// about what real Fiddler extensions actually need from it).
-///
-/// <b>Known gap, deliberately not built this pass:</b> password-protected /
-/// encrypted .saz files. Real Fiddler supports both weak (fast) ZipCrypto
-/// and stronger AES-128/256 encryption for .saz archives (see
-/// <see cref="CONFIG.bUseAESForSAZ"/>, confirmed by metadata as a real
-/// member extensions reference) -- but .NET's built-in
-/// <see cref="ZipArchive"/>/<see cref="ZipFile"/> can neither read nor
-/// write encrypted ZIP entries, and hand-rolling real ZIP encryption is
-/// meaningfully riskier scope of its own (subtly wrong crypto is worse than
-/// no crypto) rather than something to guess at alongside everything else
-/// here. Both <see cref="Read"/> and <see cref="Write"/> below FAIL LOUDLY
-/// (throw <see cref="NotSupportedException"/>) when a password/encryption
-/// is requested or detected, rather than silently reading zero sessions or
-/// silently writing an unprotected file while reporting success -- the
-/// wrong failure mode for anything touching "should this be encrypted."
+/// Reads and writes .saz files, Fiddler's published archive format: a zip
+/// with <c>raw/N_c.txt</c> (request), <c>raw/N_s.txt</c> (response) and
+/// <c>raw/N_m.xml</c> (flags and timers) per session, plus
+/// <c>_index.htm</c> and <c>[Content_Types].xml</c>. WebSocket
+/// (<c>_w.txt</c>) and gRPC (<c>_g.txt</c>) entries are skipped, and timers
+/// aren't kept. Encrypted archives aren't supported (.NET's zip classes
+/// can't do zip encryption), so both directions throw rather than silently
+/// read nothing or write an unprotected file.
 /// </summary>
 internal static class SazArchive
 {
@@ -94,7 +56,7 @@ internal static class SazArchive
                     case 'c': set.Client = entry; break;
                     case 's': set.Server = entry; break;
                     case 'm': set.Metadata = entry; break;
-                    // 'w' (WebSocket) / 'g' (gRPC): recognized, not parsed this pass.
+                    // WebSocket and gRPC entries: skipped.
                 }
             }
 
@@ -131,12 +93,8 @@ internal static class SazArchive
         }
         catch (InvalidDataException ex)
         {
-            // .NET's ZipArchive throws here for a corrupt archive, and in
-            // practice also for one it can't decompress -- which is what a
-            // password-protected (ZipCrypto or AES) .saz looks like to it,
-            // since it doesn't understand either encryption scheme. Fail
-            // loudly and say so, rather than returning an empty array that
-            // looks identical to "this archive genuinely has zero sessions."
+            // A corrupt or encrypted archive both land here; say so rather than
+            // return no sessions.
             var message =
                 $"Couldn't read '{Path.GetFileName(filename)}' as a plain .saz (ZIP) archive -- if it's " +
                 "password-protected, encrypted .saz files aren't supported yet by this legacy host. See SazArchive's remarks.";
@@ -246,24 +204,9 @@ internal static class SazArchive
     }
 
     /// <summary>
-    /// Strips a leading UTF-8 byte-order-mark character if present before
-    /// returning -- <see cref="Encoding.UTF8"/>'s own <c>GetString</c>
-    /// decodes a BOM's bytes straight into a literal U+FEFF character
-    /// rather than skipping it (only stream-based readers like
-    /// <see cref="StreamReader"/>/<see cref="XmlReader"/> auto-detect and
-    /// skip a BOM; a plain byte-to-string decode doesn't). Matters here
-    /// specifically because <c>WriteMetadata</c> below writes its XML via
-    /// <see cref="XDocument"/>, which emits a BOM by default -- found via
-    /// this project's own <c>SazArchive</c> round-trip test, which caught
-    /// a synthetic session flag silently failing to come back (a stray
-    /// leading U+FEFF made <see cref="XDocument.Parse(string)"/> throw,
-    /// caught by <c>ParseMetadata</c>'s own try/catch and logged rather
-    /// than propagated, so every session flag on every session silently
-    /// vanished on read -- not just the one this test happened to check).
-    /// Fixed at both ends: <c>WriteMetadata</c> now writes without a BOM in
-    /// the first place, and this still strips one defensively, since a
-    /// real Fiddler-produced .saz's own metadata XML isn't guaranteed not
-    /// to have one either.
+    /// The entry as text, without a leading byte order mark, which
+    /// <c>GetString</c> would otherwise keep and <c>XDocument.Parse</c> rejects.
+    /// Fiddler's own archives may have one.
     /// </summary>
     private static string ReadEntryText(ZipArchiveEntry entry)
     {
@@ -357,13 +300,9 @@ internal static class SazArchive
     }
 
     /// <summary>
-    /// Best-effort only. Once Fiddler has tunneled/decrypted a connection,
-    /// nothing in the raw request line itself reliably says https vs. http
-    /// -- an absolute-form request target settles it outright; otherwise
-    /// this looks for an "https"-named session flag (a real, if unconfirmed,
-    /// pattern real Fiddler's own session flags follow for HTTPS sessions)
-    /// and defaults to "http" if neither is present. Not confirmed against
-    /// a real HTTPS-containing .saz sample.
+    /// An absolute request target settles it; otherwise an "https" flag means
+    /// HTTPS, and anything else is taken as HTTP. A guess, not checked against
+    /// a real HTTPS archive.
     /// </summary>
     private static string GuessScheme(Session session, string requestTarget)
     {
@@ -407,9 +346,7 @@ internal static class SazArchive
                     session[name] = value;
                 }
             }
-            // <SessionTimers> is recognized in the public format but not
-            // modeled by this shim's Session type this pass -- see this
-            // class's own remarks.
+            // Timers aren't kept.
         }
         catch (System.Xml.XmlException ex)
         {
@@ -532,14 +469,7 @@ internal static class SazArchive
 
         sessionElement.Add(flagsElement);
 
-        // Not XDocument.Save(stream) directly -- that overload writes a
-        // UTF-8 byte-order-mark by default, which ReadEntryText's own
-        // plain byte-to-string decode doesn't strip, which in turn made
-        // XDocument.Parse throw on read (caught and merely logged, not
-        // propagated) -- silently losing every session flag on every
-        // session. See ReadEntryText's own remarks for the full story;
-        // fixed at both ends, this side by writing without a BOM in the
-        // first place via an explicit BOM-less UTF8Encoding.
+        // Written without a byte order mark.
         var writerSettings = new XmlWriterSettings { Encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false) };
         using var xmlWriter = XmlWriter.Create(stream, writerSettings);
         new XDocument(new XDeclaration("1.0", "utf-8", null), sessionElement).Save(xmlWriter);
@@ -583,9 +513,7 @@ internal static class SazArchive
             return;
         }
 
-        // HTTPHeaders.ToString() already renders "Name: Value\r\n" per
-        // header (see that class's own remarks) -- reused here rather than
-        // duplicating that formatting.
+        // HTTPHeaders.ToString() already writes "Name: Value\r\n" lines.
         var text = headers.ToString();
         var bytes = HeaderEncoding.GetBytes(text);
         stream.Write(bytes, 0, bytes.Length);

@@ -6,39 +6,12 @@ using Violens.ProxyCore.Http;
 namespace Violens.Compatibility.Extensions;
 
 /// <summary>
-/// The main app's side of the session bridge (see the design doc's
-/// "Session bridge" section) -- an <see cref="IExtensionAutoTamperHost"/>
-/// that runs every loaded legacy extension's <c>Fiddler.IAutoTamper</c>
-/// hooks by calling out to a separately-running
-/// <c>Violens.LegacyExtensionHost.exe</c> process over a named pipe
-/// (<see cref="SessionBridgeProtocol"/>), rather than in-process the way
-/// <see cref="LoadedExtensionSet"/> runs compiled, source-compatible
-/// extensions.
-///
-/// <b>Never a hard dependency.</b> Nothing about running VioLens's main
-/// app, or proxying real traffic, requires the legacy host process to
-/// exist -- <see cref="Probe"/> is the only place this class ever tries to
-/// reach it, once per proxy <c>Start()</c> (see
-/// <c>MainWindowViewModel.Start</c>), with a short timeout
-/// (<see cref="SessionBridgeProtocol.ConnectTimeoutMilliseconds"/>); if
-/// that fails, every hook method below becomes an unconditional passthrough
-/// for the rest of that run, with no further connection attempts. That's a
-/// deliberate difference from <see cref="ExtensionHost"/>'s own
-/// "loaded once, at app startup, never reloaded" scope: probing fresh on
-/// every <c>Start()</c> click, rather than once at app launch, means
-/// launching the legacy host .exe *after* opening VioLens still works,
-/// the next time Start is clicked -- no restart of the main app required.
-///
-/// <b>One pipe connection per hook call, not one long-lived connection.</b>
-/// Simpler to reason about correctly than a persistent pipe shared across
-/// however many connections <see cref="Proxy.InterceptingProxyListener"/>
-/// may be juggling concurrently (no request/response correlation needed,
-/// no risk of one caller's bytes interleaving with another's on a stream
-/// two threads write to at once) -- see
-/// <c>SessionBridgeServer.InstanceCount</c> for the matching choice on the
-/// legacy host's own side. The cost is a fresh connect per call rather than
-/// a warm one; for local, same-machine named-pipe IPC this is small enough
-/// not to matter for interactively browsing through the proxy.
+/// Runs legacy extensions' <c>IAutoTamper</c> hooks in the separate
+/// <c>Violens.LegacyExtensionHost.exe</c> over a named pipe. Never required:
+/// <see cref="Probe"/> checks once per Start, with a short timeout, and if
+/// the host isn't there every hook passes traffic through unchanged. One
+/// pipe connection per call, which keeps concurrent connections from
+/// interleaving and is cheap on the same machine.
 /// </summary>
 public sealed class LegacyExtensionHostBridgeClient : IExtensionAutoTamperHost
 {
@@ -52,13 +25,8 @@ public sealed class LegacyExtensionHostBridgeClient : IExtensionAutoTamperHost
     }
 
     /// <summary>
-    /// Tries once, synchronously, to reach a running legacy host and asks
-    /// it how many <c>IAutoTamper</c> extensions it has loaded
-    /// (<see cref="BridgeMessageKind.Capabilities"/>). Always returns an
-    /// instance -- never throws -- so call sites don't need their own
-    /// try/catch; an unreachable host, or one with nothing loaded, just
-    /// means every hook below becomes a no-op passthrough (see this
-    /// class's own remarks).
+    /// Asks a running legacy host how many <c>IAutoTamper</c> extensions it has.
+    /// Never throws; if it's unreachable or has none, every hook passes through.
     /// </summary>
     public static LegacyExtensionHostBridgeClient Probe(Action<string>? log = null)
     {
@@ -83,17 +51,9 @@ public sealed class LegacyExtensionHostBridgeClient : IExtensionAutoTamperHost
     }
 
     /// <summary>
-    /// A cheaper, more literal reachability check than <see cref="Probe"/>:
-    /// "is anything at all listening on the session bridge pipe right now,"
-    /// with no opinion about how many (if any) <c>IAutoTamper</c> extensions
-    /// it has loaded. <see cref="Probe"/> deliberately treats a reachable
-    /// host with zero loaded AutoTampers the same as an unreachable one
-    /// (see its own remarks -- there's nothing useful to bridge either way),
-    /// which makes it the wrong check for <see cref="LegacyExtensionHostLauncher"/>'s
-    /// "should I spawn a second copy of the process" decision: a legacy
-    /// host that's genuinely running, just with no AutoTamper-implementing
-    /// extension dropped in yet, is still a process that already exists and
-    /// must not be duplicated.
+    /// Whether anything is listening on the pipe, whatever it has loaded. The
+    /// launcher uses this, since a host with no AutoTampers is still running
+    /// and mustn't be started twice.
     /// </summary>
     public static bool Ping(Action<string>? log = null)
     {
@@ -144,10 +104,7 @@ public sealed class LegacyExtensionHostBridgeClient : IExtensionAutoTamperHost
             Request = ToWire(request),
         };
 
-        // Result deliberately unused -- fire-and-observe, matching
-        // IExtensionAutoTamperHost.RunRequestAfter's own void contract (see
-        // that interface's remarks: by this point the request has already
-        // gone out over the wire, so nothing here can change what was sent).
+        // The request has already been sent; nothing to read back.
         Exchange(message, _log);
     }
 
@@ -193,18 +150,9 @@ public sealed class LegacyExtensionHostBridgeClient : IExtensionAutoTamperHost
     }
 
     /// <summary>
-    /// One full pipe round trip: connect (bounded by
-    /// <see cref="SessionBridgeProtocol.ConnectTimeoutMilliseconds"/>,
-    /// which <see cref="NamedPipeClientStream.Connect(int)"/> already
-    /// enforces on its own -- the common, cheap-to-detect "no legacy host
-    /// running" case), then write the request and read the response
-    /// (bounded by <see cref="SessionBridgeProtocol.RoundTripTimeoutMilliseconds"/>,
-    /// enforced here explicitly since <see cref="PipeStream"/>'s
-    /// synchronous Read/Write have no built-in timeout of their own).
-    /// Never throws -- every failure is caught, logged once, and reported
-    /// as <c>null</c> so every call site above can fail open (pass the
-    /// original, unmodified request/response through) rather than ever
-    /// breaking real browsing traffic over a legacy-extension problem.
+    /// One round trip: connect and exchange, each with a timeout. Never throws:
+    /// failures are logged and return null, so traffic passes through
+    /// unchanged.
     /// </summary>
     private static BridgeResponseMessage? Exchange(BridgeRequestMessage message, Action<string> log)
     {
@@ -223,12 +171,8 @@ public sealed class LegacyExtensionHostBridgeClient : IExtensionAutoTamperHost
 
             if (!exchangeTask.Wait(SessionBridgeProtocol.RoundTripTimeoutMilliseconds))
             {
-                // Tear the pipe down from this thread to force-unblock
-                // whatever synchronous Read/Write exchangeTask is still
-                // stuck in -- PipeStream gives a blocked synchronous call no
-                // other way to be cancelled. exchangeTask's own resulting
-                // exception, once it does unblock, is never observed; that's
-                // fine, this call has already decided to fail open.
+                // Disposing the pipe is the only way to unblock a synchronous
+                // Read/Write.
                 localPipe.Dispose();
                 throw new TimeoutException($"Session bridge round trip for {message.Kind} did not complete within {SessionBridgeProtocol.RoundTripTimeoutMilliseconds}ms.");
             }

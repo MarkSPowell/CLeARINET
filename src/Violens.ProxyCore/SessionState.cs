@@ -1,15 +1,8 @@
 namespace Violens.ProxyCore;
 
 /// <summary>
-/// The lifecycle states a captured session moves through as it is read from
-/// the client, optionally hand- or auto-tampered, sent to the server, and
-/// read back. Modeled after the state machine documented for Fiddler
-/// Classic's <c>Session.state</c> property, so that ported scripts and
-/// extensions relying on these names keep working.
-///
-/// See the "Extensibility and core API surface" section of the VioLens
-/// project plan for the source and reasoning; this is placeholder scaffolding
-/// for Phase 1, not the final session model.
+/// Session lifecycle states, named after Fiddler Classic's
+/// <c>Session.state</c> so ported scripts and extensions keep working.
 /// </summary>
 public enum SessionState
 {

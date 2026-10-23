@@ -2,7 +2,7 @@ using Violens.ProxyCore.Http;
 
 namespace Violens.Compatibility.FiddlerScript;
 
-/// <summary>Fiddler's <c>oSession.oResponse</c> -- see <see cref="Exchange"/>'s own remarks for the naming/mutability rationale shared by every type in this folder.</summary>
+/// <summary>Fiddler's <c>oSession.oResponse</c>.</summary>
 public sealed class ExchangeResponse
 {
     private ExchangeResponse(string httpVersion, int statusCode, string reasonPhrase, ExchangeHeaders headerCollection, byte[] body)
@@ -17,7 +17,7 @@ public sealed class ExchangeResponse
     public static ExchangeResponse From(CapturedResponse response) =>
         new(response.HttpVersion, response.StatusCode, response.ReasonPhrase, new ExchangeHeaders(response.Headers), response.Body);
 
-    /// <summary>Before any response exists yet -- see <see cref="Exchange.ForRequest"/>'s remarks on why <c>OnBeforeRequest</c> needs something non-null here even though real Fiddler wouldn't expect it to be read at that point either.</summary>
+    /// <summary>A placeholder for <c>OnBeforeRequest</c>, before there's a response.</summary>
     public static ExchangeResponse Empty => new(string.Empty, 0, string.Empty, new ExchangeHeaders([]), []);
 
     public string HttpVersion { get; set; }

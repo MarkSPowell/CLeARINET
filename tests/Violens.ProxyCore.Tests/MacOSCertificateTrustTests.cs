@@ -4,16 +4,8 @@ using Xunit;
 namespace Violens.ProxyCore.Tests;
 
 /// <summary>
-/// MacOSCertificateTrust.Install/Uninstall shell out to the real
-/// <c>security</c> CLI against the current user's actual login keychain --
-/// exactly the same reason WinInetSystemProxyTests only exercises
-/// WinInetSystemProxy.MergeBypassList and leaves the registry-touching
-/// methods to manual verification. There's no macOS machine available to
-/// this session to run the real commands against in the first place (see
-/// the Interception Certificate Design doc's "Testing scope, deliberately
-/// narrow" note), so this sticks to the same pure, no-subprocess shape:
-/// only the argument-building methods, which are plain string constructors
-/// with no OS interaction at all.
+/// Install and Uninstall run the real <c>security</c> command on the login
+/// keychain, so only the argument builders are tested here.
 /// </summary>
 public class MacOSCertificateTrustTests
 {

@@ -19,14 +19,8 @@ using Violens.ProxyCore.SystemProxy;
 namespace Violens.DesktopUi.ViewModels;
 
 /// <summary>
-/// Hosts the same proxy core Violens.DevHost's console spike proved out
-/// in Phase 1 (root CA, leaf certificate provider, session store,
-/// intercepting listener) and projects <see cref="SessionStore"/>'s live
-/// change feed into an <see cref="ObservableCollection{T}"/> the session
-/// grid binds to. Unlike the first cut of this app, the proxy no longer
-/// starts itself on launch -- Start/Stop are explicit commands, and the
-/// port is editable up until Start is pressed, so a taken port (or just a
-/// preference) doesn't require editing code and rebuilding.
+/// Owns the proxy core (root CA, session store, listener) and mirrors the
+/// session store into collections the UI binds to.
 /// </summary>
 public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 {
@@ -38,90 +32,40 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly Dictionary<PendingBreakpoint, PendingBreakpointViewModel> _pendingBreakpointViewModels = [];
     private readonly AutoResponderRules _autoResponderRules = new();
 
-    /// <summary>
-    /// One long-lived runner, same lifecycle reasoning as
-    /// <see cref="_breakpointManager"/>/<see cref="_autoResponderRules"/>
-    /// above -- constructed once here (the composition root) and handed to
-    /// <see cref="InterceptingProxyListener"/> as
-    /// <c>Violens.ProxyCore.Scripting.IScriptRunner</c> on every
-    /// <see cref="Start"/>. Its own <c>Load</c>/<c>Reload</c> can be called
-    /// at any time, including while the proxy is running, the same way
-    /// <see cref="AutoResponderRules.Rules"/> can already be edited live.
-    /// </summary>
+    /// <summary>Created once and handed to each listener on Start; scripts can be (re)loaded while running.</summary>
     private readonly FiddlerScriptRunner _fiddlerScriptRunner;
 
     /// <summary>
-    /// Unlike <see cref="_fiddlerScriptRunner"/>, loaded exactly once, in
-    /// this constructor, and never reloaded -- see <see cref="ExtensionHost"/>'s
-    /// own remarks on why compiled .NET extensions don't get FiddlerScript's
-    /// live-reload treatment. Its <see cref="ExtensionHost.AutoTampers"/> are
-    /// wrapped fresh (via <see cref="ExtensionHost.CreateAutoTamperHost"/>)
-    /// and handed to <see cref="InterceptingProxyListener"/> on every
-    /// <see cref="Start"/>, the same way <see cref="_fiddlerScriptRunner"/>
-    /// is; its inspectors are folded into <see cref="_inspectorRegistry"/>
-    /// once, below, since that registry itself is rebuilt fresh here rather
-    /// than mutated later.
+    /// Loaded once at startup and never reloaded, unlike FiddlerScript (see
+    /// <see cref="ExtensionHost"/>).
     /// </summary>
     private readonly ExtensionHost _extensionHost;
 
     /// <summary>
-    /// Manages the optional, opt-in launch/stop lifecycle of
-    /// <c>Violens.LegacyExtensionHost.exe</c> -- see
-    /// <see cref="AutoLaunchLegacyHost"/> for the opt-in gate, and
-    /// <see cref="LegacyExtensionHostLauncher"/>'s own remarks for why this
-    /// is opt-in rather than automatic. One instance for the app's whole
-    /// lifetime, the same reasoning as <see cref="_fiddlerScriptRunner"/>:
-    /// it needs to remember, across a <see cref="Stop"/> call, whether it
-    /// was the one that actually launched the process, so <see cref="Stop"/>
-    /// never closes a legacy host someone else started.
+    /// Lives for the whole run so <see cref="Stop"/> only closes a legacy host
+    /// this app launched, never one the user started.
     /// </summary>
     private readonly LegacyExtensionHostLauncher _legacyExtensionHostLauncher = new();
 
     /// <summary>
-    /// Only ever invoked on macOS, only once per <see cref="_authority"/>
-    /// (re-asked on a later <see cref="Start"/> click if declined, since
-    /// <see cref="_authority"/> stays null until it's accepted) --
-    /// see the design doc's "silent-install tension" section for why this
-    /// exists at all: unlike Windows' native trust-install dialog, the
-    /// shelled-out <c>security</c> command VioLens's own
-    /// <c>MacOSCertificateTrust</c> uses has no OS-level confirmation of
-    /// its own. Supplied by <c>App.axaml.cs</c> (a real modal dialog,
-    /// awaited, never blocked on: blocking the UI thread on a dialog that
-    /// needs the UI thread to run is a deadlock, which is exactly how
-    /// Start used to freeze on a Mac's first run); null here means
-    /// "always decline," which is the safe default for any caller (tests,
-    /// tooling) that never supplies one -- see <see cref="Start"/>'s own
-    /// use of it.
+    /// Asks the user before trusting the root on macOS, where the
+    /// <c>security</c> command has no confirmation of its own. Must be awaited,
+    /// not blocked on: it needs the UI thread. Null means always decline.
     /// </summary>
     private readonly Func<Task<bool>>? _confirmMacOSCertificateTrust;
 
-    /// <summary>
-    /// True while <see cref="Start"/> or <see cref="StopAsync"/> is waiting
-    /// on the macOS trust dialog, the certificate install or the system
-    /// proxy settings, so a second click (or QuickExec's <c>start</c>/
-    /// <c>stop</c>) can't begin another start or stop alongside it.
-    /// </summary>
+    /// <summary>Stops a second Start/Stop from beginning while one is still in progress.</summary>
     private bool _starting;
 
     /// <summary>
-    /// Where every setting in <see cref="PreferenceKeys"/> is read from at
-    /// startup and written back to on change -- see the Preferences Design
-    /// doc. Owned by this view model (flushed and disposed in
-    /// <see cref="Dispose"/>, which runs from <c>ShutdownRequested</c> on
-    /// both Windows and macOS). Writes from the setters below are cheap: the
-    /// store updates memory immediately and batches the actual file write
-    /// on a short background timer, so a keystroke in the filter box never
-    /// waits on disk.
+    /// Writes are batched on a background timer, so setters can save on every
+    /// change without waiting on disk.
     /// </summary>
     private readonly PreferenceStore _preferences;
 
     /// <summary>
-    /// Shows the Import/Export via Extension format picker: (heading,
-    /// choices, key of the choice to highlight) → the chosen one, or null if
-    /// cancelled. Supplied by App.axaml.cs as FormatPickerWindow, the same
-    /// "view model asks through a delegate, never references a window"
-    /// pattern as <see cref="_confirmMacOSCertificateTrust"/>. Null means
-    /// no picker: see <see cref="PickFormatAsync"/>.
+    /// Shows the format picker: (heading, choices, choice to highlight) to the
+    /// chosen one, or null if cancelled. Null means no picker.
     /// </summary>
     private readonly Func<string, IReadOnlyList<FormatChoice>, string?, Task<FormatChoice?>>? _chooseFormat;
 
@@ -147,51 +91,27 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _showLegacyExtensionHostPanel;
     private bool _showAlsoBreakOnRow;
 
-    /// <summary>
-    /// Restarted (not just started) on every captured session -- see
-    /// <see cref="FlashCaptureIndicator"/> -- so a burst of traffic keeps
-    /// the flash dot lit continuously instead of blinking once per session,
-    /// and it only goes dark shortly after the capture actually goes quiet.
-    /// </summary>
+    /// <summary>Restarted on every capture, so the dot stays lit through a burst.</summary>
     private readonly DispatcherTimer _captureFlashTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
 
     /// <summary>
-    /// Every session captured this run, in capture order, regardless of
-    /// <see cref="FilterText"/> -- still what <see cref="SaveSazCommand"/>
-    /// exports from and what its can-execute check counts, since exporting
-    /// only the currently-filtered view would silently drop sessions the
-    /// person just hasn't gone looking for. The grid itself binds to
-    /// <see cref="FilteredSessions"/>, not this.
+    /// Every session captured this run, ignoring the filter. Saving exports
+    /// these, so a filter never silently drops sessions from a SAZ.
     /// </summary>
     public ObservableCollection<SessionRow> Sessions { get; } = [];
 
-    /// <summary>
-    /// Tabs extensions added with <see cref="ExtensionUi.AddTab"/>, shown
-    /// beside the Inspectors (see MainWindow.axaml.cs). Filled while
-    /// extensions load, and never changes after that.
-    /// </summary>
+    /// <summary>Tabs added by extensions; filled while they load.</summary>
     public ObservableCollection<ExtensionTabViewModel> ExtensionTabs { get; } = [];
 
     /// <summary>
-    /// The subset of <see cref="Sessions"/> that <see cref="FilterText"/>
-    /// currently matches, in capture order -- what the session grid
-    /// actually binds to. Kept as its own collection rather than an
-    /// <c>ICollectionView</c>-style live filter over <see cref="Sessions"/>
-    /// because Avalonia's DataGrid has nothing built in for that; see
-    /// <see cref="ApplyFilter"/> and the SessionAdded handler below for how
-    /// the two are kept in sync without re-scanning the whole list on every
-    /// single captured session.
+    /// What the grid shows. Avalonia's DataGrid has no live filtered view, so
+    /// this is kept in sync by hand.
     /// </summary>
     public ObservableCollection<SessionRow> FilteredSessions { get; } = [];
 
     /// <summary>
-    /// The live text in the filter box -- see <see cref="SessionQuery"/>
-    /// for the grammar (free text plus <c>method:</c>/<c>host:</c>/
-    /// <c>status:</c>). Re-parses and rebuilds <see cref="FilteredSessions"/>
-    /// on every change; that's a full O(n) rescan of <see cref="Sessions"/>
-    /// per keystroke, which is fine at the sizes a single capture run
-    /// reaches in practice and simpler than debouncing or incrementally
-    /// diffing a changed predicate.
+    /// Filter text (see <see cref="SessionQuery"/>). Rescans every session per
+    /// keystroke, which is fast enough at real capture sizes.
     /// </summary>
     public string FilterText
     {
@@ -208,30 +128,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Sessions currently paused at a breakpoint, oldest first. A
-    /// connection's processing thread is genuinely blocked for as long as
-    /// its entry sits here -- see BreakpointManager's remarks on why its
-    /// events fire off that thread, which is why every handler below
-    /// marshals through <see cref="Dispatcher"/> the same way
-    /// SessionStore.SessionAdded already has to.
+    /// Sessions paused at a breakpoint, oldest first. Breakpoint events arrive
+    /// on connection threads, so handlers marshal to the UI thread.
     /// </summary>
     public ObservableCollection<PendingBreakpointViewModel> PendingBreakpoints { get; } = [];
 
     /// <summary>
-    /// Whether the breakpoints panel should take up any space at all. True
-    /// once either Automatic Breakpoints checkbox is armed, or any of the
-    /// narrower bpu/bpafter/bpm/bps rules below has a value -- see
-    /// <see cref="BreakpointRules.AnyActive"/>, which this defers to
-    /// directly rather than repeating its five-way check here -- so the
-    /// panel is there before it's needed rather than popping in only after
-    /// the first hit; also true whenever something is actually paused
-    /// (<see cref="PendingBreakpoints"/> non-empty) even if every rule got
-    /// cleared afterward, since hiding the panel then would hide the only
-    /// way to Resume or Abort a connection that's still genuinely blocked.
-    /// Recomputed on demand rather than cached -- see every setter/handler
-    /// below that calls <c>RaisePropertyChanged</c> for this -- since
-    /// nothing here tracks dependencies automatically (this app's MVVM base
-    /// is hand-rolled; see ViewModelBase's own remarks).
+    /// Shown once any breakpoint rule is armed, so the panel is there before
+    /// the first hit, and while anything is paused, so a paused connection can
+    /// always be resumed.
     /// </summary>
     public bool IsBreakpointsPanelVisible =>
         _breakpointManager.Rules.AnyActive || PendingBreakpoints.Count > 0;
@@ -328,12 +233,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Fiddler's <c>bps</c>: pause a response with this status code.
-    /// Nullable decimal to match <c>NumericUpDown.Value</c>'s own type --
-    /// the same convention <see cref="PreferredPort"/> already uses for the
-    /// same reason -- converted to and from <see cref="BreakpointRules.ResponseStatusCodeEquals"/>'s
-    /// <c>int?</c> at this property's boundary rather than pushing the UI's
-    /// numeric type down into ProxyCore.
+    /// Fiddler's <c>bps</c>: pause a response with this status code. Decimal
+    /// because that's what <c>NumericUpDown</c> binds to.
     /// </summary>
     public decimal? ResponseStatusCodeEquals
     {
@@ -353,17 +254,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Whether the "Also break on" row (<see cref="RequestUrlContains"/>/
-    /// <see cref="ResponseUrlContains"/>/<see cref="RequestMethodEquals"/>/
-    /// <see cref="ResponseStatusCodeEquals"/>) shows on the main screen at
-    /// all -- the checkable "_Tools -&gt; Also Break On" entry is this
-    /// property's only writer, same reasoning and default
-    /// (<see langword="false"/>) as <see cref="ShowFiddlerScriptPanel"/>.
-    /// Purely a visibility switch: none of the four fields above are
-    /// cleared when this goes back to <see langword="false"/>, so a
-    /// condition set while the row was visible keeps arming
-    /// <see cref="IsBreakpointsPanelVisible"/> and keeps pausing real
-    /// traffic even after the row that set it is hidden again.
+    /// Shows or hides the "Also break on" row. Hiding it doesn't clear the
+    /// rules, which keep working.
     /// </summary>
     public bool ShowAlsoBreakOnRow
     {
@@ -378,23 +270,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Named to avoid colliding with <see cref="AutoResponderRules"/> (the
-    /// ProxyCore engine type) -- one <see cref="AutoResponderRuleViewModel"/>
-    /// per <see cref="AutoResponderRules.Rules"/> entry, kept in the same
-    /// order by hand (see <see cref="AddAutoResponderRule"/>/
-    /// <see cref="RemoveSelectedAutoResponderRule"/>/
-    /// <see cref="MoveSelectedAutoResponderRule"/>), the same two-lists
-    /// tradeoff <see cref="PendingBreakpoints"/> already makes against
-    /// <c>BreakpointManager</c>'s own state.
+    /// One row per <see cref="AutoResponderRules.Rules"/> entry, kept in the
+    /// same order by hand.
     /// </summary>
     public ObservableCollection<AutoResponderRuleViewModel> AutoResponderRuleRows { get; } = [];
 
-    /// <summary>
-    /// The AutoResponder panel's own on/off switch -- Fiddler Classic's
-    /// "Enable rules" checkbox. See <see cref="AutoResponderRules.IsEnabled"/>'s
-    /// remarks for why this defaults to <see langword="false"/> unlike the
-    /// breakpoints panel's always-live rules.
-    /// </summary>
+    /// <summary>Fiddler Classic's "Enable rules" checkbox.</summary>
     public bool AutoResponderEnabled
     {
         get => _autoResponderRules.IsEnabled;
@@ -429,16 +310,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand MoveAutoResponderRuleUpCommand { get; }
     public RelayCommand MoveAutoResponderRuleDownCommand { get; }
 
-    /// <summary>
-    /// The path last typed into the FiddlerScript panel -- not necessarily
-    /// what's actually loaded yet; that's <see cref="FiddlerScriptRunner.LoadedPath"/>,
-    /// read back into <see cref="FiddlerScriptStatus"/> only once
-    /// <see cref="LoadFiddlerScriptCommand"/> actually runs. Kept as its own
-    /// field/property (rather than binding the TextBox straight at
-    /// something on <see cref="_fiddlerScriptRunner"/>) purely so the
-    /// "Load"/"Reload" buttons have a plain string to enable/disable
-    /// against without the runner needing any UI-facing surface of its own.
-    /// </summary>
+    /// <summary>The path typed into the FiddlerScript panel, which may not be loaded yet.</summary>
     public string FiddlerScriptPath
     {
         get => _fiddlerScriptPath;
@@ -452,13 +324,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// What the FiddlerScript panel's status line shows: which handlers the
-    /// loaded script defines, or its load error -- see
-    /// <see cref="RefreshFiddlerScriptStatus"/>. Never read back into any
-    /// proxy behavior; purely informational, the same role
-    /// <see cref="StatusText"/> plays for the proxy itself.
-    /// </summary>
     public string FiddlerScriptStatus
     {
         get => _fiddlerScriptStatus;
@@ -466,16 +331,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// What the extensions status line shows: every folder <see cref="ExtensionHost.Load"/>
-    /// scanned (whether it existed, how many .dll's it found), plus what got
-    /// loaded and any load errors. Built once, right after <see cref="ExtensionHost.Load"/>
-    /// runs in the constructor -- extensions don't come and go mid-run (see
-    /// ExtensionHost's own remarks), so unlike <see cref="FiddlerScriptStatus"/>
-    /// this never needs to be refreshed later. Exists specifically so this
-    /// information doesn't depend on the console being visible at all: a
-    /// WinExe app's Console.WriteLine output isn't reliably visible in every
-    /// terminal a person might launch it from, and this line is always on
-    /// screen in the running app regardless.
+    /// The folders scanned, what loaded and any errors. Shown in the UI because
+    /// a WinExe's console output often isn't visible.
     /// </summary>
     public string ExtensionStatus
     {
@@ -484,15 +341,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// This app's own opt-in switch for whether <see cref="Start"/> should
-    /// try to launch <c>Violens.LegacyExtensionHost.exe</c> itself (via
-    /// <see cref="_legacyExtensionHostLauncher"/>) before probing the
-    /// session bridge, rather than requiring a person to have already
-    /// started it by hand. Defaults to <see langword="false"/> -- see
-    /// <see cref="LegacyExtensionHostLauncher"/>'s own remarks on why this
-    /// is opt-in, not automatic. Purely a switch: flipping it doesn't launch
-    /// or stop anything by itself, only the next <see cref="Start"/>/
-    /// <see cref="Stop"/> click does.
+    /// Whether Start launches the legacy extension host. Off by default; takes
+    /// effect on the next Start or Stop.
     /// </summary>
     public bool AutoLaunchLegacyHost
     {
@@ -506,16 +356,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// What the Legacy Extension Host panel's status line shows --
-    /// <see cref="LegacyExtensionHostLauncher.Result.Message"/> from the
-    /// most recent <see cref="Start"/> call (when <see cref="AutoLaunchLegacyHost"/>
-    /// was on), a note that auto-launch is off (when it wasn't), or
-    /// <see cref="LegacyExtensionHostLauncher"/>'s own stop-side log line
-    /// folded in after <see cref="Stop"/>. Purely informational, the same
-    /// role <see cref="ExtensionStatus"/> plays for in-process compiled
-    /// extensions.
-    /// </summary>
     public string LegacyExtensionHostStatus
     {
         get => _legacyExtensionHostStatus;
@@ -525,18 +365,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand LoadFiddlerScriptCommand { get; }
     public RelayCommand ReloadFiddlerScriptCommand { get; }
 
-    /// <summary>
-    /// Whether the FiddlerScript panel shows on the main screen at all --
-    /// the checkable "_Tools -&gt; FiddlerScript" entry in MainWindow.axaml
-    /// is this property's only writer (see this project's "move panels into
-    /// the Tools menu" UI pass). Defaults to <see langword="false"/>: unlike
-    /// the Breakpoints/AutoResponder panels, this one has no other signal
-    /// (an armed rule, an active pause) to decide it should be on screen by
-    /// default, and hiding it by default is the whole point of moving it off
-    /// the always-visible main screen in the first place. Purely a
-    /// visibility switch -- loading/reloading a script still works the same
-    /// whether or not this panel happens to be shown.
-    /// </summary>
     public bool ShowFiddlerScriptPanel
     {
         get => _showFiddlerScriptPanel;
@@ -549,14 +377,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// Whether the Extensions status panel shows on the main screen --
-    /// the checkable "_Tools -&gt; Extensions" entry is this property's only
-    /// writer, same reasoning and default (<see langword="false"/>) as
-    /// <see cref="ShowFiddlerScriptPanel"/>. Purely a visibility switch:
-    /// <see cref="ExtensionStatus"/> itself is still built once at startup
-    /// regardless of whether anyone ever checks this box.
-    /// </summary>
     public bool ShowExtensionsPanel
     {
         get => _showExtensionsPanel;
@@ -569,15 +389,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// Whether the Legacy Extension Host panel shows on the main screen --
-    /// the checkable "_Tools -&gt; Legacy Extension Host" entry is this
-    /// property's only writer, same reasoning and default
-    /// (<see langword="false"/>) as <see cref="ShowExtensionsPanel"/>.
-    /// Purely a visibility switch: <see cref="AutoLaunchLegacyHost"/> and
-    /// <see cref="LegacyExtensionHostStatus"/> both work the same whether or
-    /// not this happens to be checked.
-    /// </summary>
     public bool ShowLegacyExtensionHostPanel
     {
         get => _showLegacyExtensionHostPanel;
@@ -590,81 +401,30 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// The dynamic "_Rules" menu's own entries -- one per
-    /// <c>RulesMenuOption</c>/<c>RulesStringChoice</c> the currently-loaded
-    /// script declares (empty when nothing's loaded, or the loaded script
-    /// declares none). Rebuilt from scratch by <see cref="RefreshScriptMenus"/>
-    /// every time a script (re)loads -- see <c>MainWindow.axaml</c>'s own
-    /// remarks on why this binds as one flat <c>MenuItem.ItemsSource</c>
-    /// list rather than real nested Rules-menu submenus.
-    /// </summary>
+    /// <summary>The Rules menu, rebuilt whenever a script loads.</summary>
     public ObservableCollection<RulesMenuEntryViewModel> RulesMenuEntries { get; } = [];
 
     /// <summary>
-    /// Whether <see cref="RulesMenuEntries"/> currently has anything in it
-    /// -- MainWindow.axaml binds the "_Rules" menu's own <c>IsEnabled</c>
-    /// to this, so it visibly greys out instead of just opening to an
-    /// empty dropdown (nothing was drawing an arrow or reacting to a click
-    /// either way, but a disabled menu at least reads as "nothing here
-    /// right now" rather than "broken"). Not backed by a field: this app's
-    /// MVVM base has no dependency tracking of its own (see
-    /// ViewModelBase's own remarks), so <see cref="RefreshScriptMenus"/>
-    /// has to explicitly raise this alongside <see cref="RulesMenuEntries"/>
-    /// itself whenever that collection is rebuilt.
+    /// Lets the Rules menu grey out when empty. Raised by hand in
+    /// <see cref="RefreshScriptMenus"/>.
     /// </summary>
     public bool HasRulesMenuEntries => RulesMenuEntries.Count > 0;
 
     /// <summary>
-    /// One per <c>ToolsAction</c> the currently-loaded script declares.
-    /// Same rebuild timing as <see cref="RulesMenuEntries"/>. Despite the
-    /// name (kept for the underlying <c>ToolsAction</c> attribute/Phase C
-    /// terminology, and because <see cref="MainWindowViewModel.InvokeContextAction"/>
-    /// and <see cref="FiddlerScriptRunner.InvokeToolsAction"/> both already
-    /// use it), this no longer renders as a "_Tools" submenu -- see the
-    /// FiddlerScript panel's own remarks in MainWindow.axaml for why it was
-    /// moved to a row of buttons inside that panel instead.
+    /// The script's <c>ToolsAction</c>s, shown as buttons in the FiddlerScript
+    /// panel rather than in the Tools menu.
     /// </summary>
     public ObservableCollection<ActionMenuEntryViewModel> ToolsMenuEntries { get; } = [];
 
-    /// <summary>
-    /// Whether <see cref="ToolsMenuEntries"/> currently has anything in it,
-    /// same reasoning and same "explicitly raised, not field-backed" caveat
-    /// as <see cref="HasRulesMenuEntries"/> -- what the FiddlerScript
-    /// panel's "Script Actions" row binds its own <c>IsVisible</c> to, so
-    /// the row (and its label) takes no space at all when there's nothing
-    /// to show, rather than an empty label with no buttons after it.
-    /// </summary>
     public bool HasToolsMenuEntries => ToolsMenuEntries.Count > 0;
 
-    /// <summary>
-    /// The session grid's right-click context menu -- one per
-    /// <c>ContextAction</c> the currently-loaded script declares. Same
-    /// rebuild timing as <see cref="RulesMenuEntries"/>; see
-    /// <see cref="InvokeContextAction"/> for what it actually operates on.
-    /// </summary>
+    /// <summary>The session list's right-click menu, from the script's <c>ContextAction</c>s.</summary>
     public ObservableCollection<ActionMenuEntryViewModel> ContextActionEntries { get; } = [];
 
-    /// <summary>
-    /// A live passthrough to <see cref="_fiddlerScriptRunner"/>'s own
-    /// <c>Directives</c> -- exists purely so <c>MainWindow.axaml.cs</c> can
-    /// read <c>UIColumns</c> to rebuild the session grid's script-provided
-    /// columns (see <c>SessionRow.ScriptColumns</c>) from code-behind
-    /// without reaching past this view model into
-    /// <see cref="_fiddlerScriptRunner"/> directly. Read after
-    /// <see cref="FiddlerScriptStatus"/> changes -- that property changing
-    /// is the signal a script just (re)loaded, since both are updated
-    /// together in <see cref="RefreshFiddlerScriptStatus"/>.
-    /// </summary>
+    /// <summary>Read by the window to rebuild script-defined grid columns after a script loads.</summary>
     public FiddlerScriptDirectives ScriptDirectives => _fiddlerScriptRunner.Directives;
 
-    /// <summary>
-    /// The Request/Response tab content for whichever row is selected in
-    /// the grid, recomputed fresh on every selection change (see
-    /// <see cref="RefreshInspectors"/>) rather than kept live -- a captured
-    /// session's headers and body never change after the fact, so there's
-    /// nothing for these to react to beyond "which session is selected now".
-    /// </summary>
+    /// <summary>Rebuilt on each selection change; captured sessions don't change afterwards.</summary>
     public ObservableCollection<InspectorTabViewModel> RequestInspectors { get; } = [];
 
     public ObservableCollection<InspectorTabViewModel> ResponseInspectors { get; } = [];
@@ -685,15 +445,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// Whether this build can intercept at all. Windows and macOS both
-    /// have a real certificate trust-store and system-proxy-registration
-    /// path now -- see the Interception Certificate Design doc's "Platform
-    /// status" section, including what's still unconfirmed on macOS
-    /// specifically without a real Mac to run it against. Anything else
-    /// (Linux, in practice, since this app targets plain <c>net10.0</c>
-    /// and could technically run there) has neither.
-    /// </summary>
+    /// <summary>Interception needs a trust store and system proxy, which only Windows and macOS have here.</summary>
     public bool IsSupported { get; } = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
 
     public string StatusText
@@ -703,11 +455,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Nullable decimal to match <c>NumericUpDown.Value</c>'s own type --
-    /// binding straight to it needs no converter. Null (the field cleared
-    /// while editing) is treated as "use the default" at Start time rather
-    /// than blocking the click. Only consulted at all when
-    /// <see cref="UseAutomaticPort"/> is false -- see <see cref="Start"/>.
+    /// Decimal to bind straight to <c>NumericUpDown</c>. Null (cleared while
+    /// editing) means the default. Ignored in Auto mode.
     /// </summary>
     public decimal? PreferredPort
     {
@@ -718,8 +467,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 StartCommand.RaiseCanExecuteChanged();
 
-                // Only a real port is worth remembering -- a cleared field
-                // mid-edit (null) leaves the last good value in place.
+                // A cleared field mid-edit keeps the last good value.
                 if (value is >= 1 and <= 65535)
                 {
                     _preferences.SetInt32Pref(PreferenceKeys.Port, (int)value.Value);
@@ -729,15 +477,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// True for "Auto" (let the OS hand back any free port -- the same
-    /// port-0 trick <see cref="InterceptingProxyListener.StartOnAvailablePort"/>
-    /// already falls back to when a preferred port is taken, just requested
-    /// up front instead of after a collision), false for "Specify" (use
-    /// <see cref="PreferredPort"/>). Defaults to true: a first run picks
-    /// whatever port the OS hands back rather than assuming 8888 is free.
-    /// <see cref="PreferredPort"/> is left populated with its own default
-    /// (8888) regardless, so switching to "Specify" still starts from a
-    /// sensible value instead of an empty field.
+    /// Auto lets the OS pick a free port. <see cref="PreferredPort"/> keeps its
+    /// value so switching to Specify starts from something sensible.
     /// </summary>
     public bool UseAutomaticPort
     {
@@ -754,15 +495,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// The exact negation of <see cref="UseAutomaticPort"/>, kept as its
-    /// own two-way-bindable property purely so the "Specify" RadioButton in
-    /// MainWindow.axaml has something real to bind <c>IsChecked</c> to.
-    /// Two RadioButtons in one GroupName only stay correctly in sync (both
-    /// on the initial, unclicked render, and afterward) if each one binds
-    /// TwoWay to an actual property -- a bare <c>{Binding !UseAutomaticPort}</c>
-    /// on the second button would show it unchecked at startup regardless
-    /// of <see cref="UseAutomaticPort"/>'s actual value, since nothing
-    /// would ever set its IsChecked to true in the first place.
+    /// The inverse of <see cref="UseAutomaticPort"/>. Each RadioButton needs its
+    /// own two-way property; binding to <c>!UseAutomaticPort</c> starts
+    /// unchecked whatever the value.
     /// </summary>
     public bool UseSpecificPort
     {
@@ -785,15 +520,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// True (private setter -- only <see cref="FlashCaptureIndicator"/> and
-    /// <see cref="Stop"/> ever change it) for a brief window after each
-    /// captured session, so the status bar's dot flashes on new traffic
-    /// rather than just sitting steady the whole time the proxy runs. See
-    /// <see cref="ShowSteadyRunningIndicator"/> for how this and
-    /// <see cref="IsRunning"/> combine into the status bar's three
-    /// mutually-exclusive dots (flashing / steady-running / stopped).
-    /// </summary>
+    /// <summary>True briefly after each capture, so the status dot flashes.</summary>
     public bool IsCaptureFlashing
     {
         get => _isCaptureFlashing;
@@ -807,15 +534,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// The "running, but nothing just came in" dot -- true while the proxy
-    /// is running and NOT currently mid-flash. Together with
-    /// <see cref="IsCaptureFlashing"/> and <c>!IsRunning</c> (bound directly
-    /// in MainWindow.axaml, no property needed for that one) these three
-    /// are mutually exclusive and exactly one is ever visible, so the
-    /// status bar reads as exactly one dot that flashes brighter when
-    /// traffic is actively coming in. This way the status bar reads as
-    /// "alive" even during a quiet stretch rather than looking identical to
-    /// stopped.
+    /// Running with no recent traffic. With <see cref="IsCaptureFlashing"/> and
+    /// <c>!IsRunning</c>, exactly one status dot is visible.
     /// </summary>
     public bool ShowSteadyRunningIndicator => IsRunning && !IsCaptureFlashing;
 
@@ -826,28 +546,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public RelayCommand ExportViaExtensionCommand { get; }
     public RelayCommand OpenDocumentationCommand { get; }
 
-    /// <summary>Tools > Remove Root Certificate (see <see cref="RemoveRootCertificate"/>).</summary>
+    /// <summary>Tools > Remove Root Certificate.</summary>
     public RelayCommand RemoveRootCertificateCommand { get; }
 
     /// <summary>Edit > Remove Selected Session (also the Delete key in the session list).</summary>
     public RelayCommand RemoveSelectedSessionCommand { get; }
 
-    /// <summary>Edit > Remove All Sessions.</summary>
     public RelayCommand RemoveAllSessionsCommand { get; }
 
-    /// <param name="confirmMacOSCertificateTrust">
-    /// See <see cref="_confirmMacOSCertificateTrust"/>'s own remarks.
-    /// Optional (defaults to null, meaning "always decline on macOS") so
-    /// every other caller -- tests, and the Windows path, which never
-    /// consults this at all -- doesn't need to pass one.
-    /// </param>
-    /// <param name="preferences">
-    /// Where settings are loaded from and saved to. Optional: null means
-    /// the real per-user file (see <see cref="CreateDefaultPreferences"/>).
-    /// This view model takes ownership either way and disposes it in
-    /// <see cref="Dispose"/>.
-    /// </param>
-    /// <param name="chooseFormat">See <see cref="_chooseFormat"/>. Optional.</param>
+    /// <param name="confirmMacOSCertificateTrust">Null means always decline on macOS.</param>
+    /// <param name="preferences">Null means the per-user file. Disposed with this view model.</param>
+    /// <param name="chooseFormat">Null means no format picker.</param>
     public MainWindowViewModel(
         Func<Task<bool>>? confirmMacOSCertificateTrust = null,
         PreferenceStore? preferences = null,
@@ -856,40 +565,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _confirmMacOSCertificateTrust = confirmMacOSCertificateTrust;
         _chooseFormat = chooseFormat;
 
-        // Before anything else below reads the fields these populate.
-        // Written straight to the backing fields rather than through the
-        // property setters, so loading a value never immediately writes it
-        // back out again.
+        // Loaded into the backing fields, not the setters, so loading doesn't
+        // write straight back out.
         _preferences = preferences ?? CreateDefaultPreferences();
         LoadPreferences();
         InitializeTimingViews();
 
-        // Ported Fiddler-shaped extensions reach preferences and logging
-        // through the compatibility layer's host hooks; they share the
-        // app's own preferences file (same behavior on Windows and macOS).
-        // Set before extensions load below, since OnLoad may read them.
-        // The file-picker and notify hooks need the real window, so
-        // App.axaml.cs sets those.
+        // Ported extensions read preferences through the compatibility layer.
+        // Set before extensions load, since OnLoad may read them. App.axaml.cs
+        // sets the hooks that need the window.
         Violens.CompatShim.CompatShimHost.Preferences = _preferences;
         Violens.CompatShim.CompatShimHost.Log = message => Console.WriteLine($"[Extension] {message}");
 
-        // Must run before anything below touches the system proxy itself:
-        // a backup file still sitting on disk means the *previous* run of
-        // this app never reached Stop/Dispose (crash, kill, an unclean
-        // shutdown) and left the system proxy pointed at a port nothing is
-        // listening on any more. See SystemProxyController's own remarks
-        // for the full design, on both platforms it dispatches to.
+        // A leftover backup file means the last run never stopped cleanly and
+        // may have left the system proxy pointing at a dead port.
         SystemProxyController.RecoverFromCrash();
 
-        // Loaded once, synchronously, here at startup -- see ExtensionHost's
-        // own remarks on why compiled extensions don't get FiddlerScript's
-        // live-reload treatment. DefaultExtensionsFolder may well not exist
-        // on a machine that has never used extensions; ExtensionHost.Load()
-        // treats that as nothing to load, not an error (see its own
-        // remarks), so this is safe to call unconditionally on every launch.
         _extensionHost = new ExtensionHost(
-            // The user's own folder first, so their copy of an extension
-            // wins over an optional one the installer put next to the app.
+            // The user's own folder first, so their copy wins over a bundled one.
             [ExtensionHost.DefaultExtensionsFolder, ExtensionHost.BundledExtensionsFolder],
             log: message => Console.WriteLine($"[Extension] {message}"));
         // Extensions add their tabs from OnLoad, inside Load() below.
@@ -901,12 +594,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         ExtensionStatus = BuildExtensionStatus();
 
-        // Folds any compiled extension inspectors in alongside the three
-        // built-ins -- see InspectorRegistry.CreateDefault(IEnumerable<IInspector>)'s
-        // own remarks on this being the seam it was written for. Built here,
-        // after Load() above, rather than as a field initializer (like the
-        // three-built-ins-only version this replaced) since it now depends
-        // on what Load() found.
+        // Built after Load(), so extension inspectors join the built-in ones.
         _inspectorRegistry = InspectorRegistry.CreateDefault(
             _extensionHost.RequestInspectors.Select(i => (IInspector)Inspector2Adapter.ForRequest(i))
                 .Concat(_extensionHost.ResponseInspectors.Select(i => (IInspector)Inspector2Adapter.ForResponse(i))));
@@ -915,13 +603,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             Start, () => IsSupported && !IsRunning && !_starting && (UseAutomaticPort || PreferredPort is >= 1 and <= 65535));
         StopCommand = new RelayCommand(Stop, () => IsRunning && !_starting);
         SaveSazCommand = new RelayCommand(SaveSaz, () => Sessions.Count > 0);
-        // The Importers/Exporters.Count half of each condition is a one-time
-        // check against what Load() already found above -- extensions don't
-        // come and go mid-run (see ExtensionHost's own remarks), so that
-        // half never needs RaiseCanExecuteChanged. ExportViaExtensionCommand's
-        // Sessions.Count > 0 half is exactly SaveSazCommand's own condition,
-        // so it rides along on the same RaiseCanExecuteChanged call in the
-        // SessionAdded handler below.
+        // Extensions don't change mid-run, so only the session count needs
+        // RaiseCanExecuteChanged.
         ImportViaExtensionCommand = new RelayCommand(ImportViaExtension, () => _extensionHost.Importers.Count > 0);
         ExportViaExtensionCommand = new RelayCommand(ExportViaExtension, () => _extensionHost.Exporters.Count > 0 && Sessions.Count > 0);
         OpenDocumentationCommand = new RelayCommand(OpenDocumentation);
@@ -939,43 +622,27 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         MoveAutoResponderRuleUpCommand = new RelayCommand(() => MoveSelectedAutoResponderRule(-1), () => CanMoveSelectedAutoResponderRule(-1));
         MoveAutoResponderRuleDownCommand = new RelayCommand(() => MoveSelectedAutoResponderRule(1), () => CanMoveSelectedAutoResponderRule(1));
 
-        // The log callback routes FiddlerObject.alert()/Log.LogString()
-        // calls (and this runner's own handler-error notices) to the
-        // console -- the same place every other diagnostic in this proxy
-        // core already goes (see InterceptingProxyListener's own
-        // Console.WriteLine calls), rather than a dedicated log pane this
-        // pass doesn't build.
+        // Script alerts and handler errors go to the console, like the rest of
+        // the proxy's diagnostics.
         _fiddlerScriptRunner = new FiddlerScriptRunner(log: message => Console.WriteLine($"[FiddlerScript] {message}"));
         LoadFiddlerScriptCommand = new RelayCommand(LoadFiddlerScript, () => !string.IsNullOrWhiteSpace(FiddlerScriptPath));
         ReloadFiddlerScriptCommand = new RelayCommand(ReloadFiddlerScript, () => _fiddlerScriptRunner.IsLoaded);
 
-        // DispatcherTimer over a raw Task.Delay/CancellationTokenSource
-        // specifically because Tick always fires on the UI thread -- every
-        // other event handler in this constructor already has to marshal
-        // through Dispatcher.UIThread.Post for that same reason, and a timer
-        // sidesteps needing to do that here too.
+        // DispatcherTimer ticks on the UI thread, so no marshalling is needed.
         _captureFlashTimer.Tick += (_, _) =>
         {
             _captureFlashTimer.Stop();
             IsCaptureFlashing = false;
         };
 
-        // Registered after the commands above are assigned -- the compiler's
-        // nullable flow analysis judges a captured non-nullable property by
-        // where its assignment appears in the constructor's text, not by
-        // when the closure actually runs, so referencing SaveSazCommand here
-        // before its assignment line would (harmlessly, since the closure
-        // only ever runs post-construction) still trip CS8602.
+        // Must come after SaveSazCommand is assigned, or nullable analysis
+        // reports CS8602.
         _sessionStore.SessionAdded += session => Dispatcher.UIThread.Post(() =>
         {
             var row = SessionRow.From(session, _fiddlerScriptRunner);
             Sessions.Add(row);
-            // Only this one new row needs checking against the current
-            // filter -- everything already in FilteredSessions was already
-            // matched when it arrived (or by the last ApplyFilter() run),
-            // so there's no reason to re-scan the whole list per capture.
-            // ui-hide: an importer, extension or script asked for this
-            // session to be left out of the list (it's still captured and saved).
+            // Only the new row needs checking against the filter. ui-hide sessions
+            // are captured and saved but not listed.
             if (!row.Style.Hidden && _query.Matches(session))
             {
                 FilteredSessions.Add(row);
@@ -1051,11 +718,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Shows a message from an extension (FiddlerApplication.DoNotifyUser) in
-    /// the status line and the console. Deliberately not a modal dialog: an
-    /// import can report several warnings in a row, and a stack of dialogs
-    /// would be worse than the status line. Must be called on the UI thread
-    /// (App.axaml.cs posts it there).
+    /// Shows an extension's message in the status line rather than a dialog,
+    /// since an import may report several in a row. Call on the UI thread.
     /// </summary>
     internal void ShowExtensionNotice(string title, string message)
     {
@@ -1071,20 +735,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (InvalidOperationException ex)
         {
-            // The data folder couldn't be found (no app-data folder at all). Settings are a
-            // convenience: run with in-memory-only preferences rather than
-            // not at all.
+            // No app-data folder: keep preferences in memory for this run.
             Console.WriteLine($"[Preferences] {ex.Message} Settings won't be saved this run.");
             return PreferenceStore.CreateInMemory();
         }
     }
 
-    /// <summary>
-    /// Reads every <see cref="PreferenceKeys"/> value into its backing
-    /// field. Defaults match what these fields were initialized to before
-    /// preferences existed, so a first run (no file yet) looks exactly the
-    /// way the app always has.
-    /// </summary>
+    /// <summary>Defaults match the app's behaviour before preferences existed.</summary>
     private void LoadPreferences()
     {
         _useAutomaticPort = _preferences.GetBoolPref(PreferenceKeys.PortAutomatic, true);
@@ -1112,10 +769,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Shows the port the listener actually bound to (in Auto mode, or when
-    /// a specified port was taken) without saving it as the person's
-    /// chosen port -- only an edit they make themselves should change
-    /// <see cref="PreferenceKeys.Port"/>.
+    /// Shows the port actually bound without saving it; only the user's own
+    /// edits change the saved port.
     /// </summary>
     private void ShowBoundPort(int port)
     {
@@ -1125,12 +780,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// <c>async void</c> because it's a command handler. Only the macOS
-    /// first run awaits the trust dialog, and every Start on a Mac awaits
-    /// the system proxy settings (see <see cref="RunOffUiThreadOnMacAsync"/>);
-    /// on Windows it runs straight through as before.
-    /// </summary>
     private async void Start()
     {
         if (_starting)
@@ -1157,12 +806,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// On macOS, reading and changing the system proxy runs
-    /// <c>networksetup</c> -- about a dozen processes per network service,
-    /// any of which can wait while macOS asks for a password -- so it runs
-    /// off the UI thread there, or the window freezes until it's done. On
-    /// Windows the same calls are quick registry reads and writes, kept on
-    /// the UI thread as before.
+    /// On macOS, system proxy changes run <c>networksetup</c> many times and
+    /// may wait on a password prompt, so they run off the UI thread. On Windows
+    /// they're quick registry calls.
     /// </summary>
     private static Task<T> RunOffUiThreadOnMacAsync<T>(Func<T> work) =>
         OperatingSystem.IsMacOS() ? Task.Run(work) : Task.FromResult(work());
@@ -1178,18 +824,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            // Only relevant the very first time this runs on macOS (or
-            // again on a later Start click if declined last time --
-            // _authority stays null until this is accepted, so this check
-            // naturally re-asks). Windows never reaches this branch at
-            // all: its own trust-install confirmation is the native OS
-            // dialog X509Store.Add triggers, not this one -- see
-            // _confirmMacOSCertificateTrust's own remarks and the design
-            // doc's "silent-install tension" section.
-            // Reused across Start/Stop/Start cycles within one run of the
-            // app -- there's no reason to re-install a new trust-store
-            // root every time, only a fresh leaf provider (cheap, and it
-            // keeps each run's leaves independent of any that came before).
+            // Created once per run and reused across Start/Stop; each Start gets a
+            // fresh leaf provider. Stays null if the macOS trust prompt is declined,
+            // so the next Start asks again.
             if (_authority is null)
             {
                 if (OperatingSystem.IsMacOS())
@@ -1207,30 +844,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                     StatusText = "Installing the root certificate -- macOS may ask for your password...";
                 }
 
-                // On macOS, off the UI thread: the 'security' command
-                // waits while macOS asks for the person's password, and
-                // the window should keep drawing meanwhile. On Windows,
-                // on the UI thread as before, so Windows' own "install
-                // this certificate?" dialog stays in front of the app.
+                // On Windows this stays on the UI thread so the OS's own "install this
+                // certificate?" dialog appears in front of the app.
                 _authority = await RunOffUiThreadOnMacAsync(CreateAuthority);
             }
 
             var leafProvider = new LeafCertificateProvider(_authority.RootCertificate);
-            // Port 0 is the same "let the OS pick" signal
-            // StartOnAvailablePort itself falls back to on a collision --
-            // "Auto" just asks for that straight away instead of trying a
-            // preferred port first.
+            // Port 0 lets the OS pick.
             var requestedPort = UseAutomaticPort ? 0 : (int)(PreferredPort ?? DefaultPreferredPort);
 
-            // Opt-in only -- see AutoLaunchLegacyHost's and
-            // LegacyExtensionHostLauncher's own remarks on why this never
-            // runs unless the person has explicitly turned it on. Runs
-            // before the Probe() call just below (not after) so a
-            // freshly-launched process has a real chance of being wired in
-            // for *this* Start, not just discovered on the next one --
-            // LegacyExtensionHostLauncher.EnsureRunning itself waits (up to
-            // a bounded timeout) for the process's pipe to actually come up
-            // before returning, specifically so this ordering works.
+            // Before the probe below, so a freshly launched host is picked up by
+            // this Start. EnsureRunning waits for its pipe.
             if (AutoLaunchLegacyHost)
             {
                 var launchResult = _legacyExtensionHostLauncher.EnsureRunning(
@@ -1242,18 +866,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 LegacyExtensionHostStatus = "Auto-launch is off -- Tools -> Legacy Extension Host to turn it on.";
             }
 
-            // Probed fresh on every Start() click, deliberately unlike
-            // _extensionHost above (loaded once, at app launch, never
-            // reloaded) -- see LegacyExtensionHostBridgeClient's own
-            // remarks for why: the legacy host .exe is a separate,
-            // optional process a person may well launch (or relaunch)
-            // *after* opening VioLens, and re-probing here means Stop
-            // then Start picks that up with no restart of this app needed.
-            // Probing never throws and never blocks longer than
-            // SessionBridgeProtocol.ConnectTimeoutMilliseconds -- see that
-            // class's own remarks -- so this stays safe to call
-            // unconditionally whether or not anyone is using the legacy
-            // host at all.
+            // Probed on every Start, so a legacy host started after VioLens is
+            // picked up without a restart. Times out quickly and never throws.
             var legacyBridge = LegacyExtensionHostBridgeClient.Probe(
                 log: message => Console.WriteLine($"[Extension] {message}"));
 
@@ -1279,19 +893,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 ? $"all network interfaces, port {proxy.Port}"
                 : $"127.0.0.1:{proxy.Port}";
 
-            // In Auto mode requestedPort is always 0, which _proxy.Port
-            // (the real bound port) will never equal -- there's no
-            // "preferred port was taken" collision to report in that mode
-            // in the first place, so this note only ever applies to Specify.
+            // Only Specify mode can have its port taken.
             var portNote = UseAutomaticPort || proxy.Port == requestedPort
                 ? string.Empty
                 : $" (port {requestedPort} was already taken -- probably another VioLens process still running)";
 
-            // A failure here shouldn't roll back the listener that just
-            // started successfully above -- worst case, VioLens works
-            // exactly like it did before this feature existed (a manually
-            // pointed browser proxy), it just doesn't also become the
-            // system default.
+            // Failing to become the system proxy leaves the listener running; the
+            // browser can still be pointed at it by hand.
             try
             {
                 await RunOffUiThreadOnMacAsync(() => SystemProxyController.Enable(proxy.Port));
@@ -1327,15 +935,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         return authority;
     }
 
-    /// <summary><c>async void</c> because it's a command handler; see <see cref="StopAsync"/>.</summary>
     private async void Stop() => await StopAsync();
 
-    /// <summary>
-    /// Stops capturing and puts the system proxy back. On macOS that's
-    /// <c>networksetup</c> again, so it runs off the UI thread (see
-    /// <see cref="RunOffUiThreadOnMacAsync"/>), with Start held off until
-    /// it's done.
-    /// </summary>
+    /// <summary>Stops capturing and restores the system proxy, off the UI thread on macOS.</summary>
     private async Task StopAsync()
     {
         if (_proxy is null || _starting)
@@ -1367,18 +969,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         IsRunning = false;
         StopGateway();
 
-        // A no-op unless this app's own Start() is what launched the legacy
-        // host in the first place (see LegacyExtensionHostLauncher's own
-        // remarks) -- a legacy host reachable because a person started it
-        // themselves is left running exactly as it was before this Stop
-        // click, matching the "never a hard dependency, never a surprise"
-        // posture the rest of this feature already commits to.
+        // Only stops a host this app launched.
         _legacyExtensionHostLauncher.StopIfLaunchedByUs(
             log: message => Console.WriteLine($"[Extension] {message}"));
 
-        // Defensive rather than load-bearing -- SessionAdded can't fire
-        // while stopped, so nothing would restart the timer from here on.
-        // Still worth guaranteeing no flash state lingers into the next run.
         _captureFlashTimer.Stop();
         IsCaptureFlashing = false;
 
@@ -1387,12 +981,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Tools > Remove Root Certificate: stops capturing (HTTPS can't be
-    /// decrypted without the root), then removes every VioLens root from
-    /// this account's certificate stores, key included. The next Start
-    /// creates and trusts a new one. <c>async void</c> because it's a
-    /// command handler; on macOS the removal shells out to <c>security</c>,
-    /// so it runs off the UI thread there, as CreateAuthority does.
+    /// Stops capturing (HTTPS can't be decrypted without the root) and removes
+    /// every VioLens root and its key. The next Start makes a new one.
     /// </summary>
     private async void RemoveRootCertificate()
     {
@@ -1416,14 +1006,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             : "No root certificate was removed (none was trusted, or the removal was declined).";
     }
 
-    /// <summary>
-    /// Lights the flash dot and (re)starts its fade-out countdown -- called
-    /// once per captured session. Restarting an already-running
-    /// DispatcherTimer (Stop then Start) rather than letting an in-flight
-    /// one run to completion is what gives "stays lit through a burst of
-    /// traffic, fades shortly after things go quiet" instead of a blink per
-    /// session.
-    /// </summary>
+    /// <summary>Lights the dot and restarts the countdown, so it stays lit through a burst.</summary>
     private void FlashCaptureIndicator()
     {
         IsCaptureFlashing = true;
@@ -1432,14 +1015,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Appends a fresh, disabled, empty rule to the end of the list (both
-    /// <see cref="AutoResponderRules.Rules"/> and <see cref="AutoResponderRuleRows"/>)
-    /// and selects it -- so clicking "Add" always gives you something to
-    /// immediately start typing into, matching Fiddler Classic's own
-    /// AutoResponder "Add Rule" behavior. Starts disabled (rather than
-    /// inheriting <see cref="AutoResponderEnabled"/>) since an empty
-    /// match/action pair matches everything and would otherwise start
-    /// intercepting traffic before the person has typed anything into it.
+    /// Adds an empty rule and selects it, like Fiddler's "Add Rule". It starts
+    /// disabled because an empty rule matches everything.
     /// </summary>
     private void AddAutoResponderRule()
     {
@@ -1452,17 +1029,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Reads <see cref="FiddlerScriptPath"/> and loads it into
-    /// <see cref="_fiddlerScriptRunner"/> -- Fiddler's own
-    /// "Rules > Customize Rules" workflow, minus the text editor itself
-    /// (the script is edited in whatever editor the person already uses;
-    /// this button just (re)reads it). A file that can't even be read (bad
-    /// path, permissions) surfaces here rather than as an unhandled
-    /// exception, same posture as <see cref="Start"/>'s own try/catch
-    /// around a failed listener start; a file that *is* read but has a
-    /// broken script inside it is a different failure
-    /// (<see cref="FiddlerScriptRunner.LoadError"/>), surfaced the same way
-    /// through <see cref="RefreshFiddlerScriptStatus"/>.
+    /// Loads the script at <see cref="FiddlerScriptPath"/>. Unreadable files
+    /// and script errors both show in the status line.
     /// </summary>
     private void LoadFiddlerScript()
     {
@@ -1481,12 +1049,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         ReloadFiddlerScriptCommand.RaiseCanExecuteChanged();
     }
 
-    /// <summary>
-    /// Fiddler's own <c>FiddlerObject.ReloadScript()</c> reaches this same
-    /// method (see the constructor's <c>reloadScript</c> callback passed
-    /// into <see cref="FiddlerScriptRunner"/>) -- a script can trigger its
-    /// own reload, not just this button.
-    /// </summary>
+    /// <summary>Also reached from a script calling <c>FiddlerObject.ReloadScript()</c>.</summary>
     private void ReloadFiddlerScript()
     {
         _fiddlerScriptRunner.Reload();
@@ -1501,28 +1064,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
               $"OnBeforeRequest: {(_fiddlerScriptRunner.HasOnBeforeRequest ? "yes" : "no")}, " +
               $"OnBeforeResponse: {(_fiddlerScriptRunner.HasOnBeforeResponse ? "yes" : "no")}.";
 
-        // Rules-menu/Tools-menu/Context-menu entries and the grid's
-        // script-provided columns are all only ever as fresh as the
-        // currently-loaded script -- rebuilding them here, alongside the
-        // status line itself, means every call site that already refreshes
-        // one (LoadFiddlerScript/ReloadFiddlerScript) gets the other for
-        // free, with no separate call to remember.
         RefreshScriptMenus();
     }
 
-    /// <summary>
-    /// Rebuilds <see cref="RulesMenuEntries"/>/<see cref="ToolsMenuEntries"/>/
-    /// <see cref="ContextActionEntries"/> from scratch against whatever
-    /// <see cref="_fiddlerScriptRunner"/>'s <c>Directives</c> currently say
-    /// -- called once per script (re)load, from
-    /// <see cref="RefreshFiddlerScriptStatus"/>, never incrementally
-    /// patched. A full rebuild is simpler to reason about than diffing the
-    /// old script's menu against the new one, and a script (re)load is
-    /// already a rare, explicit, human-driven action (see
-    /// <c>FiddlerScriptRunner</c>'s own remarks on why compiled extensions
-    /// and FiddlerScript both treat reload as an occasional event, not a
-    /// hot path) -- there's no per-request cost here to worry about.
-    /// </summary>
+    /// <summary>Rebuilds the script menus from scratch; reloads are rare, so no diffing.</summary>
     private void RefreshScriptMenus()
     {
         RulesMenuEntries.Clear();
@@ -1550,15 +1095,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// Runs a <c>ContextAction</c> against <see cref="SelectedSessionRow"/>
-    /// -- a no-op with nothing selected, rather than an error, since the
-    /// context menu that offers this is only ever opened from a row the
-    /// person right-clicked in the first place, but a click landing between
-    /// the menu opening and the selection changing underneath it (a fast
-    /// re-click, a session list that just scrolled) is cheap to guard
-    /// against here.
-    /// </summary>
+    /// <summary>Runs a <c>ContextAction</c> on the selected session; does nothing if none is selected.</summary>
     private void InvokeContextAction(string methodName)
     {
         if (SelectedSessionRow is { } selected)
@@ -1568,17 +1105,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Builds one <see cref="RulesMenuEntryViewModel"/> per
-    /// <c>RulesMenuOption</c> and per <c>RulesStringChoice</c> the loaded
-    /// script declares, wiring up each one's checked-state callback to
-    /// read/write the underlying script field through
-    /// <see cref="_fiddlerScriptRunner"/> and, for a radio-grouped option or
-    /// a string-choice submenu, to keep its sibling entries (and their own
-    /// underlying fields -- not just their checkmarks) in sync. See
-    /// <see cref="RulesMenuOption"/>'s own remarks on what "radio-grouped"
-    /// means here, and <c>MainWindow.axaml</c>'s own remarks on why every
-    /// entry (grouped or not) renders as one flat list with a
-    /// "Submenu: Option" label rather than a real nested flyout.
+    /// One entry per Rules option and string choice. Radio groups and string
+    /// choices update their siblings' script fields, not just the checkmarks.
     /// </summary>
     private List<RulesMenuEntryViewModel> BuildRulesMenuEntries()
     {
@@ -1604,11 +1132,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 _fiddlerScriptRunner.SetRulesOptionValue(option.FieldName, isChecked);
 
-                // Radio semantics: checking this one clears every sibling's
-                // own field, not just its checkmark -- otherwise the
-                // script would be left with more than one of the group's
-                // booleans true at once, even though the UI shows only one
-                // checked.
+                // Clear the siblings' fields too, so only one stays true in the script.
                 if (isChecked && group is not null)
                 {
                     foreach (var (siblingOption, siblingEntry) in group)
@@ -1641,11 +1165,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
                 {
                     if (!isChecked)
                     {
-                        // Unchecking a radio-style choice directly isn't a
-                        // real action in this model -- picking a DIFFERENT
-                        // choice is what changes the value. Put this one
-                        // back rather than leaving the whole group
-                        // unchecked.
+                        // Unchecking a choice isn't meaningful; picking another one is. Keep
+                        // this one checked.
                         entry!.SetCheckedWithoutNotifying(true);
                         return;
                     }
@@ -1668,15 +1189,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         return entries;
     }
 
-    /// <summary>
-    /// Builds <see cref="ExtensionStatus"/> from what <see cref="ExtensionHost.Load"/>
-    /// found -- called exactly once, in the constructor, right after
-    /// <c>_extensionHost.Load()</c> runs. Deliberately verbose/explicit
-    /// (spells out every scanned folder, not just a summary count) since
-    /// this exists specifically to answer "did it look in the right place,
-    /// and what did it find there" without needing console access at all --
-    /// see <see cref="ExtensionStatus"/>'s own remarks.
-    /// </summary>
+    /// <summary>Lists every folder scanned, so it's clear where extensions were looked for.</summary>
     private string BuildExtensionStatus()
     {
         var lines = new List<string>();
@@ -1745,13 +1258,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Reorders both <see cref="AutoResponderRuleRows"/> (via
-    /// <see cref="ObservableCollection{T}.Move"/>, so the ListBox reorders
-    /// in place without losing its selection) and the underlying
-    /// <see cref="AutoResponderRules.Rules"/> list -- the two have to move
-    /// together since <see cref="AutoResponderRules.Evaluate"/> walks its
-    /// own list in order, oblivious to whatever order the UI happens to
-    /// display rows in.
+    /// Moves the rule in both lists; <see cref="AutoResponderRules.Evaluate"/>
+    /// uses the order of its own list.
     /// </summary>
     private void MoveSelectedAutoResponderRule(int direction)
     {
@@ -1790,20 +1298,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Imports every session from the .saz file at <paramref name="path"/>
-    /// into the live session list. <see cref="SazReader"/> adds each one
-    /// through <see cref="SessionStore.Add"/>, the same call live capture
-    /// makes, so an imported session arrives through the exact same
-    /// SessionAdded handler wired up in the constructor -- no separate
-    /// "imported row" rendering path to keep in sync with the real one.
-    ///
-    /// Genuinely async, awaited from an <c>async void</c> click handler in
-    /// MainWindow.axaml.cs, not wrapped in a <see cref="RelayCommand"/> --
-    /// this app's <c>RelayCommand</c> is synchronous-only, and blocking the
-    /// UI thread on this instead (<c>.GetAwaiter().GetResult()</c>) would
-    /// risk deadlocking against <see cref="SazReader"/>'s own async reads,
-    /// which don't use <c>ConfigureAwait(false)</c> -- see that class's own
-    /// remarks.
+    /// Imports a .saz file. Sessions go through <see cref="SessionStore.Add"/>,
+    /// so they arrive like live captures. Awaited rather than blocked on, since
+    /// <see cref="SazReader"/> doesn't use <c>ConfigureAwait(false)</c>.
     /// </summary>
     public async Task ImportSazAsync(string path)
     {
@@ -1826,13 +1323,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// Rebuilds <see cref="FilteredSessions"/> from scratch against
-    /// <see cref="Sessions"/> and the current <see cref="_query"/> -- the
-    /// only time a full rescan is warranted, since it's the query that
-    /// changed, not any one session (the SessionAdded handler above covers
-    /// that far cheaper, one row at a time).
-    /// </summary>
+    /// <summary>Full rescan; only needed when the query changes.</summary>
     private void ApplyFilter()
     {
         FilteredSessions.Clear();
@@ -1845,13 +1336,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// Rebuilds both tab lists from scratch for whatever's now selected
-    /// (or empties them when nothing is). Runs every applicable inspector
-    /// eagerly rather than lazily per-tab -- these are small, local
-    /// computations over one session's headers/body, not worth the extra
-    /// state a lazy scheme would need.
-    /// </summary>
+    /// <summary>Rebuilds both tab lists, running every inspector up front; they're cheap.</summary>
     private void RefreshInspectors()
     {
         RequestInspectors.Clear();
@@ -1878,10 +1363,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             }
             catch (Exception ex)
             {
-                // An inspector throwing shouldn't take the rest of the tabs
-                // (or the app) down with it -- show the failure in its own
-                // tab instead, same as a well-behaved inspector returning
-                // ErrorContent on purpose.
+                // A failing inspector shows its error in its own tab.
                 content = new ErrorContent($"{inspector.DisplayName} inspector failed: {ex.Message}");
             }
 
@@ -1891,29 +1373,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
     public void Dispose()
     {
-        // Unloaded regardless of whether the proxy is currently running --
-        // an extension that never got started still had OnLoad() called
-        // above and deserves its OnBeforeUnload() call, matching
-        // IFiddlerExtension's own paired-lifecycle contract.
+        // OnBeforeUnload is owed even if the proxy never started.
         _extensionHost.Unload();
         ExtensionUi.SetTabHost(null);
 
-        // Also regardless of whether the proxy is currently running --
-        // unlike the _proxy.Stop() block just below, this can't simply be
-        // reached by falling through the early-return, because EnsureRunning
-        // (see Start()) can succeed even in the rare case where the proxy
-        // listener itself then fails to start, which would otherwise leave
-        // an orphaned legacy host process behind if the app closes (rather
-        // than Stop being clicked first) while _proxy never got set. A
-        // no-op either way unless this app's own Start() actually launched
-        // something -- see LegacyExtensionHostLauncher's own remarks.
+        // Even if never started: EnsureRunning can succeed when the listener
+        // then fails, which would otherwise orphan the legacy host.
         _legacyExtensionHostLauncher.StopIfLaunchedByUs(
             log: message => Console.WriteLine($"[Extension] {message}"));
 
-        // Saved after extensions unload (an extension may store its own
-        // settings in OnBeforeUnload, through FiddlerApplication.Prefs), but
-        // before the early return below, so settings are saved whether or
-        // not the proxy was ever started.
+        // After extensions unload, since they may save settings in
+        // OnBeforeUnload.
         SaveAutoResponderRulesNow();
         _preferences.Dispose();
 
@@ -1928,22 +1398,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// File -&gt; Import via Extension: asks which format to use (see
-    /// <see cref="PickFormatAsync"/>), then runs that importer's
-    /// <see cref="ISessionImporter.ImportSessions"/> on a background thread
-    /// and adds whatever it returns through <see cref="SessionStore.Add"/> --
-    /// the same call live capture and <see cref="ImportSazAsync"/> both
-    /// already make, so an extension-imported session arrives through the
-    /// exact same SessionAdded handler.
-    ///
-    /// The options dictionary is always empty: the host has no notion of
-    /// what any given format needs, so an importer that needs a file path
-    /// asks for it itself, as a real Fiddler extension would (a ported one
-    /// through Utilities.ObtainOpenFilename, which App.axaml.cs routes to
-    /// Avalonia's file picker).
-    ///
-    /// <c>async void</c> because it's a command handler; everything inside
-    /// is caught, so nothing can escape onto the UI thread.
+    /// File > Import via Extension. Runs the importer on a background thread.
+    /// No options are passed; an importer that needs a file asks for one
+    /// itself, as in Fiddler.
     /// </summary>
     private async void ImportViaExtension()
     {
@@ -1975,13 +1432,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
-    /// <summary>
-    /// File -&gt; Export via Extension: the export counterpart of
-    /// <see cref="ImportViaExtension"/> -- pick a format, then run that
-    /// exporter against every captured session on a background thread.
-    /// <c>options</c> is empty for the same reason (an exporter that needs a
-    /// destination path asks for it itself).
-    /// </summary>
+    /// <summary>File > Export via Extension, for every captured session.</summary>
     private async void ExportViaExtension()
     {
         try
@@ -2011,13 +1462,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Which format to import or export with. No dialog when there's only
-    /// one choice. With several, the picker supplied by App.axaml.cs
-    /// (FormatPickerWindow) is shown with the last choice highlighted, and
-    /// the new choice is remembered in preferences (same file and behavior
-    /// on Windows and macOS). Null when there are no choices or the user
-    /// cancels. A host that supplied no picker (tests, tooling) gets the
-    /// remembered or first choice.
+    /// No dialog for a single choice; otherwise the picker, starting on the
+    /// last choice. Without a picker, the remembered or first choice.
     /// </summary>
     private async Task<FormatChoice?> PickFormatAsync(IReadOnlyList<FormatChoice> choices, string preferenceKey, string heading)
     {
@@ -2042,25 +1488,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Help -&gt; Documentation: opens the bundled end-user-facing User Guide
-    /// (docs/User Guide.md in the repo, shipped as loose build output next
-    /// to the executable -- see Violens.DesktopUi.csproj's own remarks on
-    /// the None/Link/CopyToOutputDirectory entry that puts it there) through
-    /// whatever the OS has registered for .md files -- the same
-    /// UseShellExecute=true approach used to reach a real file-open dialog
-    /// nowhere else in this app, since this is the first place that opens a
-    /// file rather than picking one. Deliberately a local bundled copy
-    /// rather than a GitHub link: as of this pass the repo itself isn't
-    /// pushed anywhere with a public URL to point at, and even once it is, a
-    /// local copy works offline and always matches whatever build is
-    /// actually running, which a hardcoded URL to one specific tag or branch
-    /// wouldn't. No live UI control is needed here (unlike
-    /// BrowseFiddlerScriptButton_Click/OpenSazMenuItem_Click, which need
-    /// TopLevel.StorageProvider), so this lives here rather than in
-    /// MainWindow.axaml.cs. A missing association for .md files, or the doc
-    /// not having been copied to the output folder for some reason, fails
-    /// the same way Start's own try/catch does -- reported through
-    /// StatusText rather than an unhandled exception.
+    /// Help > Documentation: opens the bundled User Guide, which works offline
+    /// and matches the running build.
     /// </summary>
     private void OpenDocumentation()
     {
@@ -2069,9 +1498,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             var path = Path.Combine(AppContext.BaseDirectory, "Documentation", "User Guide.md");
             if (!File.Exists(path))
             {
-                // In the macOS app bundle, documentation lives in
-                // Contents/Resources, next to Contents/MacOS: only code may go
-                // in Contents/MacOS, or the bundle's signature won't verify.
+                // In the macOS bundle, documentation lives in Contents/Resources; only
+                // code may go in Contents/MacOS, or the signature won't verify.
                 var bundled = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "Resources", "Documentation", "User Guide.md"));
                 if (File.Exists(bundled))
                 {

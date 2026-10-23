@@ -6,27 +6,14 @@ using System.Reflection.PortableExecutable;
 namespace Violens.LegacyExtensionHost;
 
 /// <summary>
-/// Reads a candidate extension `.dll`'s own <c>AssemblyRef</c> metadata
-/// table (ECMA-335 II.22.5) directly, via <see cref="PEReader"/>/
-/// <see cref="MetadataReader"/> -- the same "read the reference tables,
-/// never the IL method bodies" methodology this whole project's clean-room
-/// research has used throughout (see the design doc's own metadata-reading
-/// sections), just via the purpose-built .NET API for it instead of a
-/// hand-rolled byte parser. Crucially, this never loads or executes the
-/// candidate assembly (no <see cref="System.Reflection.Assembly.LoadFrom"/>
-/// call here) -- it's a pure metadata read of the file's bytes, so it's
-/// safe to run on a `.dll` this host has no intention of actually loading.
+/// Reads a DLL's AssemblyRef table with <see cref="MetadataReader"/>,
+/// without loading or running it.
 /// </summary>
 internal static class FiddlerAssemblyReferenceInspector
 {
     /// <summary>
-    /// Looks for an <c>AssemblyRef</c> row named, case-insensitively,
-    /// "Fiddler" -- the one real, historical Fiddler Classic assembly name
-    /// every sample this project inspected declares. Returns
-    /// <see langword="false"/> if the file isn't a readable .NET assembly
-    /// at all, or references nothing by that name (which is a normal,
-    /// non-error outcome -- plenty of `.dll`s dropped into this folder by
-    /// mistake won't be Fiddler Classic extensions at all).
+    /// Finds a reference to an assembly named "Fiddler". False if the file
+    /// isn't a .NET assembly or has no such reference.
     /// </summary>
     public static bool TryFindFiddlerReference(string dllPath, out string name, out Version version)
     {

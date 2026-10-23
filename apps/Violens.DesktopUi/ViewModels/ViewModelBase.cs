@@ -3,12 +3,7 @@ using System.Runtime.CompilerServices;
 
 namespace Violens.DesktopUi.ViewModels;
 
-/// <summary>
-/// Minimal <see cref="INotifyPropertyChanged"/> base. No MVVM toolkit
-/// dependency on purpose -- this app has exactly one view model so far, and
-/// pulling in a source-generator package for a handful of properties isn't
-/// worth the extra moving part yet. Revisit once there's a second one.
-/// </summary>
+/// <summary>Minimal <see cref="INotifyPropertyChanged"/> base, rather than an MVVM toolkit.</summary>
 public abstract class ViewModelBase : INotifyPropertyChanged
 {
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -25,13 +20,7 @@ public abstract class ViewModelBase : INotifyPropertyChanged
         return true;
     }
 
-    /// <summary>
-    /// For a property that isn't backed by a plain field -- one that reads
-    /// through to another object's state (see MainWindowViewModel's
-    /// BreakOnAllRequests, or PendingBreakpointViewModel's RawText, both of
-    /// which delegate to a Violens.ProxyCore type) -- so
-    /// <see cref="SetField{T}"/>'s own ref-field comparison doesn't apply.
-    /// </summary>
+    /// <summary>For properties that read through to another object rather than a field.</summary>
     protected void RaisePropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 }

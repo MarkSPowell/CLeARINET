@@ -5,18 +5,9 @@ using Violens.Compatibility.FiddlerScript;
 namespace Violens.SampleExtension;
 
 /// <summary>
-/// An original <see cref="IRequestInspector2"/> -- exercises every
-/// <see cref="IInspector2"/> member the exact way
-/// <c>Inspector2Adapter</c> actually uses them: <see cref="headers"/> is
-/// set first, then <see cref="body"/>, and whatever this class does in
-/// response to that is what ends up in the request-side "SampleRequestInspector"
-/// tab once <c>ExtensionHost</c> discovers it and
-/// <c>Inspector2Adapter.ForRequest</c> wraps it. Prepends a one-line
-/// summary to whatever body it's given, so the transformation is visible
-/// in that tab -- proof the "set body, read body back" round trip
-/// <see cref="IInspector2"/>'s own remarks describe actually works against
-/// a real, separately-compiled extension, not just the interfaces in
-/// isolation.
+/// An original <see cref="IRequestInspector2"/>. Prepends a summary line to
+/// the body it's given, so the tab shows the "set body, read it back"
+/// round trip working.
 /// </summary>
 public sealed class SampleRequestInspector : IRequestInspector2
 {
@@ -24,13 +15,7 @@ public sealed class SampleRequestInspector : IRequestInspector2
 
     public ExchangeHeaders? headers { get; set; }
 
-    /// <summary>
-    /// Setting this prepends a summary line (header count, original body
-    /// length) and flips <see cref="bDirty"/> -- reading it back afterward
-    /// returns the transformed bytes, not the ones that were set, which is
-    /// the whole point: this is what lets a real inspector rewrite what the
-    /// host displays.
-    /// </summary>
+    /// <summary>Setting it prepends a summary line; reading it returns the changed bytes.</summary>
     public byte[]? body
     {
         get => _body;

@@ -16,51 +16,18 @@ using Violens.ProxyCore.WebSockets;
 namespace Violens.ProxyCore.Proxy;
 
 /// <summary>
-/// An intercepting HTTP proxy: accepts a CONNECT tunnel and terminates TLS
-/// toward the client with a freshly-signed leaf, or takes plain http://
-/// proxy requests as they come (see <see cref="PlainHttpRequest"/>), and
-/// reads each request/response pair on the connection as HTTP/1.1 (see
-/// <see cref="Http1MessageReader"/>), capturing it into
-/// <see cref="SessionStore"/> along the way. The upstream connection
-/// itself is opened lazily, inside <c>PumpSessionsAsync</c>, the first time
-/// a request actually needs to reach the real server -- see that method's
-/// own remarks on why <see cref="AutoResponderRules"/> requires that.
-///
-/// Every message is read as a preamble first (start line + headers only),
-/// which is enough for <see cref="BreakpointManager"/> and
-/// <see cref="AutoResponderRules"/> to both decide what happens next --
-/// <c>PumpSessionsAsync</c> below only buffers a body fully (so it can be
-/// edited, or so a fully-local response can be built) when that's actually
-/// going to happen; otherwise the body is relayed live via
-/// <see cref="Http1MessageReader.RelayBodyAsync"/> instead. That split
-/// matters for anything long-lived -- a streamed chat response, a large
-/// download -- where buffering the whole thing first would mean the other
-/// side sees nothing at all until it's completely finished.
-///
-/// Still deliberately narrow: one connection is handled as a strict
-/// request-then-response ping-pong (no pipelining), and a handful of
-/// framing edge cases aren't covered yet -- see Http1MessageReader's
-/// remarks. That's enough to prove the session model and, next, the SAZ
-/// writer against real traffic, which is the rest of Phase 1.
-///
-/// FiddlerScript's own two hook points (<c>Handlers.OnBeforeRequest</c>/
-/// <c>OnBeforeResponse</c>, via an optional <see cref="IScriptRunner"/>)
-/// are wired in on the same "buffer only when something will actually act on
-/// it" fork described above -- see <c>PumpSessionsAsync</c>'s own remarks for
-/// exactly where they run and what's deliberately still out of scope. Loaded
-/// .NET extensions' own <c>IAutoTamper</c> hooks (via an optional
-/// <see cref="IExtensionAutoTamperHost"/>) share that exact same fork and
-/// ordering -- see that interface's own remarks for why FiddlerScript's
-/// handler runs first.
+/// The intercepting proxy. Accepts CONNECT tunnels, terminating TLS with a
+/// leaf certificate, and plain http:// proxy requests, and records each
+/// request/response pair in the <see cref="SessionStore"/>. Bodies are
+/// buffered only when a breakpoint, AutoResponder, FiddlerScript or an
+/// extension will act on them; otherwise they're relayed as they arrive.
+/// One request at a time per connection; no pipelining.
 /// </summary>
 public sealed class InterceptingProxyListener
 {
     /// <summary>
-    /// For AutoResponder rules that answer with another URL's content. Goes
-    /// out the way VioLens's own connections do (see
-    /// <see cref="UpstreamWebProxy"/>): never through the system proxy,
-    /// which while capturing is VioLens itself, so the fetch isn't
-    /// captured as a session of its own.
+    /// For AutoResponder rules that serve another URL. Never goes through the
+    /// system proxy, which while capturing is VioLens itself.
     /// </summary>
     private readonly HttpClient _proxyUrlClient;
 
@@ -100,25 +67,12 @@ public sealed class InterceptingProxyListener
             UseProxy = true,
             AutomaticDecompression = DecompressionMethods.None,
         });
-        // A fresh, untouched manager/rules set has nothing configured, so
-        // BreakpointRules.AnyActive / AutoResponderRules.AnyActive are both
-        // false and every call this listener makes into either is a single
-        // boolean check that returns immediately -- callers that don't care
-        // about breakpoints or AutoResponder (tests, the console dev host)
-        // get behavior identical to before either existed.
+        // With nothing configured, each check is a single boolean.
         _breakpointManager = breakpointManager ?? new BreakpointManager();
         _autoResponderRules = autoResponderRules ?? new AutoResponderRules();
-        // No default instance here, unlike the two above -- a null
-        // scriptRunner just means "no script loaded," and every call site
-        // below already treats that the same way AutoResponderRules.AnyActive
-        // being false does: HasOnBeforeRequest/HasOnBeforeResponse are read
-        // through a null-conditional, so nothing needs a real no-op
-        // implementation to stay safe.
+        // Null means no script loaded.
         _scriptRunner = scriptRunner;
-        // Same reasoning as _scriptRunner immediately above: a null
-        // extensionHost just means "no .NET extensions loaded," and every
-        // call site reads HasAnyRequestBeforeHandlers/HasAnyResponseBeforeHandlers
-        // through a null-conditional.
+        // Null means no extensions loaded.
         _extensionHost = extensionHost;
         // Ported Fiddler-shaped extensions (see IExtensionSessionHost). Null,
         // or IsActive false, means none are loaded.
@@ -127,13 +81,7 @@ public sealed class InterceptingProxyListener
         _listener = new TcpListener(allowRemoteClients ? IPAddress.Any : IPAddress.Loopback, port);
     }
 
-    /// <summary>
-    /// The port actually being listened on. Only meaningful after
-    /// <see cref="Start"/> -- reading it before that throws, same as
-    /// <see cref="TcpListener.LocalEndpoint"/> does. Needed because
-    /// <see cref="StartOnAvailablePort"/> may bind somewhere other than the
-    /// port that was asked for.
-    /// </summary>
+    /// <summary>The port being listened on, which may differ from the one requested. Valid after <see cref="Start"/>.</summary>
     public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
 
     /// <summary>
@@ -233,12 +181,8 @@ public sealed class InterceptingProxyListener
     }
 
     /// <summary>
-    /// Starts on <paramref name="preferredPort"/> when it's free. When
-    /// something else already holds it -- in practice, almost always
-    /// another VioLens process still running (the console dev host, or a
-    /// previous launch of this app that didn't shut down cleanly) -- falls
-    /// back to whatever free port the OS hands out, rather than failing
-    /// outright. Callers read the actual port back from <see cref="Port"/>.
+    /// Starts on <paramref name="preferredPort"/>, or on any free port if it's
+    /// taken (usually by another VioLens). Read the result from <see cref="Port"/>.
     /// </summary>
     public static InterceptingProxyListener StartOnAvailablePort(
         int preferredPort,
@@ -259,9 +203,7 @@ public sealed class InterceptingProxyListener
         }
         catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
         {
-            // Port 0 tells the OS to hand back any free port -- the same
-            // trick ASP.NET Core's test host and countless other tools use
-            // to avoid ever hard-failing on a port collision.
+            // Port 0: the OS picks a free port.
             var fallback = new InterceptingProxyListener(0, leafProvider, sessionStore, breakpointManager, autoResponderRules, scriptRunner, extensionHost, sessionHost, allowRemoteClients);
             fallback.Start();
             return fallback;
@@ -380,14 +322,12 @@ public sealed class InterceptingProxyListener
             {
                 ServerCertificateSelectionCallback = (_, sniHostName) =>
                     _leafProvider.GetCertificateFor(string.IsNullOrEmpty(sniHostName) ? targetHost : sniHostName),
-                // Let the OS pick the best mutually-supported protocol
-                // (TLS 1.2/1.3) rather than pinning one here.
+                // Let the OS choose TLS 1.2 or 1.3.
                 EnabledSslProtocols = SslProtocols.None,
             };
             await clientTls.AuthenticateAsServerAsync(serverOptions, cancellationToken);
 
-            // The upstream connection is NOT made here anymore -- see
-            // PumpSessionsAsync's own remarks on why it has to be lazy.
+            // The server connection is opened later, only when needed.
             await PumpSessionsAsync(
                 isTls: true, targetHost, targetPort, client, new ReadBufferedStream(clientTls), firstRequest: null, _sessionStore, _breakpointManager,
                 _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, _proxyUrlClient, Port,
@@ -413,11 +353,7 @@ public sealed class InterceptingProxyListener
 
     private static string DescribeException(Exception ex)
     {
-        // AuthenticationException's own Message is almost always the
-        // unhelpful "Authentication failed, see inner exception." -- the
-        // actual reason lives in InnerException (sometimes nested a
-        // couple of levels deep), so walk the chain instead of printing
-        // just the outer wrapper.
+        // The useful reason is in the inner exceptions.
         var description = $"{ex.GetType().Name}: {ex.Message}";
         var inner = ex.InnerException;
         while (inner is not null)
@@ -430,47 +366,16 @@ public sealed class InterceptingProxyListener
     }
 
     /// <summary>
-    /// One CONNECT tunnel's worth of request/response pairs. The upstream
-    /// TLS connection is opened lazily, the first time a request is
-    /// actually going to reach the real server, and reused for every later
-    /// request on this same tunnel -- never opened at all for a tunnel
-    /// where <see cref="AutoResponderRules"/> answers every single request
-    /// itself. That laziness is the whole point of AutoResponder's offline
-    /// testing use case (see the Project Plan doc's Requirements-derived
-    /// notes): a rule that serves a local file or returns <c>*drop</c>
-    /// needs to work with no route to the real server at all, which an
-    /// eager upstream connect (the design before AutoResponder existed)
-    /// would have broken outright.
+    /// Handles the requests on one connection. The server connection is opened
+    /// only when a request actually needs it, so AutoResponder can answer every
+    /// request with no route to the server at all.
     ///
-    /// <paramref name="scriptRunner"/>'s two hook points run only on the
-    /// "forward to the real server" path below, never for a request
-    /// AutoResponder answers locally (that local-answer branch returns
-    /// before this parameter is ever consulted) -- a deliberate scope cut,
-    /// not confirmed to match real Fiddler's own ordering; see the
-    /// FiddlerScript Compatibility Design doc. On that forward path, each
-    /// hook forces the same body-buffering a matching breakpoint or
-    /// AutoResponder force-flag already forces (see
-    /// <see cref="IScriptRunner.HasOnBeforeRequest"/>/
-    /// <see cref="IScriptRunner.HasOnBeforeResponse"/>), and runs
-    /// *before* the corresponding breakpoint check -- the same order real
-    /// Fiddler uses (a script can set <c>oSession["x-breakrequest"]</c> to
-    /// arm a pause from inside <c>OnBeforeRequest</c> itself), even though
-    /// nothing here actually reads that flag back yet -- see
-    /// <c>BreakpointManager</c>'s own remarks on the pre-existing gap this
-    /// mirrors rather than silently fixes.
-    ///
-    /// <paramref name="extensionHost"/>'s Before hooks join that exact same
-    /// fork and run immediately after <paramref name="scriptRunner"/>'s own
-    /// (an assumed, not confirmed-against-real-Fiddler ordering -- see
-    /// <see cref="IExtensionAutoTamperHost"/>'s own remarks), so a loaded
-    /// extension always sees whatever FiddlerScript already edited. The
-    /// After hooks (<see cref="IExtensionAutoTamperHost.RunRequestAfter"/>/
-    /// <see cref="IExtensionAutoTamperHost.RunResponseAfter"/>) run
-    /// unconditionally right after the corresponding write completes, on
-    /// both the buffered and relay-live paths -- they never need to force
-    /// buffering (see that interface's own remarks on why), so unlike the
-    /// Before hooks they're called from a single spot after each fork
-    /// rejoins rather than from inside either branch.
+    /// Per request, before it's forwarded: FiddlerScript's OnBeforeRequest,
+    /// then VioLens extensions' AutoTamperRequestBefore, then ported
+    /// extensions', then the request breakpoint. Fiddler runs the script before
+    /// breakpoints; the extension order is assumed. Responses follow the same
+    /// order. Requests AutoResponder answers skip all of these. The After hooks
+    /// run once each message is sent, whether buffered or relayed.
     /// </summary>
     private static async Task PumpSessionsAsync(
         bool isTls,
@@ -493,11 +398,9 @@ public sealed class InterceptingProxyListener
         long maxCapturedBodyBytes,
         CancellationToken cancellationToken)
     {
-        // clientTls is the client's TLS stream for a CONNECT tunnel, or its
-        // plain connection for http:// requests (isTls false). A plain
-        // connection can carry requests for different servers one after
-        // another, so for those targetHost/targetPort are set per request
-        // and the server connection is replaced when they change.
+        // clientTls is the TLS stream for a CONNECT tunnel, or the plain
+        // connection for http:// requests. A plain connection can carry
+        // requests for different servers, so the target is set per request.
         var scheme = isTls ? "https" : "http";
         TcpClient? upstreamClient = null;
         Stream? upstreamTls = null;
@@ -509,11 +412,7 @@ public sealed class InterceptingProxyListener
         SessionTimingRecorder? currentTiming = null;
         var pendingRequest = firstRequest;
 
-        // Opens the upstream connection the first time a request on this
-        // tunnel actually has to reach the real server, then reuses it. A
-        // request that AutoResponder or an extension answers never gets
-        // here, so a host that doesn't even resolve (the CSP extension's
-        // report host, say) still works.
+        // Opened the first time a request has to reach the server, then reused.
         async Task<Stream> EnsureUpstreamAsync(string target)
         {
             var key = $"{targetHost}:{targetPort}";
@@ -536,9 +435,7 @@ public sealed class InterceptingProxyListener
 
             if (upstreamTls is null)
             {
-                // Directly, through the network's proxy, or as its PAC
-                // script says -- trying the next route when one can't be
-                // reached, as browsers do.
+                // Trying the next route when one can't be reached, as browsers do.
                 upstreamClient?.Dispose(); // left over from a failed TLS handshake
                 upstreamClient = null;
                 upstreamTlsProbe = null;
@@ -571,14 +468,9 @@ public sealed class InterceptingProxyListener
                 {
                     var tls = new SslStream(upstreamClient!.GetStream(), leaveInnerStreamOpen: false);
 
-                    // The probe notices a server asking for a client
-                    // certificate (mutual TLS): that request comes to
-                    // VioLens, not the browser, so it's recorded on the
-                    // session instead. Default certificate validation,
-                    // deliberately: this proxy should surface a real
-                    // upstream cert problem, not hide it, even though it's
-                    // standing in the middle of the connection for the
-                    // client's side.
+                    // The probe records a client-certificate request on the session.
+                    // Default certificate validation: a real upstream certificate problem
+                    // should show, not be hidden.
                     upstreamTlsProbe = new UpstreamTlsProbe();
                     upstreamTlsProbe.Attach(tls);
                     if (currentTiming is not null)
@@ -701,10 +593,8 @@ public sealed class InterceptingProxyListener
             }
         }
 
-        // Opens the server connection, or, if that fails (the name doesn't
-        // resolve, nothing's listening, the network's proxy refuses), answers
-        // the client with 502 Bad Gateway and records that as the session --
-        // returns null then, and the connection ends.
+        // Opens the server connection, or answers 502 Bad Gateway, records it,
+        // and returns null.
         async Task<Stream?> TryEnsureUpstreamAsync(CapturedRequest outgoing, DateTimeOffset startedAt)
         {
             try
@@ -740,24 +630,19 @@ public sealed class InterceptingProxyListener
                 pendingRequest = null;
                 if (requestPreamble is null)
                 {
-                    // The client closed the connection between requests --
-                    // the normal way a keep-alive HTTP/1.1 connection ends.
+                    // The client closed the connection between requests.
                     return;
                 }
 
-                // Timed from the request's arrival, not from when the
-                // connection started waiting for it (keep-alive idle time).
+                // Timed from the request's arrival, not keep-alive idle time.
                 var startedAt = DateTimeOffset.Now;
                 var timing = new SessionTimingRecorder();
                 currentTiming = timing;
 
                 if (!isTls)
                 {
-                    // Store and process plain HTTP the way HTTPS is: a
-                    // path-only target plus a Host header (see
-                    // PlainHttpRequest). A later request on the same
-                    // connection may be for VioLens itself, or something
-                    // that can't be forwarded.
+                    // Plain HTTP is stored like HTTPS: a path-only target plus a Host header
+                    // (see PlainHttpRequest).
                     if (ProxyHomePage.IsRequestForProxy(requestPreamble.Target, ownPort) && !requestPreamble.Target.StartsWith('/'))
                     {
                         await AnswerAsync(clientTls, requestPreamble, ProxyHomePage.Build(requestPreamble.Target, rootCertificateDer()), cancellationToken);
@@ -775,10 +660,8 @@ public sealed class InterceptingProxyListener
                     targetPort = plainPort;
                 }
 
-                // AutoResponderRules only ever looks at method/URL, never
-                // the body -- same reasoning as BreakpointRules.ShouldBreakBeforeRequest
-                // (see its own remarks) -- so this, too, can be decided
-                // from the preamble alone.
+                // AutoResponder only looks at the method and URL, so it can decide from
+                // the preamble.
                 var url = isTls
                     ? $"https://{targetHost}{requestPreamble.Target}"
                     : $"http://{ContentDecoder.FindHeader(requestPreamble.Headers, "Host") ?? targetHost}{requestPreamble.Target}";
@@ -788,10 +671,7 @@ public sealed class InterceptingProxyListener
 
                 if (outcome.DelayMilliseconds > 0)
                 {
-                    // Applies whether the request ends up answered locally
-                    // or forwarded for real -- Fiddler's own *delay: is a
-                    // general "make this exchange slower," not tied to
-                    // either path specifically.
+                    // Applies whether the request is answered locally or forwarded.
                     await Task.Delay(outcome.DelayMilliseconds, cancellationToken);
                 }
 
@@ -801,23 +681,14 @@ public sealed class InterceptingProxyListener
 
                 if (isAnsweredLocally)
                 {
-                    // Always buffer the full body here rather than relaying
-                    // it -- nothing downstream of this branch forwards
-                    // anything live, so RelayBodyAsync's whole reason to
-                    // exist (see Http1MessageReader's remarks) doesn't
-                    // apply.
+                    // Answered locally, so there's nothing to relay.
                     var localRequestBody = await Http1MessageReader.ReadBodyAsync(clientTls, requestPreamble.Headers, cancellationToken);
                     var localRequest = requestPreamble with { Body = localRequestBody };
 
                     if (outcome.FinalActionKind == AutoResponderActionKind.Reset)
                     {
                         RecordAutoRespondedSession(sessionStore, targetHost, scheme, startedAt, localRequest, "Connection Reset (AutoResponder *reset)", timing.Build(answeredLocally: true));
-                        // A graceful Dispose sends a normal FIN; a TCP RST
-                        // needs the zero-second linger option set first --
-                        // this is the one case that needs the raw
-                        // TcpClient/Socket rather than just the streams
-                        // wrapping it, which is why it's passed in here at
-                        // all.
+                        // A TCP RST needs a zero linger time.
                         clientConnection.Client.LingerState = new LingerOption(true, 0);
                         clientConnection.Close();
                         return;
@@ -826,9 +697,7 @@ public sealed class InterceptingProxyListener
                     if (outcome.FinalActionKind == AutoResponderActionKind.Drop)
                     {
                         RecordAutoRespondedSession(sessionStore, targetHost, scheme, startedAt, localRequest, "Connection Dropped (AutoResponder *drop)", timing.Build(answeredLocally: true));
-                        // No response, no RST -- just stop. The outer
-                        // `using` declarations in HandleClientAsync close
-                        // this connection normally once this method returns.
+                        // No response; the connection just closes.
                         return;
                     }
 
@@ -842,35 +711,22 @@ public sealed class InterceptingProxyListener
                     continue;
                 }
 
-                // Not answered by AutoResponder. The upstream connection is
-                // opened later, by EnsureUpstreamAsync, once it's clear a
-                // ported extension isn't answering this request itself.
+                // Not answered by AutoResponder. The server connection waits until no
+                // ported extension answers the request either.
                 var outgoingPreamble = outcome.HeadersToSet.Count > 0
                     ? requestPreamble with { Headers = MergeHeaders(requestPreamble.Headers, outcome.HeadersToSet) }
                     : requestPreamble;
 
-                // Ported Fiddler-shaped extensions get one session object for
-                // this whole request (see IExtensionSessionHost). Their
-                // hooks run right after the VioLens-native extensions'
-                // matching ones, an assumed ordering like the one described
-                // in this method's remarks.
+                // Ported extensions get one session object for the whole request (see
+                // IExtensionSessionHost).
                 var extensionSession = sessionHost is { IsActive: true }
                     ? sessionHost.BeginSession(sessionStore.PeekNextId(), targetHost, scheme)
                     : null;
                 extensionSession?.PeekAtRequestHeaders(outgoingPreamble);
 
-                // BreakpointRules.ShouldBreakBeforeRequest only ever looks
-                // at Method/Target, never the body, so this can be decided
-                // from the preamble alone -- before a single byte of the
-                // request body has been read. That's what makes the fork
-                // below possible: buffer the body only when something is
-                // actually going to pause on it, relay it live otherwise.
-                // outcome.ForceBreakpointBeforeRequest folds AutoResponder's
-                // own *bpu into the exact same fork, rather than needing a
-                // second, parallel pause mechanism -- scriptRunner's own
-                // HasOnBeforeRequest joins that same fork for exactly the
-                // same reason: a loaded script that defines the handler is
-                // always going to want the body, same as a breakpoint would.
+                // Breakpoint rules only look at the method and target, so this is
+                // decided before reading the body: buffer it only if something will
+                // act on it, otherwise relay it.
                 var mustBufferRequestForScript = scriptRunner?.HasOnBeforeRequest ?? false;
                 var mustBufferRequestForExtensions = extensionHost?.HasAnyRequestBeforeHandlers ?? false;
                 CapturedRequest request;
@@ -883,29 +739,20 @@ public sealed class InterceptingProxyListener
                     var requestBody = await Http1MessageReader.ReadBodyAsync(clientTls, outgoingPreamble.Headers, cancellationToken);
                     request = outgoingPreamble with { Body = requestBody };
 
-                    // FiddlerScript's OnBeforeRequest, when the loaded
-                    // script defines it, runs before the breakpoint check
-                    // just below -- see this method's own remarks on why
-                    // that ordering (and not the reverse) is what matches
-                    // real Fiddler.
                     if (mustBufferRequestForScript)
                     {
                         var peekedSessionId = sessionStore.PeekNextId();
                         request = scriptRunner!.RunOnBeforeRequest(peekedSessionId, targetHost, request).Request;
                     }
 
-                    // Loaded .NET extensions' own AutoTamperRequestBefore
-                    // hooks run next, after FiddlerScript's own handler --
-                    // see this method's own remarks on that ordering.
                     if (mustBufferRequestForExtensions)
                     {
                         var peekedSessionId = sessionStore.PeekNextId();
                         request = extensionHost!.RunRequestBefore(peekedSessionId, targetHost, request);
                     }
 
-                    // Ported extensions' AutoTamperRequestBefore. One of
-                    // them may answer the request itself, in which case it
-                    // never reaches the server (or a request breakpoint).
+                    // Ported extensions may answer the request themselves, in which case it
+                    // never reaches the server or a breakpoint.
                     if (extensionSession is not null)
                     {
                         var result = extensionSession.RequestBefore(request);
@@ -915,9 +762,7 @@ public sealed class InterceptingProxyListener
 
                     if (extensionLocalResponse is null)
                     {
-                        // A breakpoint here (Fiddler's "bpu"/bpm/break-on-all-requests,
-                        // or AutoResponder's own *bpu) can hold this connection
-                        // open and edit the request before it's forwarded.
+                        // May pause here for editing.
                         var requestPauseStart = SessionTimingRecorder.Now();
                         request = await breakpointManager.ApplyRequestBreakpointAsync(targetHost, request, cancellationToken);
                         timing.AddPause(requestPauseStart, SessionTimingRecorder.Now());
@@ -953,11 +798,8 @@ public sealed class InterceptingProxyListener
 
                 if (extensionLocalResponse is not null)
                 {
-                    // An extension answered (Fiddler's
-                    // utilCreateResponseAndBypassServer). Nothing was sent,
-                    // so the request-after hooks don't run. The response
-                    // hooks do, as they would for any response (an assumed
-                    // match with Fiddler Classic, not a confirmed one).
+                    // An extension answered (utilCreateResponseAndBypassServer). Nothing was
+                    // sent, so the request-after hooks don't run; the response hooks do.
                     var localResponse = extensionSession!.ResponseBefore(request, extensionLocalResponse);
                     await HttpMessageWriter.WriteResponseAsync(clientTls, localResponse, cancellationToken);
                     extensionSession.ResponseAfter(request, localResponse);
@@ -970,10 +812,6 @@ public sealed class InterceptingProxyListener
                     continue;
                 }
 
-                // Fire-and-observe -- see this method's own remarks on why
-                // this runs unconditionally, from one spot after both
-                // branches above, rather than gated and duplicated inside
-                // each one.
                 extensionHost?.RunRequestAfter(sessionStore.PeekNextId(), targetHost, request);
                 extensionSession?.RequestAfter(request);
 
@@ -1026,18 +864,12 @@ public sealed class InterceptingProxyListener
                         : await Http1MessageReader.ReadResponseBodyAsync(upstreamStream, responsePreamble.Headers, cancellationToken);
                     response = responsePreamble with { Body = responseBody };
 
-                    // Same ordering rationale as the request side: the
-                    // script's own OnBeforeResponse runs before a human
-                    // ever sees this exchange at a breakpoint.
                     if (mustBufferResponseForScript)
                     {
                         var peekedSessionId = sessionStore.PeekNextId();
                         response = scriptRunner!.RunOnBeforeResponse(peekedSessionId, targetHost, request, response).Response;
                     }
 
-                    // Loaded .NET extensions' own AutoTamperResponseBefore
-                    // hooks run next, after FiddlerScript's own handler --
-                    // same ordering as the request side above.
                     if (mustBufferResponseForExtensions)
                     {
                         var peekedSessionId = sessionStore.PeekNextId();
@@ -1059,11 +891,8 @@ public sealed class InterceptingProxyListener
                 }
                 else
                 {
-                    // The case that matters most in practice: this is what
-                    // lets a long-lived streamed response -- a chat reply
-                    // arriving token by token, easily tens of seconds --
-                    // reach the client as it's generated instead of only
-                    // once the whole thing is done.
+                    // Relayed live, so a streamed response reaches the client as it's
+                    // generated.
                     await HttpMessageWriter.WriteResponsePreambleAsync(clientTls, responsePreamble, cancellationToken);
                     var responseBody = responseHasNoBody
                         ? Http1MessageReader.RelayedBody.Empty
@@ -1073,9 +902,6 @@ public sealed class InterceptingProxyListener
                     relayedResponseBody = responseBody;
                 }
 
-                // Fire-and-observe -- see this method's own remarks on why
-                // this runs unconditionally, from one spot after both
-                // branches above.
                 extensionHost?.RunResponseAfter(sessionStore.PeekNextId(), targetHost, request, response);
                 extensionSession?.ResponseAfter(request, response);
 
@@ -1096,18 +922,9 @@ public sealed class InterceptingProxyListener
 
                 if (response.StatusCode == 101)
                 {
-                    // 101 Switching Protocols -- the connection just stopped
-                    // being HTTP/1.1 (WebSocket is by far the common case here).
-                    // Trying to read another request off it would mean parsing
-                    // binary frame data as if it were an HTTP start line, which
-                    // fails outright, and even before it fails it can't work
-                    // right: a request-then-response loop is fundamentally
-                    // half-duplex, while what's needed from here on is a full
-                    // duplex, unparsed relay in both directions at once. Fall
-                    // back to exactly that for the rest of this connection's
-                    // life -- the same raw pump this spike used everywhere
-                    // before it understood HTTP/1.1 at all. A WebSocket's
-                    // messages are read out of the bytes on the way through.
+                    // 101 Switching Protocols: no longer HTTP/1.1, so relay both directions
+                    // raw for the rest of the connection, reading WebSocket messages on the
+                    // way through.
                     if (webSocket is not null)
                     {
                         await WebSocketRelay.RelayAsync(
@@ -1140,13 +957,9 @@ public sealed class InterceptingProxyListener
     }
 
     /// <summary>
-    /// Adds a session for a connection AutoResponder ended without any real
-    /// HTTP response (<c>*reset</c>/<c>*drop</c>) -- so it's still visible
-    /// in the session list instead of just silently vanishing, which would
-    /// read as a bug rather than the deliberate simulation it is. Status
-    /// code 0 is not a real HTTP status; it's this codebase's convention
-    /// for "no response was ever sent," distinguishing it in the session
-    /// grid from every genuine (even error) status code.
+    /// Records a connection AutoResponder ended with <c>*reset</c> or
+    /// <c>*drop</c>, so it still shows in the list. Status 0 means no response
+    /// was sent.
     /// </summary>
     private static void RecordAutoRespondedSession(
         SessionStore sessionStore, string targetHost, string scheme, DateTimeOffset startedAt, CapturedRequest request, string reason,
@@ -1255,14 +1068,7 @@ public sealed class InterceptingProxyListener
         return string.Equals(httpVersion, "HTTP/1.0", StringComparison.OrdinalIgnoreCase) && !keepAlive;
     }
 
-    /// <summary>
-    /// Overlays <paramref name="overrides"/> onto <paramref name="original"/>
-    /// by header name (case-insensitive): an existing header is replaced in
-    /// place, a new one is appended. Used for AutoResponder's <c>*header:</c>
-    /// action -- only reached on the "forward to the real server" path (see
-    /// <c>PumpSessionsAsync</c>'s own remarks on why a header override is
-    /// moot for a locally-answered request).
-    /// </summary>
+    /// <summary>Applies AutoResponder <c>*header:</c> overrides: replace by name, or append.</summary>
     private static IReadOnlyList<(string Name, string Value)> MergeHeaders(
         IReadOnlyList<(string Name, string Value)> original, IReadOnlyList<(string Name, string Value)> overrides)
     {
@@ -1307,13 +1113,8 @@ public sealed class InterceptingProxyListener
     }
 
     /// <summary>
-    /// A small, deliberately incomplete extension-to-Content-Type map --
-    /// enough for the file kinds an AutoResponder rule is actually likely
-    /// to serve (a JSON/HTML/text fixture, an image). Falls back to
-    /// <c>application/octet-stream</c> rather than guessing further; a
-    /// person who needs a specific Content-Type for something unusual can
-    /// still get it with <c>*header:Content-Type=...</c> on an earlier,
-    /// non-final rule.
+    /// Common file types only; anything else is application/octet-stream. A
+    /// non-final <c>*header:Content-Type=</c> rule can override it.
     /// </summary>
     private static string GuessContentType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
     {
@@ -1331,10 +1132,8 @@ public sealed class InterceptingProxyListener
     };
 
     /// <summary>
-    /// Fiddler's AutoResponder "URL proxying": fetch a different URL for
-    /// real and serve back whatever it returns, headers (Content-Encoding
-    /// included, deliberately not auto-decompressed here -- what's served
-    /// back should be exactly what that other server sent) and all.
+    /// AutoResponder URL proxying: fetch another URL and serve its response
+    /// as-is, without decompressing it.
     /// </summary>
     private static async Task<CapturedResponse> FetchAndBuildResponseAsync(HttpClient client, string url, CancellationToken cancellationToken)
     {
@@ -1368,15 +1167,9 @@ public sealed class InterceptingProxyListener
         new("HTTP/1.1", 302, "Found", [("Location", url)], []);
 
     /// <summary>
-    /// Answers an OPTIONS preflight with permissive CORS headers, mirroring
-    /// whatever the browser actually asked for (<c>Origin</c>,
-    /// <c>Access-Control-Request-Method</c>, <c>Access-Control-Request-Headers</c>)
-    /// rather than a fixed set. Fiddler Classic's own documentation names
-    /// <c>*CORSPreflightAllow</c> but doesn't spell out the exact response
-    /// shape it sends -- this is a reasonable, standards-conformant
-    /// interpretation, not a verified match. Flagging that here rather than
-    /// presenting it as confirmed Fiddler behavior; if a real Fiddler
-    /// response is ever seen to differ, this is the one place to fix.
+    /// Answers an OPTIONS preflight with CORS headers echoing what the browser
+    /// asked for. Fiddler doesn't document its exact response, so this is our
+    /// own reading of it.
     /// </summary>
     private static CapturedResponse BuildCorsPreflightResponse(CapturedRequest request)
     {

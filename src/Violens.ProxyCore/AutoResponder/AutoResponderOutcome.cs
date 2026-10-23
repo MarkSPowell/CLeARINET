@@ -1,25 +1,13 @@
 namespace Violens.ProxyCore.AutoResponder;
 
 /// <summary>
-/// What <see cref="AutoResponderRules.Evaluate"/> decided for one request:
-/// either a final action that answers the request itself (<see cref="FinalActionKind"/>
-/// non-null), or a passthrough -- possibly still carrying accumulated
-/// non-final effects (<see cref="DelayMilliseconds"/>, <see cref="HeadersToSet"/>)
-/// from rules that matched before evaluation stopped, whether it stopped
-/// because a rule's action was final or because the rule list simply ran
-/// out.
-///
-/// <c>Violens.ProxyCore.Proxy.InterceptingProxyListener</c> is the only
-/// consumer: <see cref="FinalActionKind"/> null means "forward to the real
-/// server," applying <see cref="DelayMilliseconds"/>/<see cref="HeadersToSet"/>
-/// first; non-null means "answer this locally, never touch the real
-/// server" -- see that class's own remarks on why the upstream connection
-/// has to be made lazily for that second case to actually mean what it
-/// says.
+/// The result of <see cref="AutoResponderRules.Evaluate"/>: either a final
+/// action that answers the request locally, or a passthrough carrying any
+/// delays, headers and flags from non-final rules that matched.
 /// </summary>
 public sealed class AutoResponderOutcome
 {
-    /// <summary>The plain "nothing matched, nothing to apply" case -- forward the request exactly as captured.</summary>
+    /// <summary>Nothing matched: forward the request unchanged.</summary>
     public static readonly AutoResponderOutcome PassThrough = new(
         finalActionKind: null, text: null, delayMilliseconds: 0,
         headersToSet: [], flagsToSet: [],
@@ -43,40 +31,25 @@ public sealed class AutoResponderOutcome
         ForceBreakpointAfterResponse = forceBreakpointAfterResponse;
     }
 
-    /// <summary>
-    /// Null means passthrough. Otherwise one of the final kinds from
-    /// <see cref="AutoResponderActionKind"/> -- never <see cref="AutoResponderActionKind.Delay"/>,
-    /// <see cref="AutoResponderActionKind.SetHeader"/>, or
-    /// <see cref="AutoResponderActionKind.SetFlag"/>, which by definition
-    /// never stop evaluation on their own (see <see cref="AutoResponderAction.IsFinal"/>).
-    /// </summary>
+    /// <summary>The final action, or null to pass the request through.</summary>
     public AutoResponderActionKind? FinalActionKind { get; }
 
-    /// <summary>The file path / fetch URL / redirect URL for a <see cref="FinalActionKind"/> that needs one.</summary>
+    /// <summary>The file path or URL, for a final action that needs one.</summary>
     public string? Text { get; }
 
-    /// <summary>Summed across every matched <c>*delay:</c> rule before evaluation stopped.</summary>
+    /// <summary>The total of every matched <c>*delay:</c>.</summary>
     public int DelayMilliseconds { get; }
 
-    /// <summary>Accumulated from every matched <c>*header:</c> rule, in match order -- only meaningful when <see cref="FinalActionKind"/> is null (see the class remarks on why a header override is moot once a final action bypasses the real server entirely).</summary>
+    /// <summary>Headers from matched <c>*header:</c> rules, in order. Only applied when passing through.</summary>
     public IReadOnlyList<(string Name, string Value)> HeadersToSet { get; }
 
-    /// <summary>
-    /// Accumulated from every matched <c>*flag:</c> rule. Nothing in
-    /// VioLens reads a session's flags today -- <c>SazWriter</c>'s own
-    /// <c>&lt;SessionFlags /&gt;</c> element is still always empty (see its
-    /// remarks) -- so this is parsed and carried faithfully but currently
-    /// has no effect. Recorded here rather than silently dropped so a
-    /// future flags consumer (or a SAZ export that starts populating
-    /// <c>SessionFlags</c> for real) has somewhere to read them from
-    /// without another AutoResponder change.
-    /// </summary>
+    /// <summary>Flags from matched <c>*flag:</c> rules.</summary>
     public IReadOnlyList<(string Name, string Value)> FlagsToSet { get; }
 
-    /// <summary>Fiddler's <c>*bpu</c> fired -- treat this request as breaking, the same as <c>BreakpointManager.WouldBreakBeforeRequest</c> returning true.</summary>
+    /// <summary>A <c>*bpu</c> rule matched: break before the request.</summary>
     public bool ForceBreakpointBeforeRequest { get; }
 
-    /// <summary>Fiddler's <c>*bpafter</c> fired -- same idea as <see cref="ForceBreakpointBeforeRequest"/>, at the response stage.</summary>
+    /// <summary>A <c>*bpafter</c> rule matched: break after the response.</summary>
     public bool ForceBreakpointAfterResponse { get; }
 
     internal static AutoResponderOutcome Passthrough(
