@@ -1,15 +1,15 @@
 # Embedding ProxyCore
 
-`Violens.ProxyCore` is the engine inside VioLens: the part that listens as a
-proxy, decrypts HTTPS, records each request and response, and lets code look
-at and change traffic on its way through. It has no user interface, so you
-can build your own debugger, capture tool or test harness on it, in Windows
-Forms, WPF, Avalonia, a console app or a service.
+`Violens.ProxyCore` is the engine inside VioLens. It listens as a proxy,
+decrypts HTTPS, records every request and response, and lets your code look
+at and change traffic as it goes through. There's no user interface in it,
+so you can put your own on top: a debugger, a capture tool or a test
+harness, in Windows Forms, WPF, Avalonia, a console app or a service.
 
-This guide is for developers doing that, particularly anyone building a
-Fiddler-style tool. It walks through a small working app; the complete code
-is in [`samples/EmbeddingSample`](../samples/EmbeddingSample), which builds
-with the rest of the solution so it always matches the real API.
+If you're building a Fiddler-style tool, I wrote this guide with you in
+mind. It walks through a small working app. The complete code is in
+[`samples/EmbeddingSample`](../samples/EmbeddingSample), which builds with
+the rest of the solution, so it always matches the real API.
 
 - [What you get](#what-you-get)
 - [Requirements](#requirements)
@@ -43,19 +43,19 @@ with the rest of the solution so it always matches the real API.
 | Helpers | `ContentDecoder` (gzip, deflate, Brotli, zstd), `HttpMessageText` (raw text), `SessionUrl`, `ComposerClient` |
 | Settings | `PreferenceStore`, `IPreferenceStore` |
 
-It speaks HTTP/1.1 to clients and servers, including WebSockets (messages are
-recorded, permessage-deflate included). HTTP/2 isn't supported yet.
+It speaks HTTP/1.1 to clients and servers, including WebSockets (messages
+are recorded, permessage-deflate included). I haven't added HTTP/2 yet.
 
 ## Requirements
 
-- **.NET 10.** ProxyCore uses TLS and compression features that .NET
-  Framework lacks. Windows Forms and WPF both run on .NET 10, so a desktop
-  app can move across. An app that stays on .NET Framework uses the engine
-  through a separate host process instead: see
+- .NET 10. ProxyCore uses TLS and compression features that .NET Framework
+  lacks. Windows Forms and WPF both run on .NET 10, so a desktop app can
+  move across. If your app stays on .NET Framework, it uses the engine
+  through a separate host process: see
   [Apps on .NET Framework](#apps-on-net-framework).
-- **Windows or macOS** for the parts that touch the operating system
-  (trusting the root certificate, setting the system proxy). Capturing
-  traffic sent straight to the proxy works on Linux too.
+- Windows or macOS for the parts that touch the operating system (trusting
+  the root certificate, setting the system proxy). Capturing traffic sent
+  straight to the proxy works on Linux too.
 
 ## Installing
 
@@ -64,8 +64,8 @@ dotnet add package Violens.ProxyCore --prerelease
 ```
 
 Versions match VioLens releases (0.2.0-preview.1 and so on). While the
-version starts with 0, a new minor version may change the public API; the
-release notes list what changed. See [Versions and compatibility](#versions-and-compatibility).
+version starts with 0, a new minor version may change the public API. See
+[Versions and compatibility](#versions-and-compatibility).
 
 ## A minimal app
 
@@ -97,8 +97,8 @@ listener.Stop();
 SystemProxyController.Disable();
 ```
 
-That's a working HTTPS-decrypting proxy. The rest of this guide covers each
-piece.
+That's a working HTTPS-decrypting proxy. The rest of this guide goes
+through each piece.
 
 ## Your app's identity
 
@@ -141,9 +141,9 @@ ProxyEngine.Configure(identity, log: entry => myLog.Write(entry.Category, entry.
 
 Each `ProxyLogEntry` has a `Time`, a `Category` and a `Message`. Categories
 are `proxy` (connections and failures), `session` (a line per completed
-request), `system-proxy` and `pac`. The handler runs on
-whatever thread produced the message, often a connection's, so make it
-thread-safe and quick; if it throws, the message is dropped.
+request), `system-proxy` and `pac`. The handler runs on whatever thread
+produced the message, often a connection's, so keep it thread-safe and
+quick. If it throws, the message is dropped.
 
 With `Microsoft.Extensions.Logging`:
 
@@ -155,22 +155,22 @@ ProxyEngine.Configure(identity, log: e => logger.LogInformation("[{Category}] {M
 ## The root certificate
 
 `new CertificateAuthority()` finds your app's root in the current user's
-personal certificate store, or creates one (an ECDSA P-256 key, valid for five
-years, never exportable), then makes sure it's trusted:
+personal certificate store, or creates one (an ECDSA P-256 key, valid for
+five years, never exportable), then makes sure it's trusted:
 
-- **Windows:** adding it to the current user's trusted roots shows Windows'
-  own "Do you want to install this certificate?" prompt. If the user says No,
+- Windows: adding it to the current user's trusted roots shows Windows' own
+  "Do you want to install this certificate?" prompt. If the user says No,
   the constructor throws.
-- **macOS:** trusting it adds it to the login keychain with no prompt from the
-  system, so **ask the user yourself first**. Pass `installToTrustStore: false`
-  to get the certificate without touching trust, for example to show its
-  details in your confirmation dialog.
+- macOS: trusting it adds it to the login keychain without any prompt from
+  the system, so **ask the user yourself first**. Pass
+  `installToTrustStore: false` to get the certificate without touching
+  trust, for example to show its details in your confirmation dialog.
 
 `authority.Uninstall()` removes it from both stores, for a "Remove
 certificate" menu command or your uninstaller. Create one
-`CertificateAuthority` per run and reuse it: creating the authority is what
-can prompt; minting the per-site certificates (`LeafCertificateProvider`) is
-cheap and cached.
+`CertificateAuthority` per run and reuse it. Creating the authority is the
+step that can prompt; minting the per-site certificates
+(`LeafCertificateProvider`) is cheap and cached.
 
 ## Seeing traffic
 
@@ -188,7 +188,8 @@ sessions.SessionAdded += session =>
 };
 ```
 
-Bodies are kept as they came over the wire. To read one, decode it:
+Bodies are kept exactly as they came over the wire, so decode one before
+reading it:
 
 ```csharp
 var encoding = ContentDecoder.FindHeader(session.Response.Headers, "Content-Encoding");
@@ -199,11 +200,11 @@ if (ContentDecoder.TryDecode(session.Response.Body, encoding, out var bytes, out
 ```
 
 `HttpMessageText.Format(session.Request)` gives the raw text of a request or
-response, as a Raw inspector shows it.
+response, the way a Raw inspector shows it.
 
-**Threads.** `SessionAdded` is raised on the connection's thread. In Windows
-Forms, hand it to the UI thread, and batch: a busy page can produce hundreds
-of sessions a second.
+`SessionAdded` is raised on the connection's thread. In Windows Forms, hand
+sessions to the UI thread in batches, because a busy page can produce
+hundreds of them a second.
 
 ```csharp
 private readonly ConcurrentQueue<Session> _incoming = new();
@@ -220,17 +221,17 @@ private void OnTick(object? sender, EventArgs e)
 }
 ```
 
-`SessionStore.Snapshot()` returns everything captured so far, `Remove` and
-`Clear` delete sessions (raising `SessionsRemoved`).
+`SessionStore.Snapshot()` returns everything captured so far. `Remove` and
+`Clear` delete sessions and raise `SessionsRemoved`.
 
 ## Changing traffic: per-request hooks
 
-`IExtensionSessionHost` is the hook to use if your app has its own
-per-request object, the way Fiddler has its `Session` (or an `Exchange`).
-ProxyCore calls `BeginSession` once for each request, and you return an
-`IExtensionSession` whose methods it calls in order as the request goes out
-and the response comes back. Your object lives from the first call to the
-last, so state you keep on it (flags, timers, anything) carries through.
+Use `IExtensionSessionHost` if your app has its own per-request object, the
+way Fiddler has its `Session` (or you have an `Exchange`). ProxyCore calls
+`BeginSession` once for each request. You return an `IExtensionSession`, and
+ProxyCore calls its methods in order as the request goes out and the
+response comes back. That object lives from the first call to the last, so
+any state you keep on it (flags, timers and so on) carries through.
 
 ```csharp
 public sealed class ExchangeHost(IExchangeRules rules) : IExtensionSessionHost
@@ -242,9 +243,10 @@ public sealed class ExchangeHost(IExchangeRules rules) : IExtensionSessionHost
 }
 ```
 
-Pass it to the listener: `StartOnAvailablePort(port, leafs, sessions, sessionHost: exchangeHost)`.
+Pass it to the listener:
+`StartOnAvailablePort(port, leafs, sessions, sessionHost: exchangeHost)`.
 
-The calls, for one request, and their Fiddler equivalents:
+Here are the calls for one request, with their Fiddler equivalents:
 
 | Order | `IExtensionSession` method | Fiddler equivalent | Can change |
 |---|---|---|---|
@@ -274,35 +276,36 @@ public ExtensionRequestResult RequestBefore(CapturedRequest request)
 }
 ```
 
-The request and response types are immutable records: change them with
-`with` and return the result. Each step is handed the current version, which
-something earlier (a script, a breakpoint edit) may have changed, so bring
-your own object up to date from it rather than assuming nothing moved.
+The request and response types are immutable records. Change them with
+`with` and return the result. Each step gets the current version, which
+something earlier (a script, a breakpoint edit) may have changed, so update
+your own object from it instead of assuming nothing moved.
 
 Things to know:
 
-- **Hooks run on connection threads**, several at once, never on your UI
-  thread. Keep them thread-safe and fast: the request waits for them. Never
-  block a hook waiting for the UI thread (a `Control.Invoke`, say): that can
-  deadlock. To let the user edit a request, use a [breakpoint](#breakpoints).
-- **`IsActive` costs.** While it's true, every body is read in full before
-  step 2 and step 5, so streamed responses arrive all at once. Return false
-  when your app has no rules or extensions loaded.
-- **Don't let a hook throw.** ProxyCore doesn't catch it, so the client's
+- Hooks run on connection threads, several at once, never on your UI
+  thread. Keep them thread-safe and fast, because the request waits for
+  them. Never block a hook waiting for the UI thread (a `Control.Invoke`,
+  say), as that can deadlock. To let the user edit a request, use a
+  [breakpoint](#breakpoints).
+- `IsActive` has a cost. While it's true, every body is read in full before
+  steps 2 and 5, so streamed responses arrive all at once. Return false when
+  your app has no rules or extensions loaded.
+- Don't let a hook throw. ProxyCore doesn't catch it, and the client's
   connection is dropped. Catch inside each hook, log, and carry on with the
-  message unchanged; the sample does this.
-- **AutoResponder runs first.** A request an AutoResponder rule answers never
-  reaches these hooks.
+  message unchanged, as the sample does.
+- AutoResponder runs first. A request answered by an AutoResponder rule
+  never reaches these hooks.
 
 The full order for a request is: AutoResponder, `PeekAtRequestHeaders`, the
 `IScriptRunner`'s `OnBeforeRequest`, `IExtensionAutoTamperHost` handlers,
 `RequestBefore`, the request breakpoint, then sending. Responses mirror that.
 
-**Two simpler hooks.** `IExtensionAutoTamperHost` is the same set of points
-without the per-request object (each call stands alone). `IScriptRunner` is
-for a scripting engine, with just `OnBeforeRequest` and `OnBeforeResponse`;
-VioLens's FiddlerScript support (`Violens.Compatibility`) implements it. You
-can pass all three to one listener.
+There are two simpler hooks. `IExtensionAutoTamperHost` has the same points
+without the per-request object, so each call stands alone. `IScriptRunner`
+is for a scripting engine and has only `OnBeforeRequest` and
+`OnBeforeResponse`. VioLens's FiddlerScript support (`Violens.Compatibility`)
+implements it. You can pass all three to one listener.
 
 The sample's [`Exchanges.cs`](../samples/EmbeddingSample/Exchanges.cs) has a
 complete `Exchange` class with Fiddler-style flags, the hooks, and a rules
@@ -319,17 +322,18 @@ breakpoints.BreakpointHit += pending =>
     uiContext.Post(_ => ShowBreakpointEditor(pending), null);
 ```
 
-Each rule you set is its own trigger: any one matching pauses the message.
-Pass `breakpointManager: breakpoints` to the listener. When a rule matches,
-that request (or response) waits, and `BreakpointHit` gives you a
-`PendingBreakpoint`:
+Each rule you set is a separate trigger, and any one of them matching pauses
+the message. Pass `breakpointManager: breakpoints` to the listener. When a
+rule matches, that request (or response) waits, and `BreakpointHit` gives
+you a `PendingBreakpoint`:
 
-- `RawText` is the message as text for an editor; `TryEdit(newText)` checks
-  and applies an edit (`ValidationError` says what's wrong if it can't).
-- `Resume()` lets it go on, edited or not; `Abort()` drops it.
+- `RawText` is the message as text for an editor. `TryEdit(newText)` checks
+  and applies an edit, and if it can't, `ValidationError` says what's wrong.
+- `Resume()` lets it go on, edited or not. `Abort()` drops it.
 
 Only that request waits; everything else keeps flowing. `BreakpointHit` is
-raised on the connection's thread, hence the `Post` to the UI thread.
+raised on the connection's thread, which is why the example posts to the UI
+thread.
 
 ## AutoResponder
 
@@ -346,8 +350,8 @@ autoResponder.Rules.Add(new AutoResponderRule { MatchPattern = "/slow", Action =
 Patterns: a plain substring, `EXACT:`, `regex:`, `NOT:` and `METHOD:`.
 Actions: a file, a URL to fetch instead, `*redir:`, `*delay:`, `*header:`,
 `*flag:`, `*drop`, `*reset`, `*bpu`, `*bpafter`, `*CORSPreflightAllow` and
-`*exit`. Pass `autoResponderRules: autoResponder` to the listener; rules can
-change while it runs.
+`*exit`. Pass `autoResponderRules: autoResponder` to the listener. You can
+change the rules while it's running.
 
 ## The system proxy and upstream proxies
 
@@ -360,14 +364,14 @@ SystemProxyController.Enable(listener.Port);
 SystemProxyController.Disable();
 ```
 
-`Enable` saves the current settings to a backup file in your data folder
-before changing anything, and `Disable` puts them back and deletes the
-backup. If your app crashes in between, the backup survives, and
-`RecoverFromCrash` at the next start restores it. On Windows this sets the
-user's WinINET proxy (what browsers and most apps use); on macOS, each
-network service's web proxies.
+Before changing anything, `Enable` saves the current settings to a backup
+file in your data folder. `Disable` puts them back and deletes the backup.
+If your app crashes in between, the backup survives and `RecoverFromCrash`
+restores it at the next start. On Windows this sets the user's WinINET
+proxy (what browsers and most apps use). On macOS it sets each network
+service's web proxies.
 
-Corporate networks:
+For corporate networks:
 
 - `listener.Gateway = UpstreamProxy.Parse("proxy.contoso.com:8080")` sends
   everything through a proxy, with its bypass list honoured.
@@ -375,15 +379,15 @@ Corporate networks:
   `ProxyAutoConfig.Create(autoDetect: true, scriptUrl, fallback)` for WPAD)
   asks a PAC script which proxy to use for each connection.
 - Proxies that ask for a sign-in get Windows' own (Negotiate or NTLM) by
-  default; set `listener.ProxyCredential` for a user name and password.
+  default. Set `listener.ProxyCredential` for a user name and password.
 
 ## Phones and other computers
 
 Pass `allowRemoteClients: true` to the listener to accept connections from
-other devices, not just this computer. On such a device, set the proxy to
-this computer's address and port, then browse to `http://contosowebdebugger/`
-(your `ProxyHostName`): the page there offers your root certificate, with
-steps for iPhone and Android.
+other devices as well as this computer. On the other device, set the proxy
+to this computer's address and port, then browse to
+`http://contosowebdebugger/` (your `ProxyHostName`). That page offers your
+root certificate, with steps for iPhone and Android.
 
 ## Sending requests: Composer and Replay
 
@@ -399,7 +403,7 @@ if (ComposerClient.TryResolve(edited, out var url, out var toSend, out var error
 }
 ```
 
-Bodies are sent byte for byte, so binary bodies replay exactly.
+Bodies are sent byte for byte, so binary ones replay exactly.
 
 ## Saving and opening captures
 
@@ -417,9 +421,9 @@ written to SAZ files yet.
 ## Apps on .NET Framework
 
 ProxyCore needs .NET 10, so a .NET Framework app can't load it directly.
-Instead, it can run the engine in a process of its own: **Violens.ProxyHost**,
-a small .NET 10 program, hosts ProxyCore, and your app talks to it through
-**Violens.ProxyHost.Client**, a library for .NET Standard 2.0 (so .NET
+What it can do is run the engine in a separate process. **Violens.ProxyHost**
+is a small .NET 10 program that hosts ProxyCore, and your app talks to it
+through **Violens.ProxyHost.Client**, a .NET Standard 2.0 library (so .NET
 Framework 4.6.2 and later) with no other dependencies.
 
 | Part | What it is | Where to get it |
@@ -457,63 +461,65 @@ await proxy.StopAsync();
 proxy.Dispose();   // the host puts the system proxy back and exits
 ```
 
-What it covers:
+What the client gives you:
 
-- **Capturing.** `StartAsync` takes the same identity settings as
-  `ProxyHostIdentity` (`AppIdentity`) and creates and trusts the root
-  certificate (the Windows prompt appears from the host process). It can
-  become the system proxy, going through the user's own proxy.
-- **Sessions.** `SessionCaptured` brings each finished request and response,
-  bodies included (turn them off with `StartOptions.IncludeBodies` to save
-  memory), with its full URL and flags.
+- **Capturing.** `StartAsync` takes `AppIdentity`, which has the same
+  settings as `ProxyHostIdentity`, and creates and trusts the root
+  certificate (the Windows prompt comes from the host process). It can
+  become the system proxy, forwarding through the user's own proxy.
+- **Sessions.** `SessionCaptured` delivers each finished request and
+  response with its full URL and flags. Bodies are included unless you turn
+  them off with `StartOptions.IncludeBodies` to save memory.
 - **Hooks.** `OnBeforeRequest` and `OnBeforeResponse` see each request and
-  response, change them in place (`SetHeader`, `RemoveHeader`,
+  response. They can change it in place (`SetHeader`, `RemoveHeader`,
   `SetBodyText`), set flags, or answer the request locally (`RespondWith`).
   Turn them on with `StartOptions.HookRequests` and `HookResponses`.
 - **Breakpoints.** `SetBreakpointsAsync` sets the same rules as QuickExec's
-  `bpu`, `bpafter`, `bps` and `bpm`. `BreakpointHit` gives the paused
-  message's raw text; call `Resume(editedText)` or `Abort()` when the user is
-  done.
+  `bpu`, `bpafter`, `bps` and `bpm`. `BreakpointHit` gives you the paused
+  message's raw text. Call `Resume(editedText)` or `Abort()` when the user
+  is done.
 - **Files.** `SaveSazAsync`, `LoadSazAsync` and `ClearSessionsAsync`.
-- **The certificate.** `StartResult.RootCertificate` for showing or
-  exporting it; `UninstallRootCertificateAsync` to remove it.
+- **The certificate.** `StartResult.RootCertificate` lets you show or
+  export it, and `UninstallRootCertificateAsync` removes it.
 
 Things to know:
 
-- **Hooks cross a process boundary.** Each one is a round trip over the pipe,
-  quick on one machine but not free: turn hooks on only while there are
-  rules to run. A hook that doesn't answer within `StartOptions.HookTimeout`
-  (10 seconds by default) is skipped, the message goes on unchanged, and the
-  host logs why.
-- **Threads.** Events arrive on the client's own reader thread, in order:
-  hand them to the UI thread with `BeginInvoke`, never `Invoke`. Hooks run on
-  thread-pool threads, several at once; don't make them wait for the UI.
-- **Lifetime.** The host stops capturing, puts the system proxy back and
-  exits when you dispose the client, when the pipe breaks, or when your
-  process ends, even if it crashes. If the host itself crashes while it's
-  the system proxy, the next `StartAsync` restores the user's settings.
-- **Only your app can talk to it.** `LaunchAsync` gives the host a random
-  pipe name and a one-time token, and refuses a pipe that answers without
-  that token.
+- Hooks cross a process boundary. Each one is a round trip over the pipe,
+  which is quick on one machine but not free, so only turn hooks on while
+  there are rules to run. If a hook doesn't answer within
+  `StartOptions.HookTimeout` (10 seconds by default), it's skipped, the
+  message goes on unchanged, and the host logs why.
+- Events arrive in order on the client's own reader thread. Hand them to the
+  UI thread with `BeginInvoke`, never `Invoke`. Hooks run on thread-pool
+  threads, several at once, so don't make them wait for the UI.
+- The host stops capturing, puts the system proxy back and exits when you
+  dispose the client, when the pipe breaks, or when your process ends, even
+  if it crashes. If the host itself crashes while it's the system proxy,
+  the next `StartAsync` restores the user's settings.
+- Only your app can talk to the host. `LaunchAsync` gives it a random pipe
+  name and a one-time token, and refuses a pipe that answers without that
+  token.
 
-Moving the app itself to .NET 10 is the other route. Windows Forms and WPF
-are fully supported there; what usually holds a Fiddler-style app back is
-the rest: JScript.NET (for FiddlerScript) doesn't exist on .NET 10, runtime
-compilation through CodeDOM isn't supported, and extensions built for .NET
-Framework may not load. VioLens handles those by translating FiddlerScript to
-run on a JavaScript engine (`Violens.Compatibility`) and running old
-extensions in a separate .NET Framework process.
+The other route is to move your app itself to .NET 10. Windows Forms and
+WPF are fully supported there. What usually holds a Fiddler-style app back
+is everything else: JScript.NET (for FiddlerScript) doesn't exist on .NET
+10, runtime compilation through CodeDOM isn't supported, and extensions
+built for .NET Framework may not load. VioLens gets around this by
+translating FiddlerScript to run on a JavaScript engine
+(`Violens.Compatibility`) and running old extensions in a separate .NET
+Framework process.
 
 ## Versions and compatibility
 
 - The package version is the VioLens version it shipped with.
-- **0.x:** a minor version (0.2 to 0.3) may change the public API; a patch
-  version (0.2.0 to 0.2.1) only fixes things. Each release's notes have a
-  "ProxyCore changes" section.
-- **From 1.0:** only a major version (1.x to 2.0) breaks anything.
-- Pin a version and move up when you're ready: NuGet never upgrades on its
+- In 0.x, a minor version (0.2 to 0.3) may change the public API, and a
+  patch version (0.2.0 to 0.2.1) only fixes things. Each release's notes
+  have a "ProxyCore changes" section.
+- From 1.0, only a major version (1.x to 2.0) breaks anything.
+- Pin a version and move up when you're ready. NuGet never upgrades on its
   own, and a published version never changes.
 - Expect HTTP/2 to change how requests are represented before 1.0.
 
-ProxyCore is MIT licensed, like the rest of VioLens. Questions and problems:
+ProxyCore is MIT licensed, like the rest of VioLens. If you have questions
+or hit a problem,
 [open an issue](https://github.com/MarkSPowell/VioLens/issues).

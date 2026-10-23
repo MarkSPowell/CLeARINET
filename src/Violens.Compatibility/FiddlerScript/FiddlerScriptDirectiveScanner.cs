@@ -4,54 +4,24 @@ using System.Text.RegularExpressions;
 namespace Violens.Compatibility.FiddlerScript;
 
 /// <summary>
-/// Scans a script's RAW source (before <see cref="FiddlerScriptPreprocessor"/>
-/// strips attribute blocks out entirely -- see that class's own remarks on
-/// why it strips rather than reads them) for the Phase B/C/D menu-binding
-/// attributes real Fiddler documents publicly: <c>RulesOption</c>,
-/// <c>RulesString</c>/<c>RulesStringValue</c>, <c>BindPref</c>,
-/// <c>ContextAction</c>, <c>ToolsAction</c>, <c>BindUIColumn</c> -- see the
-/// FiddlerScript Compatibility Design doc's Phase B/C/D section for the
-/// public documentation (Telerik's own "Customize Menus" and "Add Columns
-/// to Web Sessions List" pages, plus a Telerik blog post for
-/// <c>BindPref</c>) these argument shapes were drawn from.
-///
-/// Not a real parser, the same "targeted regex passes" posture
-/// <see cref="FiddlerScriptPreprocessor"/> itself takes and for the same
-/// reason: every real sample checked against this while scoping the feature
-/// declares these attributes in the same flat, single-line-per-attribute
-/// shape, stacked directly above the field/method they describe with no
-/// blank line or comment in between. A script that formats these
-/// differently (an attribute split across multiple lines, a comment
-/// wedged between the attribute stack and its declaration) won't be
-/// recognized -- the field/method still loads and runs normally either way
-/// (this scanner runs independently of, and before,
-/// <see cref="FiddlerScriptPreprocessor.Transpile"/>, which still strips
-/// the attribute block so the script parses), it just won't get a Rules
-/// menu item / column / etc. Silent in that specific case, matching this
-/// project's existing "an assembly with no RequiredVersion is silently
-/// skipped" precedent for a directive that was never meant to be found
-/// rather than one that was found and rejected.
+/// Finds the menu and column attributes Fiddler documents
+/// (<c>RulesOption</c>, <c>RulesString</c>/<c>RulesStringValue</c>,
+/// <c>BindPref</c>, <c>ContextAction</c>, <c>ToolsAction</c>,
+/// <c>BindUIColumn</c>) in a script's raw source, before the preprocessor
+/// strips them. Regex-based: attributes must sit one per line directly
+/// above their declaration, as in every sample checked. Others are ignored,
+/// and the script still runs.
 /// </summary>
 public static class FiddlerScriptDirectiveScanner
 {
-    // One `[AttributeName(args)]` on its own line. Deliberately the same
-    // shape FiddlerScriptPreprocessor.AttributeBlock strips (see that
-    // class's own remarks) -- this scanner runs against the untouched raw
-    // source instead of after stripping, so it sees these lines before they
-    // disappear.
+    // One [AttributeName(args)] on its own line, the shape the preprocessor
+    // strips.
     private static readonly Regex AttributeLine = new(
         @"^[ \t]*\[(?<name>\w+)\((?<args>[^\]]*)\)\][ \t]*\r?\n",
         RegexOptions.Multiline | RegexOptions.Compiled);
 
-    // One or more consecutive AttributeLine-shaped lines, immediately
-    // followed by either a `static var NAME: TYPE` field declaration or a
-    // `static function NAME(` method declaration -- the two declaration
-    // shapes every attribute here attaches to. A real script commonly
-    // stacks several attributes above one declaration (a RulesString field
-    // typically has one RulesString plus several RulesStringValue lines
-    // above it; a BindPref field can carry a RulesOption too) -- the whole
-    // stack is captured as one block and split apart below, rather than
-    // trying to match each attribute to its declaration one at a time.
+    // A stack of attribute lines followed by the `static var NAME: TYPE` or
+    // `static function NAME(` they belong to.
     private static readonly Regex AttributeStackThenDeclaration = new(
         @"(?<attrs>(?:^[ \t]*\[\w+\([^\]]*\)\][ \t]*\r?\n)+)" +
         @"^[ \t]*(?:public\s+|private\s+|protected\s+)?static\s+" +
@@ -157,15 +127,9 @@ public static class FiddlerScriptDirectiveScanner
     }
 
     /// <summary>
-    /// Tells apart real Fiddler's four documented <c>BindUIColumn</c>
-    /// overloads from the flat argument list this scanner already split
-    /// out: a two-argument call's second argument is
-    /// <see cref="UIColumnDescriptor.SortNumerically"/> if it parses as a
-    /// boolean, otherwise <see cref="UIColumnDescriptor.Width"/> if it
-    /// parses as an integer -- exactly the two two-argument overloads
-    /// Telerik's own documentation lists, told apart the only way possible
-    /// once the argument is already down to plain text: by what it looks
-    /// like.
+    /// Picks the <c>BindUIColumn</c> overload: with two arguments, a boolean
+    /// second argument is <see cref="UIColumnDescriptor.SortNumerically"/> and
+    /// a number is <see cref="UIColumnDescriptor.Width"/>.
     /// </summary>
     private static UIColumnDescriptor BuildUIColumnDescriptor(string methodName, List<string> args)
     {
@@ -204,20 +168,8 @@ public static class FiddlerScriptDirectiveScanner
     private static bool IsTrue(string arg) => bool.TryParse(arg, out var value) && value;
 
     /// <summary>
-    /// Splits a raw <c>"a", "b", true</c> attribute-argument string into its
-    /// individual literals, unquoting/unescaping any that were quoted
-    /// strings and trimming everything else -- a small, deliberately
-    /// non-general literal splitter (comma-separated, quote-aware, nothing
-    /// more) matching this whole scanner's "targeted regex passes, not a
-    /// real parser" posture (see this class's own remarks).
-    ///
-    /// Known gap, not silently swallowed: a quoted string argument
-    /// containing a literal <c>)</c> would already have broken
-    /// <see cref="AttributeLine"/>'s own capture before this method ever
-    /// runs (that regex stops at the first <c>]</c>, with no awareness of
-    /// quoting at all) -- not observed in any real menu-text argument
-    /// fetched while scoping this (every documented example is a short,
-    /// paren-free label), flagged here rather than hidden.
+    /// Splits <c>"a", "b", true</c> into literals, unquoting strings. A quoted
+    /// <c>]</c> isn't supported (AttributeLine stops there).
     /// </summary>
     private static List<string> ParseArguments(string rawArgs)
     {

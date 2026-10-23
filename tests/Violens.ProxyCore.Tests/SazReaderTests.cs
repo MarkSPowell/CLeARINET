@@ -46,18 +46,9 @@ public class SazReaderTests
     [Fact]
     public async Task ImportAsync_AssignsFreshIdsRatherThanReusingTheArchivesOwnNumbering()
     {
-        // SazWriter numbers sessions from the list position, so writing two
-        // sessions here already produces archive numbers 1 and 2 -- the
-        // interesting case is a *pre-populated* SessionStore, so the
-        // imported sessions can't just reuse 1 and 2 without colliding with
-        // what's already there.
-        // Two distinct Host headers, not one CapturedRequest reused via
-        // `with` -- SazReader derives a session's Host purely from its
-        // request's Host header (see ExtractHost's own remarks; a SAZ
-        // file's _m.xml never carries one), so two sessions that differ
-        // only in Session.Host and not in their Host header would come
-        // back from import indistinguishable, which would defeat the
-        // point of this test.
+        // The store already has sessions, so imported ones can't reuse ids 1
+        // and 2. Each request has its own Host header, since that's where
+        // SazReader gets the host from.
         var requestA = new CapturedRequest("GET", "/a", "HTTP/1.1", [("Host", "a.test")], []);
         var requestB = new CapturedRequest("GET", "/b", "HTTP/1.1", [("Host", "b.test")], []);
         var response = new CapturedResponse("HTTP/1.1", 200, "OK", [], []);
@@ -158,10 +149,7 @@ public class SazReaderTests
 
         Assert.Equal(1, result.Imported);
         var imported = Assert.Single(store.Snapshot());
-        // Session.Host is always a bare hostname elsewhere in this codebase
-        // (see SazReader.ExtractHost's own remarks) -- the port from the
-        // Host header shouldn't leak through into a "host:port" shape this
-        // codebase doesn't otherwise use.
+        // The port stays in the Host header; Session.Host is just the name.
         Assert.Equal("example.test", imported.Host);
     }
 

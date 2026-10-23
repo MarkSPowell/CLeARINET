@@ -16,11 +16,6 @@ namespace Violens.DesktopUi;
 
 public partial class MainWindow : Window
 {
-    /// <summary>
-    /// Filters the native Open dialog down to .saz files -- the same
-    /// StorageProvider-based picker Avalonia recommends over the obsolete
-    /// Window.OpenFileDialog it replaced.
-    /// </summary>
     private static readonly FilePickerFileType SazFileType = new("Session Archive Zip (*.saz)")
     {
         Patterns = ["*.saz"],
@@ -32,27 +27,15 @@ public partial class MainWindow : Window
     };
 
     /// <summary>
-    /// Filters <see cref="BrowseFiddlerScriptButton_Click"/>'s own
-    /// picker down to <c>*.js</c> -- real FiddlerScript's default,
-    /// JScript.NET-flavored variant (see the FiddlerScript Compatibility
-    /// Design doc's engine discussion). The Roslyn-scripting <c>*.cs</c>
-    /// variant Telerik later added isn't implemented yet, so it isn't
-    /// listed here either; <see cref="FilePickerFileTypes.All"/> is offered
-    /// alongside it so nothing already-working (a differently-extensioned
-    /// script someone's using today) becomes unreachable through the picker.
+    /// <c>*.js</c> only, since <c>CustomRules.cs</c> isn't supported yet; "All
+    /// files" is offered too.
     /// </summary>
     private static readonly FilePickerFileType FiddlerScriptFileType = new("FiddlerScript (*.js)")
     {
         Patterns = ["*.js"],
     };
 
-    /// <summary>
-    /// Every <see cref="DataGridTextColumn"/> this window has added itself
-    /// for a Phase D <c>[BindUIColumn]</c> -- kept so
-    /// <see cref="RefreshScriptColumns"/> can remove exactly these on the
-    /// next script (re)load without touching the seven built-in columns
-    /// declared in <c>MainWindow.axaml</c> itself.
-    /// </summary>
+    /// <summary>Columns added for <c>[BindUIColumn]</c>, removed again on the next script load.</summary>
     private readonly List<DataGridColumn> _scriptColumns = [];
 
     /// <summary>
@@ -92,9 +75,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        // DataContext is set from outside (see App.axaml.cs), after this
-        // constructor returns -- DataContextChanged is what actually gets
-        // a live MainWindowViewModel to subscribe PropertyChanged against.
+        // DataContext is set after construction (see App.axaml.cs).
         DataContextChanged += (_, _) => AttachViewModel();
         PositionChanged += (_, _) => RememberNormalBounds();
         Closing += (_, _) =>
@@ -197,16 +178,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The only place custom grid columns can be built at all: a script's
-    /// own <c>[BindUIColumn]</c> methods (see
-    /// <c>MainWindowViewModel.ScriptDirectives.UIColumns</c>) aren't known
-    /// until a script loads, and <c>DataGrid.Columns</c> is a plain
-    /// code-behind collection with no XAML-bindable <c>ItemsSource</c>
-    /// equivalent of its own -- the same reason
-    /// <see cref="OpenSazMenuItem_Click"/> already has to live here rather
-    /// than in the view model. Re-subscribes rather than assuming this
-    /// only ever runs once, since Avalonia can in principle reassign a
-    /// window's DataContext more than once.
+    /// Subscribes to the view model. Script columns are built here because
+    /// <c>DataGrid.Columns</c> can't be bound.
     /// </summary>
     private void AttachViewModel()
     {
@@ -356,13 +329,7 @@ public partial class MainWindow : Window
         DetailTabs.Classes.Set("single", DetailTabs.Items.Count <= 1);
     }
 
-    /// <summary>
-    /// <see cref="MainWindowViewModel.FiddlerScriptStatus"/> changing is the
-    /// signal a script just (re)loaded -- see
-    /// <see cref="MainWindowViewModel.ScriptDirectives"/>'s own remarks on
-    /// why that property, specifically, is what this piggybacks on rather
-    /// than a dedicated "columns changed" event.
-    /// </summary>
+    /// <summary>A change to FiddlerScriptStatus means a script just loaded.</summary>
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(MainWindowViewModel.FiddlerScriptStatus))
@@ -501,16 +468,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Rebuilds every <c>[BindUIColumn]</c>-provided <see cref="DataGridColumn"/>
-    /// from scratch against whatever the currently-loaded script declares,
-    /// appended after the seven built-in columns, in declaration order --
-    /// <c>UIColumnDescriptor.DisplayOrder</c> is scanned but not honored
-    /// here (see that record's own remarks). Each column's
-    /// <see cref="DataGridTextColumn.Binding"/> is a classic indexer path
-    /// (<c>ScriptColumns[Title]</c>) against <c>SessionRow.ScriptColumns</c>
-    /// -- the same reflection-binding mechanism
-    /// <c>x:CompileBindings="False"</c> already opts this whole DataGrid
-    /// subtree into, for exactly this reason.
+    /// Rebuilds the <c>[BindUIColumn]</c> columns after the built-in ones, in
+    /// declaration order (<c>DisplayOrder</c> isn't honoured yet). Each binds to
+    /// <c>ScriptColumns[Title]</c>.
     /// </summary>
     private void RefreshScriptColumns()
     {
@@ -807,16 +767,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The only place this window's code-behind does real work, rather than
-    /// leaving everything to bindings and commands: picking a file needs
-    /// <see cref="TopLevel.StorageProvider"/>, which only a live control in
-    /// the visual tree can reach, so it can't live in
-    /// <see cref="MainWindowViewModel"/> the way every other command here
-    /// does. <c>async void</c> is the only legal signature for an Avalonia
-    /// event handler, but the actual import work is properly awaited
-    /// (<see cref="MainWindowViewModel.ImportSazAsync"/>) rather than
-    /// blocked on -- see that method's own remarks on why a synchronous
-    /// wrapper would risk a UI-thread deadlock.
+    /// File > Open SAZ. Picking a file needs <see cref="TopLevel.StorageProvider"/>,
+    /// so this lives in code-behind.
     /// </summary>
     private async void OpenSazMenuItem_Click(object? sender, RoutedEventArgs e)
     {
@@ -888,25 +840,8 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Opens a native file picker for MainWindow.axaml's FiddlerScript path
-    /// field, which is <c>IsReadOnly="True"</c> so this "Browse…" button is
-    /// the only way that field's text ever changes. Originally wired as a
-    /// <c>PointerPressed</c> handler directly on the <c>TextBox</c> itself
-    /// (clicking anywhere in the field, no separate button needed), which
-    /// turned out not to fire: an Avalonia <see cref="TextBox"/>, even
-    /// read-only, still handles pointer-press internally for caret
-    /// placement and text selection, and marks the event
-    /// <see cref="Avalonia.Input.PointerEventArgs.Handled"/> before it ever
-    /// bubbles out to a plain XAML <c>PointerPressed</c> attribute -- not
-    /// something this sandbox could catch up front with no build/click-test
-    /// loop of its own. Same pattern and reasoning as
-    /// <see cref="OpenSazMenuItem_Click"/> otherwise (StorageProvider only
-    /// reachable from a live control, <c>async void</c> the only legal
-    /// event-handler signature, a plain <see cref="Button.Click"/> proven to
-    /// actually fire where <c>PointerPressed</c> didn't). Canceling the
-    /// picker leaves <see cref="MainWindowViewModel.FiddlerScriptPath"/>
-    /// exactly as it was, the same as canceling "Open SAZ" leaves nothing
-    /// changed.
+    /// Browse for a FiddlerScript file. A button because a read-only TextBox
+    /// handles PointerPressed itself, so a click handler on it never fires.
     /// </summary>
     private async void BrowseFiddlerScriptButton_Click(object? sender, RoutedEventArgs e)
     {
@@ -937,20 +872,7 @@ public partial class MainWindow : Window
         viewModel.FiddlerScriptPath = file.Path.LocalPath;
     }
 
-    /// <summary>
-    /// Help -&gt; About VioLens. Needs this window as the new dialog's
-    /// owner (<c>ShowDialog(this)</c>, what actually centers it over
-    /// MainWindow and blocks input to it while open) so, like
-    /// <see cref="OpenSazMenuItem_Click"/> and
-    /// <see cref="BrowseFiddlerScriptButton_Click"/> above, this lives here
-    /// rather than as a <c>RelayCommand</c> on <see cref="MainWindowViewModel"/>.
-    /// The result of <see cref="Window.ShowDialog(Window)"/> (a
-    /// <see cref="Task"/> that completes when the dialog closes) is
-    /// deliberately discarded, not awaited: nothing here needs to run after
-    /// the About dialog closes, the same reasoning
-    /// <c>App.axaml.cs</c>'s own fire-and-forget splash handoff already
-    /// documents.
-    /// </summary>
+    /// <summary>Help > About VioLens, as a dialog owned by this window.</summary>
     private void AboutMenuItem_Click(object? sender, RoutedEventArgs e)
     {
         var about = new AboutWindow();

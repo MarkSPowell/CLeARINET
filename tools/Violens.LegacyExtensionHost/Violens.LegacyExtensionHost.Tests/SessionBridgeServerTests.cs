@@ -7,19 +7,9 @@ using Xunit;
 namespace Violens.LegacyExtensionHost.Tests;
 
 /// <summary>
-/// The real, end-to-end version of <see cref="SessionBridgeRunnerTests"/>:
-/// an actual <see cref="NamedPipeClientStream"/> talking to the actual
-/// <see cref="SessionBridgeServer"/> (started once by
-/// <see cref="SessionBridgeServerFixture"/>), over the same
-/// <see cref="SessionBridgeProtocol"/> framing the main app's own
-/// <c>LegacyExtensionHostBridgeClient</c> uses -- proves the wire framing,
-/// JSON serialization, and pipe transport actually work together, not just
-/// the request/response handling logic <see cref="SessionBridgeRunnerTests"/>
-/// already covers directly. Deliberately doesn't reference
-/// <c>Violens.Compatibility.Extensions.LegacyExtensionHostBridgeClient</c>
-/// itself (a net10.0 project this net48 test project can't reference at
-/// all) -- <see cref="Exchange"/> below is this test's own small, direct
-/// stand-in for that client's connect/write/read sequence.
+/// Over a real named pipe to <see cref="SessionBridgeServer"/>, with the
+/// same framing the app's client uses. <see cref="Exchange"/> stands in for
+/// that client, which this net48 project can't reference.
 /// </summary>
 [Collection(SessionBridgeServerCollection.Name)]
 public sealed class SessionBridgeServerTests

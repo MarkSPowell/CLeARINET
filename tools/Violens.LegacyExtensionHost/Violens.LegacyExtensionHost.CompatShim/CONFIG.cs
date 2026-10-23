@@ -4,20 +4,14 @@ using System.IO;
 namespace Violens.CompatShim;
 
 /// <summary>
-/// Members confirmed by metadata (both from ContentBlock/SAZClipboard):
-/// <c>static GetPath(string)</c>, <c>bUseAESForSAZ</c> field. Made a
-/// <c>static class</c> since every reference is static-style access with no
-/// visible constructor call anywhere in the five samples.
+/// <c>GetPath(string)</c> and <c>bUseAESForSAZ</c>, used by ContentBlock and
+/// SAZClipboard. Static, since they're only used statically.
 /// </summary>
 public static class CONFIG
 {
     /// <summary>
-    /// metadata: <c>Fiddler.CONFIG.static string GetPath(string)</c> --
-    /// ContentBlock. Real Fiddler's own path-name conventions (e.g. what
-    /// string keys like "Captures" mean) aren't confirmed from metadata --
-    /// this returns a VioLens-branded folder under LocalAppData keyed by
-    /// whatever name is passed, a reasonable placeholder pending real
-    /// evidence of what ContentBlock actually requests.
+    /// Used by ContentBlock. Fiddler's path names aren't known, so this returns
+    /// a folder of that name under VioLens's LocalAppData folder.
     /// </summary>
     public static string GetPath(string pathName)
     {

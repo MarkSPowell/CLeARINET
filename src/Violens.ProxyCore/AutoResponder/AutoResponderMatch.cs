@@ -3,34 +3,16 @@ using System.Text.RegularExpressions;
 namespace Violens.ProxyCore.AutoResponder;
 
 /// <summary>
-/// Parses one <see cref="AutoResponderRule.MatchPattern"/> into a compiled
-/// predicate over a request's method and full URL, following Fiddler
-/// Classic's own AutoResponder match syntax (per its published
-/// documentation -- see <c>docs/VioLens Project Plan and Goals.md</c>'s
-/// clean-room policy for why this is built against that, never decompiled
-/// or leaked source):
+/// Parses an AutoResponder match pattern, following Fiddler Classic's
+/// documented syntax:
 /// <list type="bullet">
-/// <item><description>An optional leading <c>METHOD:&lt;verb&gt; </c>
-/// (verb, then a space) restricts the rest of the pattern to requests using
-/// that HTTP method.</description></item>
-/// <item><description><c>NOT:&lt;pattern&gt;</c> inverts whatever
-/// <c>&lt;pattern&gt;</c> would otherwise match.</description></item>
-/// <item><description><c>EXACT:&lt;url&gt;</c> requires a complete,
-/// case-sensitive match against the full URL -- no substring, no
+/// <item><description><c>METHOD:&lt;verb&gt; </c> prefix: only requests with that method.</description></item>
+/// <item><description><c>NOT:&lt;pattern&gt;</c>: inverts the pattern.</description></item>
+/// <item><description><c>EXACT:&lt;url&gt;</c>: case-sensitive match of the whole URL.</description></item>
+/// <item><description><c>regex:&lt;pattern&gt;</c>: a .NET regex against the whole URL. Inline
+/// options such as <c>(?insx)</c> work as-is.</description></item>
+/// <item><description>Anything else: case-insensitive substring match, with <c>*</c> as a
 /// wildcard.</description></item>
-/// <item><description><c>regex:&lt;pattern&gt;</c> is a plain .NET
-/// <see cref="Regex"/> tested against the full URL. Fiddler's own docs show
-/// inline modifier groups like <c>(?insx)</c> at the start of a pattern --
-/// .NET's own regex engine already parses those natively (<c>i</c> =
-/// IgnoreCase, <c>n</c> = ExplicitCapture, <c>s</c> = Singleline, <c>x</c> =
-/// IgnorePatternWhitespace), so nothing extra is needed here to support
-/// them.</description></item>
-/// <item><description>Anything else is a case-insensitive literal match:
-/// a bare <c>*</c> inside it is a wildcard (translated to <c>.*</c>);
-/// everything else in it is matched literally, including any other regex
-/// metacharacters it happens to contain. With no <c>*</c> at all this is
-/// just a case-insensitive substring (<c>Contains</c>) match, the common
-/// case in practice.</description></item>
 /// </list>
 /// </summary>
 public sealed class AutoResponderMatch
@@ -62,10 +44,7 @@ public sealed class AutoResponderMatch
             }
             else
             {
-                // "METHOD:GET" with nothing after it -- treat the verb
-                // itself as the whole restriction and match any URL, rather
-                // than throwing on what's obviously a still-being-typed
-                // rule in a live editor.
+                // "METHOD:GET" alone matches any URL with that method.
                 method = afterKeyword;
                 remainder = string.Empty;
             }
@@ -103,13 +82,8 @@ public sealed class AutoResponderMatch
 
         if (pattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase))
         {
-            // Constructed once per Parse call, not once per rule for the
-            // process's whole life -- see the class remarks on why
-            // re-parsing per evaluation is an accepted tradeoff here. A
-            // malformed pattern throws ArgumentException from here, which
-            // AutoResponderRules.Evaluate lets propagate rather than
-            // silently treating as "never matches" -- a broken regex rule
-            // should be loud, not quietly inert.
+            // A malformed regex throws, so a broken rule is noticed rather than
+            // silently never matching.
             var regex = new Regex(pattern["regex:".Length..]);
             return url => regex.IsMatch(url);
         }
@@ -123,13 +97,7 @@ public sealed class AutoResponderMatch
         return url => url.Contains(pattern, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// Escapes every regex metacharacter in <paramref name="pattern"/>
-    /// except <c>*</c>, then turns each <c>*</c> into <c>.*</c> -- so a
-    /// pattern like <c>api.example.com/*</c> matches that whole prefix
-    /// without its literal <c>.</c>s accidentally becoming "any character"
-    /// wildcards of their own.
-    /// </summary>
+    /// <summary>Escapes everything except <c>*</c>, which becomes <c>.*</c>.</summary>
     private static string WildcardToRegexPattern(string pattern)
     {
         var segments = pattern.Split('*');

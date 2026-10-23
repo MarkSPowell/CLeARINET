@@ -4,26 +4,18 @@ using System.Text;
 namespace Violens.CompatShim;
 
 /// <summary>
-/// Members confirmed by metadata, static throughout (matches every call
-/// site's <c>static</c> calling convention): <c>UrlDecode(string, Encoding)</c>
-/// (ContentBlock), <c>getResponseBodyEncoding(Session)</c> and
-/// <c>GetStringFromArrayRemovingBOM(byte[], Encoding)</c> (JSFormat),
-/// <c>TrimAfter(string, char)</c> (JSFormat), <c>TrimBefore(string, string)</c>
-/// and <c>TrimBefore(string, char)</c> (Differ), <c>ReadSessionArchive(string, bool)</c>
-/// and <c>WriteSessionArchive(string, Session[], string, bool)</c>
-/// (SAZClipboard, Differ), <c>CopyToClipboard(string)</c> (Differ).
+/// The static helpers the samples call: <c>UrlDecode</c> (ContentBlock),
+/// <c>getResponseBodyEncoding</c>, <c>GetStringFromArrayRemovingBOM</c> and
+/// <c>TrimAfter</c> (JSFormat), <c>TrimBefore</c> (Differ),
+/// <c>ReadSessionArchive</c> and <c>WriteSessionArchive</c> (SAZClipboard,
+/// Differ) and <c>CopyToClipboard</c> (Differ).
 /// </summary>
 public static class Utilities
 {
     public static string UrlDecode(string input, Encoding encoding) =>
         input == null ? null : Uri.UnescapeDataString(input);
 
-    /// <summary>
-    /// Real Fiddler's own encoding-detection heuristic (charset header,
-    /// BOM sniffing, etc.) isn't reproduced here -- returns UTF-8 as a
-    /// simple, real, always-available default pending Phase 2's real
-    /// proxied-body data to validate against.
-    /// </summary>
+    /// <summary>Always UTF-8; Fiddler's charset detection isn't reproduced.</summary>
     public static Encoding getResponseBodyEncoding(Session session) => Encoding.UTF8;
 
     public static string GetStringFromArrayRemovingBOM(byte[] bytes, Encoding encoding)
@@ -57,8 +49,7 @@ public static class Utilities
     {
         if (input == null)
         {
-            // Diagnostic only, doesn't change the return value -- see
-            // TrimBefore's own remarks below for why this is here.
+            // Diagnostic only.
             FiddlerApplication.Log.LogFormat("Utilities.TrimAfter: input was null, returning null.", Array.Empty<object>());
             return null;
         }
@@ -67,16 +58,8 @@ public static class Utilities
     }
 
     /// <summary>
-    /// Null input passes straight through as null (real Fiddler's own
-    /// null-handling here isn't confirmed by metadata or documentation --
-    /// this is a defensible placeholder, not confirmed behavior). Logged
-    /// diagnostically while chasing a real NullReferenceException inside
-    /// Differ.dll's own code with zero shim-method frames in the stack: a
-    /// caller passing a null header value in here (say, from a missing
-    /// header's indexer lookup) and not checking before using the result
-    /// would look exactly like that crash, and this makes the last such
-    /// pass-through before a crash visible on the Log tab without reading
-    /// Differ's IL.
+    /// Null in, null out (Fiddler's behaviour here isn't documented). Logged,
+    /// to make a null a caller then dereferences visible on the Log tab.
     /// </summary>
     public static string TrimBefore(string input, string delimiter)
     {
@@ -92,7 +75,7 @@ public static class Utilities
         return idx < 0 ? input : input.Substring(idx + delimiter.Length);
     }
 
-    /// <summary>See the <c>TrimBefore(string, string)</c> overload's own remarks.</summary>
+    /// <summary>As the string overload.</summary>
     public static string TrimBefore(string input, char delimiter)
     {
         if (input == null)
@@ -104,19 +87,10 @@ public static class Utilities
         return idx < 0 ? input : input.Substring(idx + 1);
     }
 
-    /// <summary>
-    /// Real .saz read (unencrypted archives only) -- see
-    /// <see cref="SazArchive"/> for the implementation and its own remarks,
-    /// in particular: password-protected/encrypted .saz files aren't
-    /// supported yet, and this throws rather than silently returning
-    /// nothing for one.
-    /// </summary>
+    /// <summary>Reads a .saz file; encrypted archives throw (see <see cref="SazArchive"/>).</summary>
     public static Session[] ReadSessionArchive(string filename, bool decrypt) => SazArchive.Read(filename, decrypt);
 
-    /// <summary>
-    /// Real .saz write (unencrypted archives only) -- see
-    /// <see cref="SazArchive"/>'s own remarks.
-    /// </summary>
+    /// <summary>Writes a .saz file; encryption isn't supported (see <see cref="SazArchive"/>).</summary>
     public static bool WriteSessionArchive(string filename, Session[] sessions, string password, bool encrypt) =>
         SazArchive.Write(filename, sessions, password, encrypt);
 

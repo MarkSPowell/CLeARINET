@@ -1,45 +1,41 @@
 namespace Violens.ProxyCore.AutoResponder;
 
-/// <summary>
-/// What an <see cref="AutoResponderAction"/> actually does. See
-/// <see cref="AutoResponderAction.IsFinal"/> for which of these stop rule
-/// evaluation outright versus just adjusting the request in passing.
-/// </summary>
+/// <summary>What an <see cref="AutoResponderAction"/> does.</summary>
 public enum AutoResponderActionKind
 {
-    /// <summary>Serve a local file's contents as the response body. The bare, unprefixed default -- see <see cref="AutoResponderAction"/>.</summary>
+    /// <summary>Serve a local file as the response body (the default, unprefixed form).</summary>
     ServeFile,
 
-    /// <summary>Fetch a different URL and serve <em>its</em> response instead of the real one.</summary>
+    /// <summary>Fetch a different URL and serve its response.</summary>
     ProxyUrl,
 
-    /// <summary>Fiddler's <c>*redir:</c> -- respond with an HTTP redirect to another URL.</summary>
+    /// <summary>Fiddler's <c>*redir:</c>: respond with a redirect.</summary>
     Redirect,
 
-    /// <summary>Fiddler's <c>*delay:####</c> -- non-final; adds latency before whatever happens next.</summary>
+    /// <summary>Fiddler's <c>*delay:####</c>: add latency; non-final.</summary>
     Delay,
 
-    /// <summary>Fiddler's <c>*header:Name=Value</c> -- non-final; overrides/adds a header on the real outgoing request.</summary>
+    /// <summary>Fiddler's <c>*header:Name=Value</c>: set a header on the outgoing request; non-final.</summary>
     SetHeader,
 
-    /// <summary>Fiddler's <c>*flag:Name=Value</c> -- non-final; see <see cref="AutoResponderOutcome.FlagsToSet"/>'s own remarks on why nothing consumes these yet.</summary>
+    /// <summary>Fiddler's <c>*flag:Name=Value</c>: set a session flag; non-final.</summary>
     SetFlag,
 
-    /// <summary>Fiddler's <c>*reset</c> -- ends the connection via TCP RST instead of answering.</summary>
+    /// <summary>Fiddler's <c>*reset</c>: end the connection with a TCP RST.</summary>
     Reset,
 
-    /// <summary>Fiddler's <c>*drop</c> -- ends the connection with no response and no RST.</summary>
+    /// <summary>Fiddler's <c>*drop</c>: close the connection without a response.</summary>
     Drop,
 
-    /// <summary>Fiddler's <c>*CORSPreflightAllow</c> -- answers an OPTIONS preflight with permissive CORS headers.</summary>
+    /// <summary>Fiddler's <c>*CORSPreflightAllow</c>: answer an OPTIONS preflight with permissive CORS headers.</summary>
     CorsPreflightAllow,
 
-    /// <summary>Fiddler's <c>*exit</c> -- stops evaluating further rules; the request passes through as if none of the remaining rules existed.</summary>
+    /// <summary>Fiddler's <c>*exit</c>: stop evaluating rules and pass the request through.</summary>
     Exit,
 
-    /// <summary>Fiddler's <c>*bpu</c> -- hands off to the existing breakpoint pipeline instead of answering itself.</summary>
+    /// <summary>Fiddler's <c>*bpu</c>: break before the request.</summary>
     BreakBeforeRequest,
 
-    /// <summary>Fiddler's <c>*bpafter</c> -- same idea as <see cref="BreakBeforeRequest"/>, at the response stage.</summary>
+    /// <summary>Fiddler's <c>*bpafter</c>: break after the response.</summary>
     BreakAfterResponse,
 }

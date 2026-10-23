@@ -1,10 +1,5 @@
-// VioLens dev host -- Phase 1 HTTPS decryption spike.
-//
-// This is throwaway tooling to validate the interception certificate
-// design against real traffic, not a preview of the product's UI or CLI.
-// See docs/VioLens Interception Certificate Design for the design this
-// is proving out, and the project plan's Phase 1 exit criterion for what
-// "done" looks like.
+// VioLens dev host: a console proxy for testing the interception
+// certificate design against real traffic. Not part of the product.
 
 using System.Net.Sockets;
 using Violens.ProxyCore;
@@ -40,12 +35,8 @@ Console.WriteLine();
 var leafProvider = new LeafCertificateProvider(authority.RootCertificate);
 var sessionStore = new SessionStore();
 
-// Defaults to 8888; pass a different preferred port as the first argument,
-// e.g.:
-//   dotnet run --project tools\Violens.DevHost -- 8899
-// If the preferred port is already taken -- most often another VioLens
-// process still running, DesktopUi included -- StartOnAvailablePort falls
-// back to whatever free port the OS hands out rather than failing outright.
+// Port 8888 unless given, e.g. `dotnet run --project tools\Violens.DevHost -- 8899`.
+// If it's taken, any free port is used.
 var preferredPort = args.Length > 0 && int.TryParse(args[0], out var parsedPort) ? parsedPort : 8888;
 
 InterceptingProxyListener proxy;
@@ -75,12 +66,7 @@ Console.WriteLine();
 
 Console.CancelKeyPress += (_, args) =>
 {
-    // Suppress the default immediate-terminate behavior so the SAZ write
-    // below actually gets to run. This is synchronous, plain file I/O --
-    // no async work in flight to race against -- so there's nothing unsafe
-    // about doing it directly in the handler; Environment.Exit(0) at the
-    // end then terminates explicitly once it's done, rather than leaving
-    // the runtime to decide when (or whether) that happens on its own.
+    // Keep running long enough to write the SAZ, then exit.
     args.Cancel = true;
 
     var sessions = sessionStore.Snapshot();

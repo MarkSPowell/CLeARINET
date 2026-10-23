@@ -5,15 +5,7 @@ using Xunit;
 
 namespace Violens.SampleExtension.Tests;
 
-/// <summary>
-/// <see cref="Session"/> is public-constructible (see
-/// <c>ISessionImporter.cs</c>'s own corrected remarks on why that's true
-/// but still not the right way to hand a session to <c>SessionStore</c>)
-/// -- exporting is the one place that's actually fine to lean on directly,
-/// since export only ever reads sessions that already have a real,
-/// already-assigned <see cref="Session.Id"/>. This test just invents one;
-/// nothing downstream of <see cref="SampleSessionExporter"/> re-derives it.
-/// </summary>
+/// <summary>Builds sessions directly, with made-up ids; export only reads them.</summary>
 public class SampleSessionExporterTests
 {
     private static Session BuildSession(int id) => new(

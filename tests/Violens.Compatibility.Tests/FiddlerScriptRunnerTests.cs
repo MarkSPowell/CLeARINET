@@ -7,12 +7,8 @@ using Xunit;
 namespace Violens.Compatibility.Tests;
 
 /// <summary>
-/// Exercises <see cref="FiddlerScriptRunner"/> through its
-/// <see cref="IScriptRunner"/> surface specifically -- the same
-/// narrow contract <c>InterceptingProxyListener</c> actually calls -- rather
-/// than reaching past it into <see cref="FiddlerScriptHost"/>/<see cref="Exchange"/>
-/// directly, which <see cref="FiddlerScriptHostTests"/> already covers.
-/// Every script snippet here is original, written for this test suite.
+/// <see cref="FiddlerScriptRunner"/> through <see cref="IScriptRunner"/>, the
+/// interface the listener calls. Every snippet is original.
 /// </summary>
 public class FiddlerScriptRunnerTests
 {

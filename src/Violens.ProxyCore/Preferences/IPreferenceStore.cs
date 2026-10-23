@@ -1,20 +1,10 @@
 namespace Violens.ProxyCore.Preferences;
 
 /// <summary>
-/// VioLens's preferences contract -- see the Preferences Design doc.
-///
-/// Every member except <see cref="GetListPref"/>/<see cref="SetListPref"/>
-/// deliberately matches a member of Fiddler's own documented
-/// <c>IFiddlerPreferences</c> by name and shape (tenet 1), so a later
-/// adapter for FiddlerCore-style extensions is a thin wrapper rather than
-/// a redesign. The two list members are VioLens's own addition, for
-/// the idea in ericlaw1979/Clearinet's public Issue #2 ("Extensible Lists").
-///
-/// Every value is a string under the hood; the typed accessors are
-/// conversions at the edge, always culture-invariant, and a value that
-/// fails to convert returns the caller's default rather than throwing.
-/// Names are case-insensitive. Safe to call from any thread -- see the
-/// design doc's "Threading and deadlock safety" section.
+/// Preferences (see the Preferences Design). Apart from the list methods,
+/// members match Fiddler's <c>IFiddlerPreferences</c>. Values are strings;
+/// typed getters return the default when a value doesn't convert. Names are
+/// case-insensitive. Thread-safe.
 /// </summary>
 public interface IPreferenceStore
 {

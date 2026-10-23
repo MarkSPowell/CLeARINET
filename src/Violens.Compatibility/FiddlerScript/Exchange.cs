@@ -3,48 +3,13 @@ using Violens.ProxyCore.Http;
 namespace Violens.Compatibility.FiddlerScript;
 
 /// <summary>
-/// The FiddlerScript-facing request/response wrapper a <c>Handlers</c>
-/// function receives as its single argument -- Fiddler Classic's own
-/// <c>Session</c> object, under the name <c>ericlaw1979/Clearinet</c>'s own
-/// sample scripts have already moved to (see that repo's
-/// <c>Content/SampleRules.js</c>: <c>static function OnBeforeRequest(oEx:
-/// Exchange)</c>, with the file's own comment noting "in the SAZ format,
-/// the term 'Exchange' is written as 'Session'"). This project follows that
-/// precedent for the *type name* deliberately -- it costs nothing, since a
-/// FiddlerScript type annotation like <c>oSession: Session</c> is erased
-/// entirely by <see cref="FiddlerScriptPreprocessor"/> before Jint ever
-/// sees it (script code never constructs one of these or references its
-/// .NET type name at all, only whatever parameter name the script itself
-/// chose) -- and it means VioLens's own compatibility layer isn't
-/// presumptively guessing at upstream's naming the way <c>Session.cs</c>'s
-/// own doc comment, written before this was actually checked, turned out
-/// to be wrong about.
-///
-/// The *member* surface is a different call, made deliberately the other
-/// way: every property and method below keeps Fiddler Classic's own exact
-/// casing (<c>hostname</c>, not <c>Hostname</c>; <c>responseCode</c>, not
-/// <c>ResponseCode</c>) even where that violates normal C# naming
-/// conventions, because Jint's default CLR interop resolves JS property
-/// access against the real member name, and an *existing* <c>CustomRules.js</c>
-/// file (the actual porting target -- see the Project Plan's "Fiddler
-/// Classic compatibility review") was written against those exact names,
-/// not ericlaw1979/Clearinet's newer, partially-renamed
-/// <c>Exchange</c> sample (which uses <c>host</c>/<c>urlContains()</c>
-/// instead of <c>hostname</c>/<c>uriContains()</c> in a few places).
-/// Aliasing those newer member names too is future work, not done here --
-/// see the FiddlerScript Compatibility Design doc.
-///
-/// Wraps a *mutable* working copy of the request/response rather than
-/// <see cref="Violens.ProxyCore.Http.CapturedRequest"/>/<c>CapturedResponse</c>
-/// directly, since those are immutable records (built for a session that's
-/// already finished, per <c>Session.cs</c>'s own remarks) and a script
-/// needs to actually edit headers/body/routing before the request goes
-/// anywhere. <see cref="ToRequest"/>/<see cref="ToResponse"/> project this
-/// working state back into fresh immutable records once a handler
-/// finishes -- not called by anything yet (see
-/// <see cref="FiddlerScriptHost"/>'s remarks: this phase stops at running a
-/// handler and inspecting its effects, not yet at wiring those effects
-/// into <c>InterceptingProxyListener</c>'s actual request/response flow).
+/// The session object FiddlerScript handlers receive. Named <c>Exchange</c>,
+/// as in Clearinet's samples, but its members keep Fiddler Classic's exact
+/// names and casing (<c>hostname</c>, <c>responseCode</c>), since Jint
+/// resolves script property names against them and existing
+/// <c>CustomRules.js</c> files use them. Wraps editable copies of the
+/// request and response; <see cref="ToRequest"/> and <see cref="ToResponse"/>
+/// return the results.
 /// </summary>
 public sealed class Exchange
 {
@@ -69,43 +34,26 @@ public sealed class Exchange
     }
 
     /// <summary>
-    /// Builds a working <see cref="Exchange"/> from an already-captured,
-    /// immutable request -- the normal entry point once a request has been
-    /// fully read off the wire but before it's forwarded, matching where
-    /// Fiddler Classic's own <c>OnBeforeRequest</c> fires. There's no
-    /// response yet at that point, so <see cref="oResponse"/> starts empty;
-    /// a script that reads response members from inside
-    /// <c>OnBeforeRequest</c> (nothing in the real API contract expects
-    /// that to work either) just sees blank/default values.
+    /// For <c>OnBeforeRequest</c>: there's no response yet, so
+    /// <see cref="oResponse"/> is empty.
     /// </summary>
     public static Exchange ForRequest(int id, string hostname, CapturedRequest request) =>
         new(id, hostname, ExchangeRequest.From(request), ExchangeResponse.Empty);
 
-    /// <summary>
-    /// Builds a working <see cref="Exchange"/> once a response exists too --
-    /// where Fiddler Classic's own <c>OnBeforeResponse</c>/
-    /// <c>OnPeekAtResponseHeaders</c> fire.
-    /// </summary>
+    /// <summary>For <c>OnBeforeResponse</c> and <c>OnPeekAtResponseHeaders</c>.</summary>
     public static Exchange ForResponse(int id, string hostname, CapturedRequest request, CapturedResponse response) =>
         new(id, hostname, ExchangeRequest.From(request), ExchangeResponse.From(response));
 
-    // Named id_ rather than "id" only in the backing field; the public
-    // member below is the real, script-visible one. C# doesn't allow a
-    // property and its own backing field to share a name case-insensitively
-    // without an explicit field keyword (not yet used elsewhere in this
-    // codebase), so a trailing underscore on the private field is simpler
-    // than introducing that dependency here.
+    // C# won't let a property and its field differ only by case, hence the
+    // underscore.
     private readonly int id_;
 
     /// <summary>Fiddler's <c>oSession.id</c> -- the session's ordinal, matching <see cref="Violens.ProxyCore.Sessions.Session.Id"/>.</summary>
     public int id => id_;
 
     /// <summary>
-    /// Fiddler's <c>oSession.hostname</c> -- get/set, since real scripts
-    /// retarget a request by writing to it (see the "Retarget Server Port"
-    /// and "Simulate HOSTS File" cookbook patterns). Settable here for API
-    /// fidelity; nothing downstream reads the new value back yet (see this
-    /// type's own remarks on <see cref="ToRequest"/> not being wired up).
+    /// Fiddler's <c>oSession.hostname</c>. Settable, as scripts expect, but
+    /// changing it doesn't reroute the request yet.
     /// </summary>
     public string hostname { get; set; }
 
@@ -119,7 +67,7 @@ public sealed class Exchange
         set => oRequest.PathAndQuery = value;
     }
 
-    /// <summary>Fiddler's <c>oSession.bypassGateway</c>: skip the configured upstream gateway/proxy for this one exchange. Recorded, not yet wired to routing -- see this type's own remarks.</summary>
+    /// <summary>Fiddler's <c>oSession.bypassGateway</c>. Recorded, but doesn't affect routing yet.</summary>
     public bool bypassGateway { get; set; }
 
     /// <summary>Fiddler's <c>oSession.responseCode</c> -- read-only passthrough, 0 before a response exists (see <see cref="ForRequest"/>).</summary>
@@ -144,26 +92,15 @@ public sealed class Exchange
     public ExchangeResponse oResponse { get; }
 
     /// <summary>
-    /// Fiddler's <c>oSession.oFlags</c> -- the same generic string bag the
-    /// indexer below reads and writes, exposed as its own object because
-    /// real scripts call <c>oSession.oFlags.Remove("ui-hide")</c> (see the
-    /// "Unhide 404 Responses" cookbook sample) as well as the indexer form.
-    /// Both views share <see cref="_flags"/>, so a write through either one
-    /// is visible from the other immediately.
+    /// Fiddler's <c>oSession.oFlags</c>, for scripts that call
+    /// <c>oFlags.Remove(...)</c>. Shares its flags with the indexer.
     /// </summary>
     public ExchangeFlags oFlags { get; }
 
     /// <summary>
-    /// Fiddler's own <c>oSession["flag-name"]</c> generic property bag --
-    /// UI hints (<c>ui-color</c>/<c>ui-bold</c>/<c>ui-hide</c>/
-    /// <c>ui-customcolumn</c>), debug flags (<c>x-breakrequest</c>/
-    /// <c>x-breakresponse</c>/<c>x-replywithfile</c>/<c>x-overrideHost</c>),
-    /// trickle-delay knobs, and timing (<c>X-TTFB</c>/<c>X-TTLB</c>) all go
-    /// through here rather than a typed property per flag -- see the
-    /// FiddlerScript Compatibility Design doc's note on why this one
-    /// indexer is disproportionately high-value: most cookbook samples lean
-    /// on it rather than a named member. Case-insensitive, matching real
-    /// Fiddler's own flag-name handling.
+    /// Fiddler's <c>oSession["flag-name"]</c>: UI hints (<c>ui-color</c>,
+    /// <c>ui-hide</c>), debug flags (<c>x-breakrequest</c>) and the like, which
+    /// most scripts rely on. Case-insensitive, as in Fiddler.
     /// </summary>
     public string? this[string flagName]
     {
@@ -193,13 +130,7 @@ public sealed class Exchange
     public bool uriContains(string text) =>
         url.Contains(text, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// Fiddler's <c>oSession.utilDecodeResponse()</c>: undoes
-    /// Content-Encoding in place, same as <c>RawTextInspector</c>'s own
-    /// decoding (its twin implementation, not shared code -- see
-    /// <see cref="ExchangeCodec"/>'s remarks for why this duplicates rather
-    /// than cross-references the Extensibility-layer inspector).
-    /// </summary>
+    /// <summary>Fiddler's <c>oSession.utilDecodeResponse()</c>: undoes Content-Encoding in place.</summary>
     public void utilDecodeResponse() => ExchangeCodec.DecodeInPlace(oResponse);
 
     /// <summary>Fiddler's <c>oSession.utilFindInResponse(sText, bCaseSensitive)</c> -- returns the character index, or -1, matching Fiddler's own contract (not a bool).</summary>
@@ -253,9 +184,9 @@ public sealed class Exchange
         return count;
     }
 
-    /// <summary>Projects the current working state back into an immutable <see cref="CapturedRequest"/>. Not called by anything yet -- see this type's own remarks.</summary>
+    /// <summary>The request as the script left it.</summary>
     public CapturedRequest ToRequest() => oRequest.ToCapturedRequest();
 
-    /// <summary>Projects the current working state back into an immutable <see cref="CapturedResponse"/>. Not called by anything yet -- see this type's own remarks.</summary>
+    /// <summary>The response as the script left it.</summary>
     public CapturedResponse ToResponse() => oResponse.ToCapturedResponse();
 }

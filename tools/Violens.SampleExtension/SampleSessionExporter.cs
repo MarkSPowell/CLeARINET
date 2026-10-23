@@ -4,16 +4,9 @@ using Violens.ProxyCore.Sessions;
 namespace Violens.SampleExtension;
 
 /// <summary>
-/// An original <see cref="ISessionExporter"/> -- writes a plain-text
-/// one-line-per-session summary to a fixed file next to this extension's
-/// own <c>.dll</c> (<see cref="AppContext.BaseDirectory"/>), rather than
-/// anywhere the host would need to choose. Deliberately not a real export
-/// format: proves <c>ExtensionHost</c> discovers this class and
-/// <c>MainWindowViewModel.ExportViaExtension</c> calls it with the real,
-/// currently-captured sessions -- see <see cref="ISessionImporter"/>'s own
-/// remarks (this class's counterpart) for why an extension is expected to
-/// pick its own destination rather than receive one through
-/// <c>options</c>.
+/// An original <see cref="ISessionExporter"/>: writes one line per session to
+/// a fixed file beside the DLL. Not a real format; it shows the export
+/// path working.
 /// </summary>
 [ProfferFormat(
     FormatName,
@@ -44,7 +37,7 @@ public sealed class SampleSessionExporter : ISessionExporter
         return true;
     }
 
-    /// <summary>Nothing to release -- see <see cref="SampleSessionImporter.Dispose"/>'s own remarks.</summary>
+    /// <summary>Nothing to release.</summary>
     public void Dispose()
     {
     }

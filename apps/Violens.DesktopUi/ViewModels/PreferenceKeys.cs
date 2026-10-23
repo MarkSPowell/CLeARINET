@@ -1,16 +1,9 @@
 namespace Violens.DesktopUi.ViewModels;
 
 /// <summary>
-/// Every preference name the desktop app reads or writes -- the "What gets
-/// persisted" table in the Preferences Design doc, in code. The same names
-/// on Windows and macOS; the legacy-host key is simply inert on macOS,
-/// where that host can't run.
-///
-/// Deliberately absent: breakpoint conditions and the AutoResponder's
-/// on/off switch. Both change what every app on the machine receives once
-/// VioLens is the system proxy, so silently re-arming them at launch
-/// would be a trap -- see the design doc's "What is deliberately not
-/// persisted" section.
+/// Every preference the desktop app uses (see the Preferences Design).
+/// Breakpoints and the AutoResponder switch are deliberately not saved:
+/// re-arming them at launch would silently affect every app on the machine.
 /// </summary>
 internal static class PreferenceKeys
 {

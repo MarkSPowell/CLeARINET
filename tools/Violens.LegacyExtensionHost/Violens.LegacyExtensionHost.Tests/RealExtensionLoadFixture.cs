@@ -7,31 +7,11 @@ using Xunit;
 namespace Violens.LegacyExtensionHost.Tests;
 
 /// <summary>
-/// Loads the five real extension DLLs exactly once per test run (not once
-/// per [Fact]) and shares the result across every test class in the
-/// <see cref="RealExtensionsCollection"/> collection -- loading real,
-/// unmodified third-party code and running its real <c>OnLoad()</c> hooks
-/// isn't free, and repeating it per-test buys nothing since
-/// <see cref="LegacyExtensionLoader"/> and <see cref="frmViewer"/> are both
-/// freshly constructed here regardless.
-///
-/// Runs its whole setup on a dedicated STA thread (via
-/// <see cref="StaThreadRunner"/>) because it constructs a real
-/// <see cref="frmViewer"/> and sets <see cref="FiddlerApplication.UI"/> to
-/// it before calling <see cref="LegacyExtensionLoader.Load"/> -- this
-/// mirrors <c>Violens.LegacyExtensionHost.Program.Main</c>'s own
-/// sequencing exactly, since several real extensions' <c>OnLoad()</c>
-/// reach into <c>FiddlerApplication.UI</c>'s menu fields immediately.
-///
-/// Loads from an isolated copy of just the five expected files (see
+/// Loads the five sample DLLs once per test run, from an isolated copy (see
 /// <see cref="RealExtensionEnvironment.CopyExpectedFilesToIsolatedFolder"/>),
-/// not <see cref="RealExtensionEnvironment.ExtensionsFolder"/> directly --
-/// that folder is also the real, live LegacyExtensions folder the actual
-/// host reads from and Mark drops retargeted extensions into for manual
-/// testing, so pointing this suite's exact-count assertions at it directly
-/// meant they'd fail the moment anything else legitimately ended up in
-/// there. Implements <see cref="IDisposable"/> purely to clean that
-/// temp copy up afterward.
+/// on an STA thread, after setting <see cref="FiddlerApplication.UI"/> as
+/// the host does, since some extensions' OnLoad uses its menus straight
+/// away. Disposing deletes the copy.
 /// </summary>
 public sealed class RealExtensionLoadFixture : IDisposable
 {

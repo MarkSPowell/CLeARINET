@@ -5,15 +5,9 @@ using Xunit;
 namespace Violens.Compatibility.Tests;
 
 /// <summary>
-/// End-to-end tests running small, original FiddlerScript-style snippets
-/// (written for this test suite, not copied from any real
-/// <c>CustomRules.js</c> or the cookbook samples referenced from
-/// <see cref="FiddlerScriptHost"/>'s own remarks) through the real
-/// preprocess-then-Jint pipeline. Deliberately styled the same way real
-/// scripts are (typed <c>var</c> declarations, <c>class Handlers</c>,
-/// <c>static function</c> methods) so a passing test here is real evidence
-/// the pipeline handles that shape, not just the preprocessor's own
-/// isolated string output.
+/// Original snippets, written the way real scripts are (typed vars,
+/// <c>class Handlers</c>, <c>static function</c>), run through the
+/// preprocessor and Jint together.
 /// </summary>
 public class FiddlerScriptHostTests
 {

@@ -6,17 +6,9 @@ using Xunit;
 namespace Violens.Compatibility.Tests;
 
 /// <summary>
-/// Exercises every documented member of
-/// IFiddlerExtension/IAutoTamper/IAutoTamper2/IAutoTamper3/IHandleExecAction
-/// (https://fiddlerbook.com/fiddler/dev/IFiddlerExtension.asp) against
-/// <see cref="SampleExtension"/>. The goal, per how this was asked for: prove every
-/// documented method is both implementable against VioLens's own interfaces AND
-/// actually usable through <see cref="Exchange"/> -- not just that the interfaces
-/// compile. Each test calls one method and asserts on the specific, independent
-/// effect <see cref="SampleExtension"/> is documented to produce for it, rather than
-/// only checking <see cref="SampleExtension.CallLog"/> -- a method that fired but did
-/// nothing useful to its <see cref="Exchange"/> argument would still pass a
-/// call-log-only test, which isn't the thing worth proving here.
+/// Calls every documented member of IFiddlerExtension, IAutoTamper(2/3) and
+/// IHandleExecAction on <see cref="SampleExtension"/>, and checks each one's
+/// effect on the <see cref="Exchange"/>, not just that it was called.
 /// </summary>
 public class ExtensionInterfaceTests
 {
@@ -140,13 +132,9 @@ public class ExtensionInterfaceTests
     }
 
     /// <summary>
-    /// Runs every method in one pass against a shared extension instance, in roughly
-    /// the order a real request/response cycle would call them -- not just each
-    /// method in isolation. Not a claim that this is confirmed real-Fiddler ordering
-    /// (see IAutoTamper's own remarks: the *After hooks and OnBeforeReturningError
-    /// aren't wired into any real pump here to observe actual ordering from), just a
-    /// sanity check that the whole documented surface works together on one instance
-    /// without any method's effects interfering with another's.
+    /// Every method in one pass on one instance, roughly in request/response
+    /// order, to check they don't interfere. Not a claim about Fiddler's exact
+    /// ordering.
     /// </summary>
     [Fact]
     public void EveryMethodCanRunInOnePass_AgainstASharedExtensionInstance()

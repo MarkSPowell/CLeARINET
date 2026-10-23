@@ -1,15 +1,6 @@
 namespace Violens.ProxyCore.Breakpoints;
 
-/// <summary>
-/// Which side of a session a <see cref="PendingBreakpoint"/> paused --
-/// matches the HandTamperRequest/HandTamperResponse states already
-/// scaffolded in <c>Violens.ProxyCore.SessionState</c> (Fiddler
-/// Classic's own session state machine), though this MVP doesn't yet
-/// drive a captured <c>Session</c>'s state through those states -- a
-/// breakpoint pauses before a <c>Session</c> object even exists (it's
-/// only ever recorded once fully captured), so for now this enum is the
-/// only place that distinction lives.
-/// </summary>
+/// <summary>Whether a breakpoint paused the request or the response.</summary>
 public enum BreakpointStage
 {
     Request,

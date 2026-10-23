@@ -5,13 +5,7 @@ using Xunit;
 
 namespace Violens.SampleExtension.Tests;
 
-/// <summary>
-/// Covers both <see cref="SampleRequestInspector"/> and
-/// <see cref="SampleResponseInspector"/> -- structurally identical twins
-/// (see either class's own remarks on why they're separate types), so one
-/// parameterized-by-hand pass through each is enough; there's nothing
-/// side-specific to their behavior worth testing twice.
-/// </summary>
+/// <summary>Covers both sample inspectors, which are identical apart from their side.</summary>
 public class SampleInspectorTests
 {
     [Fact]

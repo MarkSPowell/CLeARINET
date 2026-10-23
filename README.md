@@ -197,8 +197,7 @@ ever leaves the device on its own.
 ## Project layout
 
 - `docs/` — the [User Guide](docs/User%20Guide.md) for using the app, plus
-  design docs referenced throughout the code's own comments ("see the
-  project plan," "the Interception Certificate Design doc"): the project
+  design docs: the project
   plan and tenets, the interception certificate design, the preferences
   design, the FiddlerScript
   compatibility design, the .NET extension compatibility design, the

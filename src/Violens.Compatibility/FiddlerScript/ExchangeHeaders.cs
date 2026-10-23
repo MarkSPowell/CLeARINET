@@ -1,16 +1,9 @@
 namespace Violens.Compatibility.FiddlerScript;
 
 /// <summary>
-/// Fiddler's <c>oSession.oRequest.headers</c>/<c>oSession.oResponse.headers</c>
-/// collection -- an ordered, case-insensitive-by-name header list backing
-/// both the indexer form (<c>oSession.oRequest["User-Agent"]</c>) and the
-/// method form (<c>.Exists()</c>/<c>.ExistsAndContains()</c>/<c>.Remove()</c>)
-/// real scripts use interchangeably (see the cookbook samples referenced
-/// from <see cref="Exchange"/>'s own remarks). Backed by a plain
-/// <see cref="List{T}"/> of name/value pairs rather than a dictionary,
-/// since HTTP headers can legitimately repeat (e.g. multiple <c>Set-Cookie</c>
-/// headers) and Fiddler's own header collection preserves that -- a
-/// dictionary would silently drop duplicates.
+/// Fiddler's header collection: indexer and <c>Exists</c>/<c>Remove</c>-style
+/// methods. A list, not a dictionary, because headers can repeat
+/// (<c>Set-Cookie</c>).
 /// </summary>
 public sealed class ExchangeHeaders
 {
@@ -63,6 +56,6 @@ public sealed class ExchangeHeaders
     private int IndexOf(string name) =>
         _headers.FindIndex(h => string.Equals(h.Name, name, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Snapshots the current header list for handing back to <c>Violens.ProxyCore</c> -- see <see cref="Exchange.ToRequest"/>/<see cref="Exchange.ToResponse"/>.</summary>
+    /// <summary>The headers as they stand.</summary>
     public IReadOnlyList<(string Name, string Value)> ToList() => _headers.AsReadOnly();
 }

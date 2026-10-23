@@ -4,16 +4,9 @@ using Xunit;
 namespace Violens.ProxyCore.Tests;
 
 /// <summary>
-/// WinInetSystemProxy's Enable/Disable/RecoverFromCrash mutate the current
-/// user's real WinINET registry settings -- exactly the ones controlling
-/// whatever proxy the developer running this test suite is actually using.
-/// A unit test that called them for real (even to restore its own changes
-/// afterward) would risk leaving a real machine's internet connectivity
-/// broken if the test failed partway through, which is a much worse
-/// outcome than a gap in coverage. So only the one pure, side-effect-free
-/// piece of that class is exercised here; the registry-touching methods
-/// are left to manual verification (see the Project Plan's system-proxy
-/// gap entry).
+/// Enable, Disable and RecoverFromCrash change the real registry settings
+/// of whoever runs the tests, and a failure midway could break their
+/// connection, so only <c>MergeBypassList</c> is tested here.
 /// </summary>
 public class WinInetSystemProxyTests
 {

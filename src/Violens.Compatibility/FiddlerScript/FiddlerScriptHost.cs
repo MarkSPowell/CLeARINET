@@ -5,40 +5,15 @@ namespace Violens.Compatibility.FiddlerScript;
 // (System.Linq is implicitly available via ImplicitUsings; see the .csproj.)
 
 /// <summary>
-/// Loads one <c>CustomRules.js</c>-shaped script and dispatches its
-/// <c>Handlers.OnBeforeRequest</c>/<c>OnBeforeResponse</c>/
-/// <c>OnPeekAtResponseHeaders</c> against an <see cref="Exchange"/>.
-///
-/// Runs the script through <b>Jint</b>, not real JScript.NET --
-/// <c>Microsoft.JScript</c> (what Fiddler Classic's own script engine
-/// compiles <c>CustomRules.js</c> with) was never ported past .NET
-/// Framework and isn't available on .NET 10 (open, unresolved:
-/// <see href="https://github.com/dotnet/runtime/issues/27155"/>), so there
-/// is no way to run an existing script's *actual* compiler here. Jint is a
-/// mature, actively maintained, pure-C# ECMAScript interpreter instead --
-/// see <see cref="FiddlerScriptPreprocessor"/> for what bridges the syntax
-/// gap between JScript.NET's non-standard extensions (typed <c>var</c>
-/// declarations, its own class-attribute syntax) and the plain ECMAScript
-/// Jint actually parses. This is recorded as a decision in the Project
-/// Plan's "Fiddler Classic compatibility review" and the FiddlerScript
-/// Compatibility Design doc, not something to second-guess per call site.
-///
-/// One instance per loaded script (scripts are cheap to reload -- see
-/// <c>AppObject.ReloadScript</c> -- so there's no long-lived-engine
-/// lifecycle to manage beyond "construct a new one"). Not thread-safe:
-/// Jint's <see cref="Engine"/> isn't either, and this codebase's own
-/// convention (see <c>BreakpointRules</c>/<c>AutoResponderRules</c>) is
-/// plain mutable state with the caller responsible for not calling in from
-/// two threads at once -- a future listener integration will need to
-/// decide how a single script instance serializes access across
-/// concurrently pumped connections, the same way it already has to for
-/// <c>SessionStore</c>.
+/// Loads one <c>CustomRules.js</c> and runs its <c>Handlers</c> functions
+/// against an <see cref="Exchange"/>. Runs on Jint, since JScript.NET isn't
+/// available on .NET Core (dotnet/runtime#27155);
+/// <see cref="FiddlerScriptPreprocessor"/> handles the syntax differences.
+/// One instance per loaded script. Not thread-safe.
 /// </summary>
 public sealed class FiddlerScriptHost
 {
-    // Deliberately unlikely to collide with any real script's own global --
-    // real FiddlerScript globals are short, human-typed names
-    // (oSession/oEx, Handlers, m_SomeOption), never anything this shape.
+    // A name no real script would use.
     private const string ExchangeGlobalName = "__violens_exchange";
     private const string AssignGlobalName = "__violens_assign";
     private const string ContextActionSessionsGlobalName = "__violens_context_sessions";
@@ -47,40 +22,22 @@ public sealed class FiddlerScriptHost
 
     private readonly Engine _engine;
 
-    /// <summary>
-    /// Every Phase B/C/D menu-binding attribute
-    /// <see cref="FiddlerScriptDirectiveScanner"/> found in this script's own
-    /// RAW source, scanned once in the constructor -- see that scanner's own
-    /// remarks for exactly what it looks for.
-    /// <see cref="FiddlerScriptDirectives.Empty"/> for a script that declares
-    /// none of these (every script written before Phase B/C/D existed, in
-    /// particular).
-    /// </summary>
+    /// <summary>The script's menu and column attributes, found when it loaded.</summary>
     public FiddlerScriptDirectives Directives { get; }
 
     public FiddlerScriptHost(string scriptSource, AppObject? appObject = null)
     {
-        // Scanned from the RAW source, before FiddlerScriptPreprocessor
-        // strips the attribute blocks this reads out of the script below --
-        // see FiddlerScriptDirectiveScanner's own remarks on why this has
-        // to run first, against text that hasn't been touched yet.
+        // From the raw source, before the preprocessor strips the attributes.
         Directives = FiddlerScriptDirectiveScanner.Scan(scriptSource);
 
-        // AllowClr() is what lets a script reference `System.Text.StringBuilder`,
-        // `System.Diagnostics.Process`, etc. by dotted name -- several real
-        // cookbook samples do exactly this (see the Compatibility Design
-        // doc). Unrestricted CLR access from a script is a real trust
-        // boundary to be honest about: this is appropriate for a script the
-        // person running VioLens wrote for themselves (Fiddler Classic's
-        // own trust model is identical -- CustomRules.js already runs with
-        // the user's own full permissions), not for running an untrusted
-        // script from somewhere else.
+        // AllowClr lets scripts use .NET types by name (System.Text.StringBuilder),
+        // as cookbook samples do. It gives the script full access, which is the
+        // same trust Fiddler gives CustomRules.js: fine for your own script, not
+        // for an untrusted one.
         _engine = new Engine(options => options.AllowClr());
 
         var app = appObject ?? new AppObject();
-        // Bound under both names since real scripts use either
-        // interchangeably depending on which era/fork they were copied
-        // from -- see AppObject's own remarks.
+        // Scripts use either name.
         _engine.SetValue("FiddlerObject", app);
         _engine.SetValue("AppObject", app);
 
@@ -91,20 +48,13 @@ public sealed class FiddlerScriptHost
         }
         catch (Exception ex)
         {
-            // Deliberately broad, matching RawTextInspector's own
-            // "third-party library doesn't document a closed exception set
-            // for bad input" reasoning -- Jint can throw its own
-            // JavaScriptException for a runtime script error, but a
-            // malformed script can also fail during Jint's own parse step,
-            // and this project isn't pinning its error handling to Jint's
-            // exact internal exception hierarchy for that split. Either
-            // way, a script that fails to load should say so clearly, not
-            // take the whole host down.
+            // Jint throws different exception types for parse and runtime errors;
+            // either way the script didn't load.
             throw new FiddlerScriptException($"Failed to load FiddlerScript: {ex.Message}", ex);
         }
     }
 
-    /// <summary>Fiddler's <c>OnBeforeRequest</c> -- see the class remarks for what firing this too early/late relative to real Fiddler's own timing would mean; this phase only runs the handler and lets the caller inspect <paramref name="exchange"/> afterward, it doesn't yet feed the result back into a real request/response flow.</summary>
+    /// <summary>Fiddler's <c>OnBeforeRequest</c>.</summary>
     public void InvokeOnBeforeRequest(Exchange exchange) => Invoke("OnBeforeRequest", exchange);
 
     /// <summary>Fiddler's <c>OnBeforeResponse</c>.</summary>
@@ -120,7 +70,7 @@ public sealed class FiddlerScriptHost
     /// <summary>Reads a <see cref="RulesMenuOption"/>'s current value straight off the running script's own <c>Handlers</c> field -- there's no separate cached copy anywhere, so a value a handler itself changed mid-run is always what this returns.</summary>
     public bool GetRulesOptionValue(string fieldName) => EvaluateField(fieldName).AsBoolean();
 
-    /// <summary>Writes a <see cref="RulesMenuOption"/>'s field directly on the running script's <c>Handlers</c> class -- the desktop Rules menu's own "the user just checked/unchecked this" entry point. See <see cref="BindPrefBinding"/>'s own remarks for what happens next if this field is also <c>[BindPref]</c>-bound (nothing here -- persistence is <see cref="FiddlerScriptRunner"/>'s job, one layer up).</summary>
+    /// <summary>Sets a <see cref="RulesMenuOption"/>'s field on the running script.</summary>
     public void SetRulesOptionValue(string fieldName, bool value) => AssignField(fieldName, value);
 
     /// <summary>Same as <see cref="GetRulesOptionValue"/>, for a <see cref="RulesMenuStringOption"/>'s <c>String</c> field.</summary>
@@ -130,18 +80,9 @@ public sealed class FiddlerScriptHost
     public void SetRulesStringValue(string fieldName, string value) => AssignField(fieldName, value);
 
     /// <summary>
-    /// Calls a <see cref="ContextActionDescriptor"/>'s method with
-    /// <paramref name="sessions"/> passed as a single array argument --
-    /// real Fiddler's own <c>Session[] oSessions</c> parameter shape,
-    /// scoped in this project to whatever the caller hands in (see
-    /// <see cref="ContextActionDescriptor"/>'s own remarks on why that's
-    /// just the one currently-selected session today). Passed through
-    /// Jint's CLR array interop (<c>.length</c>/indexed access), not a
-    /// constructed native JS array -- good enough for every real
-    /// <c>ContextAction</c> sample fetched while scoping this (a
-    /// <c>for</c> loop over <c>oSessions.length</c>), but not a promise
-    /// that every <c>Array.prototype</c> method works against it; flagged
-    /// here rather than silently assumed.
+    /// Calls a <c>ContextAction</c> method with the sessions as one array, as
+    /// Fiddler's <c>Session[]</c> parameter. It's a CLR array, so
+    /// <c>.length</c> and indexing work but not every Array method.
     /// </summary>
     public void InvokeContextAction(string methodName, IReadOnlyList<Exchange> sessions)
     {
@@ -197,14 +138,8 @@ public sealed class FiddlerScriptHost
     }
 
     /// <summary>
-    /// Calls a <see cref="UIColumnDescriptor"/>'s method with one session
-    /// and returns its string result -- real Fiddler's own documentation
-    /// warns a well-behaved column method "checks to ensure that objects
-    /// exist before use"; this pass can't enforce that either, but a
-    /// method that throws anyway is caught here and reported as a
-    /// <see cref="FiddlerScriptException"/> rather than taking the whole
-    /// grid render down with it (see <see cref="FiddlerScriptRunner.ComputeUIColumnValue"/>
-    /// for what the caller shows instead).
+    /// Calls a <c>BindUIColumn</c> method for one session. A method that throws
+    /// is reported as a <see cref="FiddlerScriptException"/>.
     /// </summary>
     public string ComputeUIColumnValue(string methodName, Exchange session)
     {
@@ -241,14 +176,7 @@ public sealed class FiddlerScriptHost
         }
     }
 
-    /// <summary>
-    /// Defense in depth, the same role <see cref="Guard"/> plays for handler
-    /// names: every real call site passes a field name that came from this
-    /// same instance's own <see cref="Directives"/> (what a menu was built
-    /// from in the first place), never anything a script or another caller
-    /// supplies directly -- this exists to catch that invariant quietly
-    /// breaking later, not because untrusted input reaches this today.
-    /// </summary>
+    /// <summary>A safety check: field names only ever come from this script's own <see cref="Directives"/>.</summary>
     private void GuardFieldName(string fieldName)
     {
         var known = Directives.RulesMenuOptions.Select(o => o.FieldName)
@@ -283,22 +211,12 @@ public sealed class FiddlerScriptHost
         }
         catch (Exception ex)
         {
-            // Same "broad on purpose" reasoning as the constructor -- a
-            // handler throwing partway through (a null-check the script
-            // author forgot, a typo'd member name) shouldn't take the
-            // caller down with it.
+            // A handler error mustn't take the caller down.
             throw new FiddlerScriptException($"Script error in Handlers.{handlerName}: {ex.Message}", ex);
         }
     }
 
-    /// <summary>
-    /// Every call site here passes one of this class's own constant
-    /// handler names, never anything a script or another caller supplies --
-    /// this exists purely as a defense-in-depth assertion against that
-    /// invariant quietly breaking later (e.g. a future overload accepting
-    /// an arbitrary handler name), not because untrusted input reaches
-    /// this today.
-    /// </summary>
+    /// <summary>A safety check: handler names are only ever this class's own constants.</summary>
     private static string Guard(string handlerName)
     {
         if (handlerName is not ("OnBeforeRequest" or "OnBeforeResponse" or "OnPeekAtResponseHeaders" or "OnExecAction"))

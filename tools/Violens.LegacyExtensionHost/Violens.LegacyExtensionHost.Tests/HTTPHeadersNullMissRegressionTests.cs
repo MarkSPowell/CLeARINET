@@ -4,19 +4,10 @@ using Xunit;
 namespace Violens.LegacyExtensionHost.Tests;
 
 /// <summary>
-/// Locks in <see cref="HTTPHeaders"/>'s indexer's confirmed-correct
-/// null-on-miss behavior as a regression guard. This isn't a bug in the
-/// shim -- it's the confirmed reason <c>Differ.dll</c> throws a real
-/// <see cref="System.NullReferenceException"/> on a session that genuinely
-/// lacks a Content-Type header (see the design doc's "Root cause found: a
-/// real gap in Differ.dll itself, not this shim" entry, itself confirmed
-/// against real Fiddler's own public API docs). If a future change to
-/// <see cref="HTTPHeaders"/> ever made a miss return
-/// <see cref="string.Empty"/> instead of <c>null</c> to "fix" that crash,
-/// it would silently diverge from real Fiddler's own documented contract
-/// -- this test exists to catch that specific regression, not to imply the
-/// crash itself should ever be "fixed" here (see the design doc for why
-/// synthesizing a fake header would misrepresent real captured traffic).
+/// The indexer returns null for a missing header, as Fiddler documents.
+/// That's why Differ.dll crashes on a session without Content-Type, but
+/// returning an empty string instead would break the documented contract,
+/// so this guards against that "fix".
 /// </summary>
 public sealed class HTTPHeadersNullMissRegressionTests
 {

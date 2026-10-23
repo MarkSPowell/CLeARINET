@@ -4,15 +4,7 @@ using Xunit;
 
 namespace Violens.ProxyCore.Tests;
 
-/// <summary>
-/// Exercises <see cref="CompositeExtensionAutoTamperHost"/> against small,
-/// purpose-built fake <see cref="IExtensionAutoTamperHost"/> implementations
-/// -- no real <c>LoadedExtensionSet</c> or
-/// <c>LegacyExtensionHostBridgeClient</c> needed here, matching the same
-/// "test through the interface, with fakes" approach
-/// <c>Violens.Compatibility.Tests.LoadedExtensionSetTests</c> already
-/// uses for the layer below this one.
-/// </summary>
+/// <summary><see cref="CompositeExtensionAutoTamperHost"/> with fake hosts.</summary>
 public sealed class CompositeExtensionAutoTamperHostTests
 {
     private static CapturedRequest SampleRequest() => new("GET", "/widgets", "HTTP/1.1", [("Host", "api.example.com")], []);
@@ -46,12 +38,8 @@ public sealed class CompositeExtensionAutoTamperHostTests
     [Fact]
     public void RunRequestBefore_ThreadsTheEditedRequestThroughEveryHostInOrder()
     {
-        // Each fake host appends its own marker to the same header -- proves
-        // the second host sees the first one's edit, not the original
-        // request, mirroring LoadedExtensionSet's own "one shared,
-        // progressively edited instance" contract one level up (several
-        // extension HOSTS here, rather than several extensions within one
-        // host).
+        // Each host appends a marker to the same header, so the second must see
+        // the first's edit.
         var first = new FakeHost(hasRequestBefore: true, editRequest: r => AppendHeader(r, "X-Trace", "A"));
         var second = new FakeHost(hasRequestBefore: true, editRequest: r => AppendHeader(r, "X-Trace", "B"));
         IExtensionAutoTamperHost composite = new CompositeExtensionAutoTamperHost([first, second]);

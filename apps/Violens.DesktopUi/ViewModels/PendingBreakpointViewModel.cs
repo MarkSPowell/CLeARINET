@@ -2,14 +2,7 @@ using Violens.ProxyCore.Breakpoints;
 
 namespace Violens.DesktopUi.ViewModels;
 
-/// <summary>
-/// Wraps one <see cref="PendingBreakpoint"/> for the breakpoints panel:
-/// exposes its raw text as a bindable, editable property (each edit calls
-/// straight through to <see cref="PendingBreakpoint.TryEdit"/>) and its
-/// Resume/Abort actions as commands. One of these is created per
-/// <c>BreakpointManager.BreakpointHit</c> and discarded on
-/// <c>BreakpointResolved</c> -- see MainWindowViewModel.
-/// </summary>
+/// <summary>One paused session in the breakpoints panel: editable text plus Resume and Abort.</summary>
 public sealed class PendingBreakpointViewModel : ViewModelBase
 {
     private readonly PendingBreakpoint _pending;
@@ -26,13 +19,8 @@ public sealed class PendingBreakpointViewModel : ViewModelBase
         $"{_pending.Request.Method} {_pending.Host}{_pending.Request.Target}";
 
     /// <summary>
-    /// The whole message as one editable blob (Fiddler Classic's TextView
-    /// model -- see HttpMessageText's remarks). Every set re-parses via
-    /// <see cref="PendingBreakpoint.TryEdit"/>; an edit that doesn't parse
-    /// still updates what's shown (so the person's in-progress typing is
-    /// never discarded out from under them) but leaves
-    /// <see cref="ValidationError"/> set and <see cref="ResumeCommand"/>
-    /// disabled until it's fixed.
+    /// The whole message as editable text. Text that doesn't parse is kept as
+    /// typed, with <see cref="ValidationError"/> set and Resume disabled.
     /// </summary>
     public string RawText
     {

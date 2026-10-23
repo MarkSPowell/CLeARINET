@@ -7,14 +7,9 @@ using Xunit;
 namespace Violens.LegacyExtensionHost.Tests;
 
 /// <summary>
-/// Fully self-contained -- builds its own synthetic sessions and writes/
-/// reads a real temp .saz file, no external file or real extension DLL
-/// needed, so this always runs (including in CI with none of the real
-/// samples present). Exercises the real <c>SazArchive</c> implementation
-/// through <see cref="Utilities.WriteSessionArchive"/>/
-/// <see cref="Utilities.ReadSessionArchive"/> -- the same public entry
-/// points a real extension (SAZClipboard, Differ) actually calls -- rather
-/// than reaching into the internal <c>SazArchive</c> class directly.
+/// Writes and reads a temp .saz through <see cref="Utilities.WriteSessionArchive"/>
+/// and <see cref="Utilities.ReadSessionArchive"/>, the entry points
+/// extensions call. Self-contained, so it always runs.
 /// </summary>
 public sealed class SazArchiveRoundTripTests : IDisposable
 {
@@ -55,9 +50,7 @@ public sealed class SazArchiveRoundTripTests : IDisposable
         Assert.Equal("api.example.com", session.host);
         Assert.Equal("/api/data?x=1", session.PathAndQuery);
         Assert.Equal("api.example.com/api/data?x=1", session.url);
-        // Scheme is guessed from the "https" session flag (see
-        // SazArchive.GuessScheme's own remarks) -- not otherwise present in
-        // a relative-form request line.
+        // The scheme comes from the "https" flag.
         Assert.Equal("https://api.example.com/api/data?x=1", session.fullUrl);
         Assert.Equal("application/json", session.oRequest.headers["Content-Type"]);
         Assert.Equal("{\"a\":1}", Encoding.UTF8.GetString(session.requestBodyBytes));
@@ -84,10 +77,8 @@ public sealed class SazArchiveRoundTripTests : IDisposable
     [Fact]
     public void Write_WithEncryptRequested_ThrowsRatherThanSilentlyWritingUnprotected()
     {
-        // Locks in the documented gap (see SazArchive's own remarks): .NET's
-        // ZipArchive can't write encrypted entries, so this must fail
-        // loudly, not silently produce an unprotected file while reporting
-        // success.
+        // Encryption isn't supported, so this must throw rather than write an
+        // unprotected file.
         Assert.Throws<NotSupportedException>(() =>
             Utilities.WriteSessionArchive(_tempFile, new[] { new Session { id = 1 } }, password: null, encrypt: true));
 
@@ -104,11 +95,8 @@ public sealed class SazArchiveRoundTripTests : IDisposable
     [Fact]
     public void Read_OfAnUnreadableArchive_ThrowsRatherThanSilentlyReturningEmpty()
     {
-        // A real password-protected .saz would hit the same code path (see
-        // SazArchive.Read's own remarks: .NET's ZipArchive can't tell
-        // "encrypted" apart from "corrupt," both surface as
-        // InvalidDataException) -- garbage bytes are a self-contained stand-in
-        // for either, without needing a real encrypted sample file.
+        // An encrypted archive looks corrupt to ZipArchive too, so garbage bytes
+        // stand in for one.
         File.WriteAllBytes(_tempFile, new byte[] { 0x00, 0x01, 0x02, 0x03, 0x04 });
 
         Assert.Throws<NotSupportedException>(() => Utilities.ReadSessionArchive(_tempFile, decrypt: false));
@@ -117,10 +105,7 @@ public sealed class SazArchiveRoundTripTests : IDisposable
     [Fact]
     public void Read_OfAMissingFile_ReturnsEmptyRatherThanThrowing()
     {
-        // Deliberately different from the unreadable-archive case above --
-        // see SazArchive.Read's own early-return for a missing/empty
-        // filename, which is a normal "nothing to load yet" case, not a
-        // failure.
+        // A missing file means nothing to load, not an error.
         var missingFile = Path.Combine(Path.GetTempPath(), "violens-saz-tests-missing-" + Guid.NewGuid() + ".saz");
 
         var result = Utilities.ReadSessionArchive(missingFile, decrypt: false);

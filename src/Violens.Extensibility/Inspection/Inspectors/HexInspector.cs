@@ -1,12 +1,6 @@
 namespace Violens.Extensibility.Inspection.Inspectors;
 
-/// <summary>
-/// Fiddler Classic's "HexView" -- a raw byte dump that always applies,
-/// including for content <see cref="RawTextInspector"/> can't make sense
-/// of (a zstd body today, a genuinely binary payload always). Hands back
-/// the bytes unmodified; laying them out as hex/ASCII lines is a rendering
-/// concern for the host, not this inspector's job.
-/// </summary>
+/// <summary>Fiddler Classic's HexView: the raw bytes, for any body. The host lays out the dump.</summary>
 public sealed class HexInspector : IInspector
 {
     public string Id => "violens.hex";

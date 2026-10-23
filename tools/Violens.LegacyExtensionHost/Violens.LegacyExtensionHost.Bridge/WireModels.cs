@@ -1,13 +1,6 @@
 namespace Violens.LegacyExtensionHost.Bridge;
 
-/// <summary>
-/// One header name/value pair on the wire. Deliberately not a
-/// <c>KeyValuePair&lt;string,string&gt;</c> or a tuple -- System.Text.Json
-/// serializes a plain class with named properties far more predictably
-/// across the netstandard2.0/net48/net10.0 split this project spans than
-/// either of those (a tuple's <c>Item1</c>/<c>Item2</c> property names are
-/// an implementation detail, not a contract worth depending on).
-/// </summary>
+/// <summary>A header on the wire: a class with named properties, which serializes the same on every target.</summary>
 public sealed class WireHeader
 {
     public string Name { get; set; } = string.Empty;
@@ -16,13 +9,8 @@ public sealed class WireHeader
 }
 
 /// <summary>
-/// Wire shape of <c>Violens.ProxyCore.Http.CapturedRequest</c> --
-/// deliberately a separate, independent type rather than referencing that
-/// record directly (see this project's own <c>.csproj</c> remarks on why
-/// nothing net10.0/net48-specific crosses this boundary). Field names and
-/// shapes are kept a straightforward mirror on purpose, so mapping in
-/// either direction stays a plain property-by-property copy, not a
-/// translation.
+/// <c>CapturedRequest</c> on the wire: a separate type mirroring it, so
+/// nothing framework-specific crosses between net48 and net10.0.
 /// </summary>
 public sealed class WireRequest
 {
@@ -34,16 +22,11 @@ public sealed class WireRequest
 
     public List<WireHeader> Headers { get; set; } = new();
 
-    /// <summary>
-    /// System.Text.Json serializes <c>byte[]</c> as a base64 string by
-    /// default on every target this project spans -- no custom converter
-    /// needed for that, just something worth being explicit about here
-    /// since it's not visible from the type alone.
-    /// </summary>
+    /// <summary>Serialized as base64.</summary>
     public byte[] Body { get; set; } = Array.Empty<byte>();
 }
 
-/// <summary>Wire shape of <c>Violens.ProxyCore.Http.CapturedResponse</c> -- see <see cref="WireRequest"/>'s own remarks.</summary>
+/// <summary><c>CapturedResponse</c> on the wire.</summary>
 public sealed class WireResponse
 {
     public string HttpVersion { get; set; } = string.Empty;

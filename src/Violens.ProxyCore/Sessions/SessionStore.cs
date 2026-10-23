@@ -3,12 +3,9 @@ using Violens.ProxyCore.Http;
 namespace Violens.ProxyCore.Sessions;
 
 /// <summary>
-/// Holds every session captured so far, in memory, for the lifetime of the
-/// process. Good enough for this capture spike and for the SAZ writer that
-/// reads from it. <see cref="SessionAdded"/> is the change feed a live UI
-/// subscribes to -- Phase 2's desktop app uses it to append rows as they're
-/// captured instead of polling <see cref="Snapshot"/>. Eviction and
-/// on-disk spillover for long-running captures are still unsolved.
+/// Every session captured so far, in memory. <see cref="SessionAdded"/> is
+/// the change feed a UI subscribes to. Bodies are capped, but nothing is
+/// evicted or spilled to disk yet.
 /// </summary>
 public sealed class SessionStore
 {
@@ -17,11 +14,8 @@ public sealed class SessionStore
     private int _nextId = 1;
 
     /// <summary>
-    /// Raised synchronously, on whatever thread called <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/>,
-    /// right after a session is recorded -- that's proxy connection-handling
-    /// threads, never a UI thread. Subscribers that touch UI state (like
-    /// the desktop app) must marshal back to the UI thread themselves
-    /// rather than assuming this event already did it.
+    /// Raised after a session is recorded, on the thread that recorded it (a
+    /// connection thread). UI subscribers must marshal to their own thread.
     /// </summary>
     public event Action<Session>? SessionAdded;
 
@@ -29,10 +23,8 @@ public sealed class SessionStore
         Add(host, startedAt, request, response, flags: null);
 
     /// <summary>
-    /// As <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse, IReadOnlyDictionary{string, string}?, string)"/>
-    /// for an HTTPS session. Kept as its own overload (rather than a
-    /// default parameter value) so extensions compiled against an earlier
-    /// VioLens still find it.
+    /// The HTTPS-session overload, kept separate (not a default parameter) so
+    /// extensions compiled against earlier versions still find it.
     /// </summary>
     public Session Add(
         string host,
@@ -43,11 +35,8 @@ public sealed class SessionStore
         Add(host, startedAt, request, response, flags, "https");
 
     /// <summary>
-    /// As <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/>,
-    /// for a session that arrives already carrying Fiddler-style string
-    /// flags -- see <see cref="Session.Flags"/>. An empty dictionary is
-    /// stored as null. <paramref name="scheme"/> is "https"
-    /// or "http" -- see <see cref="Session.Scheme"/>.
+    /// For a session that already carries Fiddler-style flags (see
+    /// <see cref="Session.Flags"/>); an empty dictionary is stored as null.
     /// </summary>
     public Session Add(
         string host,
@@ -100,10 +89,8 @@ public sealed class SessionStore
             _sessions.Add(session);
         }
 
-        // Fired outside the lock: a subscriber that calls back into this
-        // store (e.g. Snapshot()) during the event must not deadlock, and
-        // a slow subscriber must not hold up other capture threads calling
-        // Add() concurrently.
+        // Outside the lock, so subscribers can call back in and slow ones don't
+        // hold up other connections.
         SessionAdded?.Invoke(session);
         return session;
     }
@@ -165,26 +152,9 @@ public sealed class SessionStore
     }
 
     /// <summary>
-    /// A best-effort look at the id the <em>next</em> session recorded via
-    /// <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> will receive. Exists for FiddlerScript/extension
-    /// code that wants to read <c>oSession.id</c> from inside
-    /// <c>OnBeforeRequest</c>/<c>OnBeforeResponse</c> -- see
-    /// <c>Violens.ProxyCore.Scripting.IScriptRunner</c> -- before
-    /// the session that exchange belongs to has actually been recorded here;
-    /// <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> only assigns a real id once both the request and
-    /// the response are known, which for a request-side hook is still in the
-    /// future.
-    ///
-    /// <b>Best-effort under concurrency, not a reservation:</b> another
-    /// connection's own <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> can run between this call
-    /// returning and the caller's own eventual <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> call, so
-    /// the id actually assigned to that session can end up higher than
-    /// whatever this returned. There is deliberately no way to reserve an id
-    /// ahead of time -- that would need <see cref="Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> itself to change
-    /// shape (pre-allocate, then fill in later), which nothing today
-    /// requires closely enough to justify. This matches how real Fiddler's
-    /// own <c>oSession.id</c> numbering works in spirit: assigned by capture
-    /// order, not requested in advance.
+    /// The id the next session will probably get, for scripts and extensions
+    /// reading <c>oSession.id</c> before their session is recorded. Not a
+    /// reservation: another connection may record a session first.
     /// </summary>
     public int PeekNextId()
     {

@@ -6,27 +6,10 @@ using Violens.LegacyExtensionHost.Bridge;
 
 namespace Violens.LegacyExtensionHost;
 
-/// <summary>
-/// Converts between the session bridge's wire DTOs
-/// (<c>Violens.LegacyExtensionHost.Bridge.WireRequest</c>/<c>WireResponse</c>)
-/// and this project's own <see cref="Session"/> -- the one place that
-/// mapping happens, used by <see cref="SessionBridgeRunner"/> for every
-/// hook kind. Kept as a separate static class (rather than folded directly
-/// into the runner) specifically so it's independently testable: building a
-/// correct <see cref="Session"/> from real captured traffic, and correctly
-/// reading extension edits back out of one, is exactly the part of this
-/// bridge most worth a unit test, with no pipe or process involved.
-/// </summary>
+/// <summary>Converts between the bridge's wire types and the shim's <see cref="Session"/>.</summary>
 internal static class SessionMapping
 {
-    /// <summary>
-    /// Builds a <see cref="Session"/> for <c>AutoTamperRequestBefore</c>/
-    /// <c>AutoTamperRequestAfter</c> -- no response exists yet at that point
-    /// (matching real Fiddler's own timing, and
-    /// <c>Violens.Compatibility.FiddlerScript.Exchange.ForRequest</c>'s
-    /// identical "no response yet" shape on the in-process side of this same
-    /// distinction).
-    /// </summary>
+    /// <summary>For the request hooks: there's no response yet.</summary>
     public static Session ToRequestSession(int id, string hostname, WireRequest request, Action<string> log) =>
         Populate(new Session(), id, hostname, request, log);
 
@@ -71,18 +54,9 @@ internal static class SessionMapping
     }
 
     /// <summary>
-    /// <see cref="HTTPHeaders"/>'s own indexer setter (see that class's own
-    /// remarks) replaces an existing same-named header rather than adding a
-    /// second one -- a real gap for anything that legitimately repeats a
-    /// header name (multiple <c>Set-Cookie</c> headers being the common
-    /// real-world case), inherited from how this shim's header store is
-    /// built, not introduced here. Only the last value for a repeated name
-    /// survives into the <see cref="Session"/> a loaded extension actually
-    /// sees -- flagged with a log line so this is visible on the Log tab
-    /// rather than a silent data loss, not solved by this bridge (fixing
-    /// <see cref="HTTPHeaders"/> itself to support repeated names is future
-    /// work, and would need checking it doesn't change any of the five real
-    /// samples' own confirmed behavior against it).
+    /// The shim's header indexer replaces a same-named header rather than
+    /// adding another, so for repeated headers (<c>Set-Cookie</c>) only the
+    /// last survives. Logged when it happens.
     /// </summary>
     private static void SetHeaders(HTTPHeaders headers, IReadOnlyList<WireHeader> wireHeaders, string which, Action<string> log)
     {
@@ -105,14 +79,8 @@ internal static class SessionMapping
     }
 
     /// <summary>
-    /// Projects a <see cref="Session"/>'s current request state back into a
-    /// <see cref="WireRequest"/>, after every loaded extension's
-    /// <c>AutoTamperRequestBefore</c>/<c>AutoTamperRequestAfter</c> has run.
-    /// <paramref name="original"/> supplies <c>HttpVersion</c>, which
-    /// <see cref="Session"/> has no member for at all (none of the five real
-    /// extensions this shim was built against reference one -- see
-    /// <c>ClientChatter</c>'s own remarks) and which no loaded extension can
-    /// therefore have changed.
+    /// The session's request after the hooks ran. <paramref name="original"/>
+    /// supplies the HTTP version, which <see cref="Session"/> doesn't have.
     /// </summary>
     public static WireRequest FromSession(Session session, WireRequest original) => new()
     {
@@ -124,14 +92,8 @@ internal static class SessionMapping
     };
 
     /// <summary>
-    /// Same as <see cref="FromSession(Session, WireRequest)"/>, for the
-    /// response side. <paramref name="original"/> also backstops
-    /// <c>ReasonPhrase</c> when <c>oResponse.headers.HTTPResponseStatus</c>
-    /// wasn't left in a "code reason" shape an extension could have set it
-    /// to anything, or left it as this bridge seeded it in
-    /// <see cref="ToResponseSession"/> -- both parse the same way here, so
-    /// this only actually falls back to <paramref name="original"/> when
-    /// that string is empty or code-only.
+    /// The session's response after the hooks ran. <paramref name="original"/>
+    /// supplies the reason phrase if the status line has none.
     /// </summary>
     public static WireResponse FromSession(Session session, WireResponse original) => new()
     {

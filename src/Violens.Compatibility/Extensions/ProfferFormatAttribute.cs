@@ -1,13 +1,8 @@
 namespace Violens.Compatibility.Extensions;
 
 /// <summary>
-/// VioLens's equivalent of Fiddler Classic's own <c>[ProfferFormat("Name",
-/// "Description")]</c> attribute, decorating an <c>ISessionImporter</c>/
-/// <c>ISessionExporter</c> implementation to declare which named format(s)
-/// it handles (fiddlerbook.com/fiddler/dev/ISessionExport.asp) -- an
-/// importer/exporter class can carry more than one of these (real Fiddler's
-/// own SAZ exporter, for instance, proffers both "Session Archive (.saz)"
-/// and a legacy alias), which is why this allows multiple.
+/// Fiddler's <c>[ProfferFormat("Name", "Description")]</c>: a format an
+/// importer or exporter handles. A class may have several.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true)]
 public sealed class ProfferFormatAttribute(string formatName, string description) : Attribute

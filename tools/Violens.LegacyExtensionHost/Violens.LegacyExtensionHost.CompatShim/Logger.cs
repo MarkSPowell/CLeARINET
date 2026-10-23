@@ -3,12 +3,7 @@ using System.Diagnostics;
 
 namespace Violens.CompatShim;
 
-/// <summary>
-/// metadata: <c>Fiddler.Logger.void LogFormat(string, object[])</c> --
-/// JSFormat, called as an instance method (obtained via
-/// <see cref="FiddlerApplication.Log"/>, matches the confirmed
-/// <c>FiddlerApplication.static Fiddler.Logger get_Log()</c>).
-/// </summary>
+/// <summary><c>LogFormat(string, object[])</c>, used by JSFormat through <see cref="FiddlerApplication.Log"/>.</summary>
 public sealed class Logger
 {
     public void LogFormat(string format, object[] args)
@@ -27,13 +22,7 @@ public sealed class Logger
 
         Debug.WriteLine("[LegacyExtensionHost] " + message);
 
-        // Also surface on the "Log" tab (see frmViewer.AppendLog) -- this is
-        // the same visibility fix Program.cs's own startup logging got, and
-        // extensions/this shim's own code (e.g. SazArchive) call LogFormat
-        // for exactly the kind of thing that's worth seeing without a
-        // debugger attached. FiddlerApplication.UI can be null very early
-        // (before Program.cs assigns it) or in a future host that doesn't
-        // have a UI at all, so this stays optional rather than required.
+        // Also shown on the Log tab. UI may not be set yet early in startup.
         FiddlerApplication.UI?.AppendLog(message);
     }
 }

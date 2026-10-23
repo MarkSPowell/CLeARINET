@@ -1,77 +1,72 @@
 # VioLens User Guide
 
-This is the end-user guide: how to actually use the app once it's running.
-If you're looking for build instructions, project layout, or the "why" behind
-a design decision, see [README.md](../README.md) and the other documents in
-this `docs/` folder instead — those are written for contributors, not for
-someone just trying to inspect some traffic. You can always get back to this
-guide from inside the app itself via **Help > Documentation**.
+This guide covers using VioLens day to day: capturing traffic, finding
+your way around the session list, and the tools that come with it. If you
+want to build VioLens yourself, start with [README.md](../README.md). You
+can open this guide from the app at any time with **Help > Documentation**.
 
 ## Upgrading from CLeARINET
 
 VioLens was called CLeARINET until version 0.2. If you used CLeARINET on
 this computer:
 
-- **Settings carry over.** The first time VioLens runs, it copies
+- Your settings carry over. When VioLens first runs, it copies
   CLeARINET's settings, AutoResponder rules and FiddlerScript preferences
   into its own folder, and the extensions in `Documents\CLeARINET\Extensions`
-  into `Documents\VioLens\Extensions`. The originals are left where they
-  were, with a note listing what was copied; delete those files once you're
-  happy. If CLeARINET was closed without putting your proxy settings back,
-  VioLens puts them back.
-- **Only CLeARINET's own files.** Another app with a similar name keeps its
-  files in folders called `Clearinet`, which Windows and macOS treat as the
-  same folders. VioLens only copies, and the installer only removes, the
-  files CLeARINET itself created, so anything else there is left alone.
-- **A new root certificate.** VioLens asks you to trust its own
+  into `Documents\VioLens\Extensions`. The originals stay where they were,
+  with a note listing what was copied; delete them once you're happy. If
+  CLeARINET was closed without putting your proxy settings back, VioLens
+  puts them back.
+- Only CLeARINET's own files are touched. Another app with a similar name
+  keeps its files in folders called `Clearinet`, which Windows and macOS
+  treat as the same folders. VioLens only copies, and the installer only
+  removes, the files CLeARINET created, so anything else there is left
+  alone.
+- There's a new root certificate. VioLens asks you to trust its own
   `DO_NOT_TRUST_ViolensRoot` certificate, then removes CLeARINET's
   `DO_NOT_TRUST_ClearinetRoot` (on Windows, the system asks you to confirm
   the removal). Phones and other devices you set up to trust CLeARINET's
   certificate need the new one: visit `http://violens/` through the proxy
   to download it, and remove the old one from the device.
-- **The installer replaces CLeARINET.** On Windows, installing VioLens
-  removes the program files and shortcuts CLeARINET installed. On macOS, VioLens is a
-  separate app: drag CLeARINET from Applications to the Bin once VioLens
-  is working.
+- On Windows, installing VioLens removes the program files and shortcuts
+  CLeARINET installed. On macOS, VioLens is a separate app: drag CLeARINET
+  from Applications to the Bin once VioLens is working.
 
 ## Starting the proxy
 
-1. Pick a port. **Port: Auto** (the default) lets the OS hand back any free
-   port — the simplest choice unless something else on your machine expects
-   VioLens on a specific port. **Specify** lets you type one in.
+1. Pick a port. **Port: Auto** (the default) uses any free port, which is
+   fine unless something else on your machine expects VioLens on a
+   specific port. **Specify** lets you type one in.
 2. Click **Start**.
-3. The first time you do this, you'll be asked to trust a new certificate
-   named `DO_NOT_TRUST_ViolensRoot...`. This is expected — it's what
-   lets VioLens see inside HTTPS traffic on this machine, the same
-   mechanism Fiddler Classic uses. On Windows this is the OS's own "Do you
-   want to install this certificate?" prompt; on macOS it's a confirmation
-   dialog VioLens shows itself (macOS has no equivalent OS-level prompt
-   for the way VioLens installs it) before it ever touches your login
-   keychain. Accept it to continue. Nothing captured ever leaves your
-   device on its own.
-4. Once running, the status bar at the bottom shows which port you're
-   listening on and whether VioLens successfully registered itself as
-   the system proxy. If it couldn't (some other tool already has that
-   role, for example), you'll still capture traffic from anything you point
-   at the port manually.
+3. On first start, VioLens asks you to trust a certificate named
+   `DO_NOT_TRUST_ViolensRoot...`. That's what lets it see inside HTTPS
+   traffic on this machine, the same way Fiddler Classic does. On Windows
+   you get the system's "Do you want to install this certificate?"
+   prompt. On macOS, VioLens shows its own confirmation before it adds
+   anything to your login keychain. Accept it to continue. Nothing you
+   capture leaves your device unless you send it somewhere.
+4. Once it's running, the status bar shows the port VioLens is listening
+   on and whether it registered itself as the system proxy. If it couldn't
+   (because another tool already has that role, for example), you'll
+   still capture traffic from anything you point at the port yourself.
 
-Click **Stop** to release the port and stop capturing. Sessions already
+Click **Stop** to release the port and stop capturing. Sessions you've
 captured stay in the list until you remove them (see below) or close the
 app.
 
 To stop trusting VioLens's certificate, choose **Tools > Remove Root
-Certificate**. This stops capturing and removes the certificate and its key
-from your account; the next **Start** makes a new one. Uninstalling VioLens
-on Windows does the same. On Windows, the system asks you to confirm.
+Certificate**. This stops capturing and removes the certificate and its
+key from your account, and the next **Start** makes a new one.
+Uninstalling VioLens on Windows does the same. On Windows, the system asks
+you to confirm.
 
-VioLens's HTTPS interception (certificate trust and system proxy
-registration) is implemented on both Windows and macOS. The macOS side is
-new and has had little testing on a real Mac so far — see
-[README.md](../README.md)'s Known limitations section for the specifics.
+HTTPS interception works on both Windows and macOS, but the Mac build is
+newer and less tested. See the Known limitations section of
+[README.md](../README.md) for details.
 
-On macOS the app isn't notarized, so the first time you open it macOS says
-it can't verify the developer. Open it anyway from **System Settings >
-Privacy & Security > Open Anyway**; you only need to do this once.
+The macOS app isn't notarized, so when you first open it macOS says it
+can't verify the developer. Open it anyway from **System Settings >
+Privacy & Security > Open Anyway**. You only need to do this once.
 
 ## The session list and inspectors
 
@@ -80,18 +75,18 @@ grid: number, time, status, method, URL, and request/response sizes. Click a
 row to see its **Request** and **Response** panels below, each with its own
 tabs:
 
-- **Headers** — a table of header names and values.
-- **Raw** — the decoded text body (automatic decompression for gzip,
-  deflate, Brotli and zstd, and the character set from Content-Type — see
-  README.md for the full list of what's handled).
-- **JSON** (only for a JSON body) — the body pretty-printed, so an API
-  response is readable at a glance. Offered for JSON content types, and for
-  a body with no useful content type that turns out to be JSON.
-- **WebForms** (request side, only when there's something to show) — the
+- **Headers**: a table of header names and values.
+- **Raw**: the decoded text body. It decompresses gzip, deflate, Brotli
+  and zstd, and uses the character set from Content-Type (README.md has
+  the full list of what's handled).
+- **JSON** (only for a JSON body): the body pretty-printed, so an API
+  response is easy to read. You get it for JSON content types, and for a
+  body with no useful content type that turns out to be JSON.
+- **WebForms** (request side, only when there's something to show): the
   query string and any form fields, one row per name and value, decoded.
   Form uploads (`multipart/form-data`) show each field, and each file's
   name, type and size.
-- **ImageView** (only for an image) — the picture itself, with its format,
+- **ImageView** (only for an image): the picture itself, with its format,
   pixel size and size in bytes. PNG, JPEG, GIF, WebP, BMP and ICO are
   recognised even when the Content-Type is wrong. For PNG, JPEG, GIF and
   WebP it also lists any **image bloat**: bytes that don't change how the
@@ -100,14 +95,14 @@ tabs:
   the file smaller with no visible change. (EXIF can hold the photo's
   orientation, which browsers honour, so keep that tag if the image relies
   on it.)
-- **Hex** — a hex dump of the raw bytes.
-- **Cookies** (only on a side that has cookies) — on the request side,
+- **Hex**: a hex dump of the raw bytes.
+- **Cookies** (only on a side that has cookies): on the request side,
   each cookie the browser sent; on the response side, each cookie the
   server set, with its attributes (Path, Domain, Expires, Secure, HttpOnly,
   SameSite...). A cookie browsers will refuse, such as `SameSite=None`
   without `Secure`, or a `__Host-`/`__Secure-` cookie that breaks its
   prefix's rules, gets a warning.
-- **Notes** (request side, only when there are any) — notes an importer
+- **Notes** (request side, only when there are any): notes an importer
   or extension attached to the session. For example, a NetLog capture
   recorded without bodies notes the response size the browser reported,
   which explains why the Resp column shows 0 B.
@@ -149,13 +144,13 @@ menu shows every column again, in the original order and widths.
 The filter box above the grid accepts free text (matched against the URL and
 headers, never body content) plus a small query grammar:
 
-- `method:GET` — exact method match
-- `host:example.com` — exact host match
-- `status:404`, `status:4xx`, `status:>=500` — exact, class, or comparison
-  forms
+- `method:GET` matches the method exactly
+- `host:example.com` matches the host exactly
+- `status:404`, `status:4xx` and `status:>=500` match an exact status, a
+  class or a comparison
 
-Combine free text and query tokens in the same filter; every keystroke
-re-applies it live.
+You can mix free text and query tokens in one filter. The list updates as
+you type.
 
 ### Timing, the waterfall and statistics
 
@@ -304,11 +299,11 @@ conversion you used.
 
 ## The Tools menu
 
-Several panels are hidden by default to keep the main screen uncluttered.
-**Tools** in the menu bar is where you turn each one on or off — those
-entries are checkboxes, and checking one shows the panel on the main
-screen (unchecking it hides it again without losing whatever you'd set up
-in it). Tools also opens TextWizard and the column chooser:
+Several panels are hidden by default. You turn each one on or off from
+the **Tools** menu: those entries are checkboxes, and checking one shows
+the panel on the main screen. Unchecking it hides the panel again but
+keeps whatever you'd set up in it. Tools also opens TextWizard and the
+column chooser:
 
 | Tools menu entry | Shows |
 |---|---|
@@ -323,21 +318,20 @@ in it). Tools also opens TextWizard and the column chooser:
 | TextWizard… | Encodes and decodes text (see "TextWizard") |
 | Session List Columns | Which columns the session list shows (see "The session list") |
 
-Unchecking "Break on Requests"/"Break on Responses"/"Also Break On" only
-hides that control — it doesn't clear whatever rule you'd already set. If a
-connection is genuinely paused at a breakpoint, the Breakpoints panel stays
-visible regardless of these checkboxes, since hiding it would hide your only
-way to resume or abort that connection.
+Unchecking "Break on Requests", "Break on Responses" or "Also Break On"
+only hides that control. It doesn't clear a rule you'd already set. While
+a connection is paused at a breakpoint, the Breakpoints panel stays
+visible whatever these checkboxes say, so you can always resume or abort
+it.
 
-Each visible panel can also be collapsed on its own (the small arrow in its
-header) without hiding it entirely from the Tools menu — useful if you want
-to temporarily reclaim screen space without losing your rules.
+You can also collapse a visible panel with the small arrow in its header,
+to get some screen space back without hiding it from the Tools menu.
 
 ## Breakpoints
 
-Fiddler-Classic-style: pause a request or response before it completes, look
-at (and optionally edit) its raw text, then either **Resume** it on its way
-or **Abort** the connection outright.
+As in Fiddler Classic, you can pause a request or response before it
+completes, look at its raw text (and edit it if you like), then either
+**Resume** it or **Abort** the connection.
 
 1. Check **Tools > Break on Requests** and/or **Break on Responses** to pause
    everything, or check **Tools > Also Break On** for narrower conditions:
@@ -345,45 +339,44 @@ or **Abort** the connection outright.
    method, a response whose request URL contains some text, or a response
    with a specific status code.
 2. When something hits a breakpoint, it appears in the **Breakpoints**
-   panel's list on the left. Select it to see its raw request/response text
-   on the right — start line, headers, and body together, as one editable
-   block of text.
-3. Edit the text if you need to, then click **Resume** to let it continue
-   (with your edits applied) or **Abort** to kill the connection instead. An
-   edit that leaves the text malformed is reported as an error rather than
-   silently dropped, so a bad edit won't slip through unnoticed.
+   panel's list on the left. Select it to see its raw request or response
+   text on the right: start line, headers and body, as one block you can
+   edit.
+3. Edit the text if you need to, then click **Resume** to send it on with
+   your edits, or **Abort** to kill the connection. If an edit leaves the
+   text malformed, you get an error rather than having the edit quietly
+   dropped.
 
 ## AutoResponder
 
-Fiddler Classic's traffic-replay feature: an ordered list of match/action
-rules that intercept matching requests before they ever reach the real
-server.
+The AutoResponder works like Fiddler Classic's: an ordered list of
+match/action rules that answer matching requests before they reach the
+real server.
 
 1. Check **Tools > AutoResponder** to show the rules editor.
-2. Click **Add Rule** to add a new (initially disabled) row.
-3. Fill in the **Match** column — a plain substring, a `*wildcard*`, or one
-   of Fiddler's own prefixes: `EXACT:`, `regex:`, `NOT:`, `METHOD:verb`.
-4. Fill in the **Action** column — a local file path or `http(s)://` URL to
+2. Click **Add Rule** to add a new row. It starts disabled.
+3. Fill in the **Match** column: a plain substring, a `*wildcard*`, or one
+   of Fiddler's prefixes: `EXACT:`, `regex:`, `NOT:`, `METHOD:verb`.
+4. Fill in the **Action** column: a local file path or `http(s)://` URL to
    serve instead, or one of Fiddler's action prefixes: `*redir:`, `*delay:ms`,
    `*header:Name=Value`, `*reset`, `*drop`, `*bpu`, `*bpafter`, and others.
-5. Check the box on the left of the row to enable it. Rules only take effect
-   once both the row itself is checked *and* the panel's own toggle
-   (**Tools > AutoResponder**, which doubles as Fiddler's own "Enable rules"
-   switch) is on.
-6. Use **Move Up**/**Move Down** to reorder rules — the first matching rule
-   wins, so order matters when two rules could both match the same request.
-   **Remove** deletes the selected rule.
+5. Check the box on the left of the row to enable it. A rule only takes
+   effect when its row is checked *and* **Tools > AutoResponder** is on
+   (that toggle is Fiddler's "Enable rules" switch).
+6. Use **Move Up** and **Move Down** to reorder rules. The first matching
+   rule wins, so order matters when two rules could match the same
+   request. **Remove** deletes the selected rule.
 
-Rules are saved as you edit them, with each row's checkbox, and are back
-the next time you open VioLens. The panel's own switch always starts
+Rules are saved as you edit them, along with each row's checkbox, and are
+there the next time you open VioLens. The panel's switch always starts
 off (see "Settings that are remembered").
 
 ## Composer and Replay
 
 The **Composer** tab (next to **Inspectors**) sends a request you've
 written or edited, like Fiddler Classic's Composer. Type the request as raw
-HTTP: a first line with the method, a full `https://` or `http://` URL and the version,
-then headers, a blank line, and any body. Click **Execute**.
+HTTP: a first line with the method, a full `https://` or `http://` URL and
+the version, then headers, a blank line, and any body. Click **Execute**.
 
 ```
 POST https://api.example.com/items HTTP/1.1
@@ -499,44 +492,41 @@ off when you've finished, and remove the certificate from the other device.
 
 ## FiddlerScript
 
-FiddlerScript lets a script hook into every request and response, and
-optionally add its own menu entries, buttons, and grid columns. This is the
-closest thing to Fiddler Classic's own `CustomRules.js`.
+FiddlerScript lets a script hook into every request and response, and add
+its own menu entries, buttons and grid columns. It's the closest thing to
+Fiddler Classic's `CustomRules.js`.
 
 1. Check **Tools > FiddlerScript** to show the panel.
-2. Click **Browse…** to pick a `.js` file (or any file — the picker defaults
-   to `.js` but doesn't require it).
+2. Click **Browse…** to pick a `.js` file. (The picker defaults to `.js`,
+   but any file will do.)
 3. Click **Load**. The status line below shows which handlers the script
-   defines (`OnBeforeRequest`, `OnBeforeResponse`) or, if something's wrong
-   with the script, its load error — the previous working script (if any)
-   keeps running until you fix and reload.
-4. After editing the script file in whatever editor you normally use, click
-   **Reload** to pick up your changes. A script can also trigger its own
-   reload from inside itself.
+   defines (`OnBeforeRequest`, `OnBeforeResponse`), or the load error if
+   something's wrong with it. In that case the previous working script, if
+   there was one, keeps running until you fix and reload.
+4. After editing the script in your usual editor, click **Reload** to pick
+   up the changes. A script can also reload itself.
 
-A loaded script can add to the app in a few places beyond the two request/
-response hooks:
+Besides the request and response hooks, a loaded script can add to the
+app in these places:
 
-- **Rules menu** (in the menu bar): populated from the script's declared
-  rule options and choices. Empty and greyed out when nothing's loaded, or
-  the loaded script declares none — hover over it for a reminder of why.
-- **Script Actions** (a row of buttons inside the FiddlerScript panel
-  itself, right below the Load/Reload buttons): one button per action the
-  script declares. Only appears at all once the loaded script actually
-  declares at least one.
-- **Right-click on a session row**: a script can add its own entries to that
-  context menu, operating on whichever session you right-clicked.
+- **Rules menu** (in the menu bar): filled from the rule options and
+  choices the script declares. It's empty and greyed out when no script is
+  loaded or the script declares none; hover over it to see why.
+- **Script Actions** (a row of buttons in the FiddlerScript panel, below
+  Load and Reload): one button per action the script declares. The row
+  only appears once the script declares at least one.
+- **Session right-click menu**: a script can add its own entries, which
+  act on the session you right-clicked.
 - **Extra grid columns**: a script can declare its own columns, which are
-  added to the session grid after the built-in ones once the script loads.
+  added after the built-in ones once the script loads.
 
 ## Extensions
 
-Compiled .NET extensions (the successor to Fiddler Classic's `.dll`-based
-extension model) are loaded automatically from VioLens's Extensions
-folder at startup — there's no in-app step to load one, only to drop the
-`.dll` there before launching VioLens. That folder is
+VioLens loads compiled .NET extensions (its version of Fiddler Classic's
+`.dll` extensions) from its Extensions folder when it starts. To add one,
+put the `.dll` there before launching VioLens. The folder is
 `Documents\VioLens\Extensions` on Windows and
-`~/Documents/VioLens/Extensions` on macOS; VioLens also loads the
+`~/Documents/VioLens/Extensions` on macOS. VioLens also loads the
 `Extensions` folder next to the app itself, where the Windows installer
 puts the optional extensions below. If the same `.dll` is in both, the copy
 in your Documents folder is used.
@@ -559,27 +549,27 @@ author, under its own licence (see `THIRD-PARTY-NOTICES.txt` and the
   app. Copy the `.dll`s you want into `~/Documents/VioLens/Extensions`
   and restart VioLens.
 
-Check **Tools > Extensions** to see a status readout: which folders were
-scanned, how many `.dll` files were found, how many of each extension role
+Check **Tools > Extensions** to see which folders were scanned, how many
+`.dll` files were found, how many of each kind of extension loaded
 (AutoTamper, request/response inspector, importer, exporter, exec-action
-handler, ported Fiddler extension) actually loaded, and any load errors.
+handler, ported Fiddler extension), and any load errors.
 
-If a loaded extension proffers session import or export, two File-menu
-entries pick it up:
+If a loaded extension offers session import or export, you can use it
+from the File menu:
 
 - **File > Import via Extension…**
 - **File > Export via Extension…**
 
-Both are disabled (greyed out, with a tooltip explaining why) until a
-loaded extension actually supports that direction. If your extensions
-offer more than one format, you're asked which to use, with the one you
-picked last time already selected. With only one, it's used straight away.
+Each is greyed out (with a tooltip saying why) until a loaded extension
+supports it. If your extensions offer more than one format, you're asked
+which to use, with last time's choice already selected. If there's only
+one, it's used straight away.
 
 ### Fiddler Classic extensions ported from source
 
-A Fiddler Classic extension whose source you have can usually be rebuilt
-for VioLens with very small changes, and then runs on both Windows and
-macOS. The first one proven this way is Eric Lawrence's
+If you have the source of a Fiddler Classic extension, you can usually
+rebuild it for VioLens with very small changes, and it then runs on both
+Windows and macOS. The first one ported this way is Eric Lawrence's
 [NetLog importer](https://github.com/ericlaw1979/FiddlerImportNetlog),
 which imports Chromium/Edge NetLog captures (`.json`, `.json.gz` or a
 `.zip` containing one). The only change to its source is deleting its
@@ -599,9 +589,9 @@ Content-Security-Policy a page needs, has a VioLens-only version:
 [CSP-CLeARINET-Extension](https://github.com/MarkSPowell/CSP-CLeARINET-Extension),
 a fork of the Fiddler extension with an Avalonia tab. It's one of the
 optional extensions above (or build it yourself; see its README). Open
-the **CSP Rule Collector** tab,
-tick **Enable Rule Collection**, clear the browser's cache and browse the
-site. Untick it when you're done: while it's on, responses get extra
+the **CSP Rule Collector** tab, tick **Enable Rule Collection**, clear the
+browser's cache and browse the site. Untick it when you're done: while
+it's on, responses get extra
 report-only CSP headers and aren't cached. While it's collecting, the
 browser sends many report requests to `fiddlercsp.deletethis.net`; the
 extension answers them itself, and they're shown struck through. Tick
@@ -609,42 +599,37 @@ extension answers them itself, and they're shown struck through. Tick
 and use **Edit > Remove All Sessions** to clear ones already there.
 
 Ported extensions can add their own menus (before **Help**, or in
-**Tools**), session-list columns and row colours; the optional Privacy
-Scanner adds a **Privacy** menu, a **Privacy Info** column and row colours. See
-`docs/Extension Test Targets.md` for what's supported so far.
+**Tools**), session-list columns and row colours. The optional Privacy
+Scanner, for example, adds a **Privacy** menu, a **Privacy Info** column
+and row colours. See `docs/Extension Test Targets.md` for what's supported
+so far.
 
 ## Legacy Fiddler Classic extensions
 
-A separate, optional tool for a specific case the Extensions feature above
-can't cover: an already-compiled Fiddler Classic extension `.dll` whose UI
-hooks reach directly into Windows Forms menu/toolbar/tab controls that
-Microsoft removed from .NET 5 and later. Those extensions can't run inside
-VioLens's own process at all — not a bug, a platform limitation — so
-`Violens.LegacyExtensionHost.exe`, a separate program included with
-VioLens, runs them instead, in its own window, wired up to your real
-captured traffic.
+Some compiled Fiddler Classic extensions use Windows Forms menu, toolbar
+and tab controls that Microsoft removed from .NET 5 and later. Those
+can't run inside VioLens itself, so VioLens includes a separate program,
+`Violens.LegacyExtensionHost.exe`, that runs them in its own window,
+connected to your captured traffic.
 
-This is off by default and entirely optional; skip this section if you
-don't have an existing compiled Fiddler Classic extension you specifically
-want to keep using.
+It's off by default. You only need it if you have a compiled Fiddler
+Classic extension of this kind that you want to keep using.
 
-1. Drop the extension's `.dll` into `Documents\VioLens\LegacyExtensions\`.
+1. Put the extension's `.dll` in `Documents\VioLens\LegacyExtensions\`.
    An extension still compiled against the real Fiddler assembly won't load
-   as-is — see the pop-up/log message it produces for what to do, which
+   as it is. The pop-up or log message it produces says what to do, which
    comes down to recompiling it against `Violens.CompatShim` (if you
    have its source).
 2. Check **Tools > Legacy Extension Host** to show the panel, then check
    "Launch Violens.LegacyExtensionHost.exe automatically on Start". With
    that on, clicking **Start** also launches the legacy host (if it isn't
-   already running) and connects it to your real traffic; the panel's
-   status line reports what happened (already running, launched, not
-   found, or launch failed). Leave the checkbox off and nothing about your
-   normal VioLens usage changes.
-3. The legacy host opens as its own separate window, not merged into
-   VioLens's own — that's a known, permanent limitation, not a bug.
-   Loaded extensions' request/response-tampering hooks run against your
-   real traffic either way; anything the extension shows in its own
-   window's session list is separate demo data, not your real sessions.
+   already running) and connects it to your traffic. The panel's status
+   line says what happened (already running, launched, not found, or
+   launch failed). With the checkbox off, VioLens works as normal.
+3. The legacy host always opens in its own window, separate from
+   VioLens's. Loaded extensions' request and response tampering hooks run
+   against your real traffic, but anything the extension shows in its own
+   window's session list is separate demo data, not your sessions.
 
 ## Saving and loading captured sessions
 
@@ -680,10 +665,10 @@ and macOS:
 - The FiddlerScript path you last entered
 - Whether the legacy extension host launches automatically
 
-Breakpoints and the AutoResponder's on/off switch are **not** remembered,
-on purpose. Once VioLens is the system proxy, a breakpoint or
-AutoResponder rule that switched itself back on at launch would affect
-every app on your machine as soon as you clicked Start.
+Breakpoints and the AutoResponder's on/off switch are **not** remembered.
+Once VioLens is the system proxy, a breakpoint or AutoResponder rule that
+came back on at launch would affect every app on your machine as soon as
+you clicked Start.
 
 Settings are saved in a `preferences.json` file:
 
@@ -699,19 +684,17 @@ had is lost. To reset every setting, quit VioLens and delete the file.
 
 ## The Help menu
 
-- **Help > Documentation** opens this file through whatever your system
-  uses to open `.md` files. If nothing's registered for that extension,
-  you can also find this file directly at `docs/User Guide.md` in the
-  VioLens source tree, or, for a running build, in a `Documentation`
+- **Help > Documentation** opens this file with whatever your system uses
+  for `.md` files. If nothing is set up for them, you'll find the file at
+  `docs/User Guide.md` in the VioLens source tree, or in a `Documentation`
   folder next to the app's executable.
-- **Help > About VioLens** shows which build you're actually running —
-  useful when reporting an issue, or checking whether you're on the
-  latest preview.
+- **Help > About VioLens** shows which build you're running. That's
+  useful when you report an issue or want to check you're on the latest
+  preview.
 
 ## Known limitations
 
-VioLens is an early, working MVP, not a 1.0 release. See
-[README.md](../README.md)'s Known limitations section for what's
-deliberately not here yet (HTTP/2, proxies
-that need a sign-in, little testing on a real Mac so far, and more) — that list is kept in one place, in README.md, rather than
-duplicated here.
+VioLens is still a preview. The main gaps are HTTP/2, client
+certificates, SOCKS proxies and Digest proxy sign-in, and the Mac build
+has had less use than the Windows one. The full list is in the Known
+limitations section of [README.md](../README.md).

@@ -86,11 +86,9 @@ public sealed class Logger
 }
 
 /// <summary>
-/// Fiddler's documented <c>IFiddlerPreferences</c>, minus watchers
-/// (<c>AddWatcher</c> hands back a Fiddler-specific watcher type; that can
-/// be added when an extension needs it). VioLens's own
-/// <see cref="IPreferenceStore"/> was deliberately given the same method
-/// names, so this is a thin pass-through.
+/// Fiddler's <c>IFiddlerPreferences</c>, without watchers.
+/// <see cref="IPreferenceStore"/> uses the same method names, so this
+/// passes straight through.
 /// </summary>
 public interface IFiddlerPreferences
 {
@@ -112,12 +110,8 @@ public interface IFiddlerPreferences
 }
 
 /// <summary>
-/// Backs <see cref="FiddlerApplication.Prefs"/> with whatever
-/// <see cref="CompatShimHost.Preferences"/> currently is -- looked up on
-/// every call, so a host can set it after this type was first touched. In
-/// the desktop app that's the same <c>preferences.json</c> the app itself
-/// uses, with the same behavior on Windows and macOS (see the Preferences
-/// Design doc).
+/// Backs <see cref="FiddlerApplication.Prefs"/> with the current
+/// <see cref="CompatShimHost.Preferences"/>, looked up on each call.
 /// </summary>
 internal sealed class HostPreferences : IFiddlerPreferences
 {

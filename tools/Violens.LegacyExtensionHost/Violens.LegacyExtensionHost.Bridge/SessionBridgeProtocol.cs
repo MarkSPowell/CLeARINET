@@ -5,57 +5,27 @@ using System.Text.Json;
 namespace Violens.LegacyExtensionHost.Bridge;
 
 /// <summary>
-/// Shared constants and message framing for the session bridge's named
-/// pipe -- one Windows local pipe, no network exposure (see the design
-/// doc's "Session bridge" section for why named pipes were chosen over
-/// any networked transport: this never needs to cross a machine boundary,
-/// and a named pipe can't be reached from another machine at all, which
-/// matters for a tool that's inspecting the user's own HTTPS traffic).
-/// Used identically by the main app's client
-/// (<c>Violens.Compatibility.Extensions.LegacyExtensionHostBridgeClient</c>)
-/// and the legacy host's server (<c>Violens.LegacyExtensionHost.SessionBridgeServer</c>)
-/// -- framing has to match exactly on both ends, so it lives here once
-/// rather than being reimplemented twice.
+/// Pipe name, timeouts and framing for the session bridge, shared by both
+/// ends. A local named pipe, which other machines can't reach.
 /// </summary>
 public static class SessionBridgeProtocol
 {
     /// <summary>
-    /// The pipe name both ends connect to. Versioned in the name itself
-    /// (rather than a separate handshake field) so a future,
-    /// wire-incompatible protocol change just fails to connect instead of
-    /// connecting and then misbehaving -- simplest possible compatibility
-    /// guard for two binaries (net10.0 main app, net48 legacy host) that
-    /// are never guaranteed to be rebuilt and redeployed together.
+    /// Versioned in the name, so an incompatible build fails to connect
+    /// rather than misbehaving; the two ends aren't always updated together.
     /// </summary>
     public const string PipeName = "Violens.LegacyExtensionHost.SessionBridge.v1";
 
-    /// <summary>
-    /// How long the client waits to even connect before deciding no legacy
-    /// host is listening. Short and local-only (this is loopback IPC, not a
-    /// network call) -- see <c>LegacyExtensionHostBridgeClient</c>'s own
-    /// remarks for why a slow connect has to fail fast rather than block
-    /// real browsing traffic.
-    /// </summary>
+    /// <summary>How long to try connecting before deciding no host is there. Short, so traffic isn't held up.</summary>
     public const int ConnectTimeoutMilliseconds = 250;
 
     /// <summary>
-    /// How long the client waits for a full request/response round trip
-    /// once connected, covering however long every loaded legacy
-    /// extension's hook actually takes to run. Generous compared to
-    /// <see cref="ConnectTimeoutMilliseconds"/> on purpose: a slow but
-    /// working extension should get to finish; a hung one should still
-    /// eventually let real browsing traffic through rather than stall it
-    /// forever -- see <c>LegacyExtensionHostBridgeClient.Exchange</c>.
+    /// How long a round trip may take, including the extensions' hooks. Long
+    /// enough for a slow extension; a hung one still lets traffic through.
     /// </summary>
     public const int RoundTripTimeoutMilliseconds = 3000;
 
-    /// <summary>
-    /// The pipe's own read/write buffer size (bytes) -- not a hard cap on
-    /// message size (<see cref="WriteMessage{T}"/>/<see cref="ReadMessage{T}"/>
-    /// length-prefix and loop until a full message is transferred either
-    /// way), just the chunk size each individual OS-level read/write call
-    /// uses.
-    /// </summary>
+    /// <summary>The pipe's buffer size; messages can be larger.</summary>
     public const int PipeBufferSize = 64 * 1024;
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -63,13 +33,7 @@ public static class SessionBridgeProtocol
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    /// <summary>
-    /// Writes one length-prefixed JSON message: a 4-byte little-endian
-    /// byte count, then that many UTF-8 JSON bytes. Symmetric with
-    /// <see cref="ReadMessage{T}"/> -- same framing is used in both
-    /// directions (request main app -> legacy host, response the other
-    /// way), so this one method serves both ends.
-    /// </summary>
+    /// <summary>Writes one message: a 4-byte little-endian length, then UTF-8 JSON.</summary>
     public static void WriteMessage<T>(Stream stream, T message)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(message, SerializerOptions);
@@ -84,14 +48,7 @@ public static class SessionBridgeProtocol
         stream.Flush();
     }
 
-    /// <summary>
-    /// Reads one length-prefixed JSON message written by
-    /// <see cref="WriteMessage{T}"/>. Loops on both the 4-byte length
-    /// prefix and the payload itself, since <see cref="Stream.Read"/> --
-    /// including on a <see cref="System.IO.Pipes.PipeStream"/> -- is only
-    /// ever guaranteed to return "at least one byte, up to what was asked
-    /// for," never "exactly what was asked for" in one call.
-    /// </summary>
+    /// <summary>Reads one message, looping because a read may return fewer bytes than asked for.</summary>
     public static T ReadMessage<T>(Stream stream)
     {
         var lengthPrefix = ReadExactly(stream, 4);

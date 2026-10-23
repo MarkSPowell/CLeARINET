@@ -4,17 +4,8 @@ using Xunit;
 namespace Violens.ProxyCore.Tests;
 
 /// <summary>
-/// MacOSSystemProxy.Enable/Disable/RecoverFromCrash shell out to the real
-/// <c>networksetup</c> CLI against the current user's actual network
-/// services -- the same reason WinInetSystemProxyTests only exercises
-/// WinInetSystemProxy.MergeBypassList rather than the registry-touching
-/// methods. This sticks to the same pure, no-subprocess shape: the
-/// argument-building methods (plain string construction, no OS
-/// interaction) and the two output parsers, which are ordinary string
-/// processing over a fixed, well-documented CLI output format -- no real
-/// <c>networksetup</c> invocation needed to exercise either. See the
-/// Interception Certificate Design doc's "Testing scope, deliberately
-/// narrow" note.
+/// Enable, Disable and RecoverFromCrash change real network settings, so
+/// only the argument builders and output parsers are tested.
 /// </summary>
 public class MacOSSystemProxyTests
 {
@@ -117,9 +108,7 @@ public class MacOSSystemProxyTests
     [Fact]
     public void ParseProxyState_IsCaseInsensitiveForTheEnabledValue()
     {
-        // Not observed in real networksetup output as far as this session
-        // could confirm without a Mac to check against -- defensive rather
-        // than a documented quirk being worked around.
+        // Lower-case "yes" hasn't been seen from networksetup; this is defensive.
         var output = "Enabled: yes\nServer: 10.0.0.1\nPort: 3128\n";
 
         Assert.True(MacOSSystemProxy.ParseProxyState(output).Enabled);

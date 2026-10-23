@@ -10,11 +10,7 @@
         Icon="avares://Violens.DesktopUi/Assets/violens-icon.png"
         Background="{DynamicResource AppBackgroundBrush}">
 
-  <!-- No bindings, no DataContext: everything here is either static XAML
-       text or set once, directly, from AboutWindow.axaml.cs's constructor
-       (VersionText's own Text), a plain code-behind read of the running
-       assembly's own version, not state that changes while this dialog is
-       open, so a full view model would be more machinery than this needs. -->
+  <!-- No view model: the version text is set from code-behind. -->
   <StackPanel Margin="24" Spacing="4">
     <TextBlock Text="VioLens"
                FontSize="22"

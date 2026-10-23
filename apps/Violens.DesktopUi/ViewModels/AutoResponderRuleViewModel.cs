@@ -2,20 +2,7 @@ using Violens.ProxyCore.AutoResponder;
 
 namespace Violens.DesktopUi.ViewModels;
 
-/// <summary>
-/// Thin bindable wrapper around one <see cref="AutoResponderRule"/> -- same
-/// role <see cref="PendingBreakpointViewModel"/> plays for a
-/// <c>PendingBreakpoint</c>, just simpler: an <see cref="AutoResponderRule"/>
-/// is already plain mutable state (see that class's own remarks), so each
-/// property here is a direct passthrough rather than a call into some
-/// engine method. <see cref="Rule"/> is exposed so
-/// <c>MainWindowViewModel</c> can reach the underlying model object when
-/// adding/removing/reordering -- <see cref="AutoResponderRules.Rules"/> and
-/// this view model's own <c>ObservableCollection</c> are two separate lists
-/// kept in sync by hand, the same tradeoff <c>FilteredSessions</c> already
-/// makes for the same reason (no Avalonia collection view that could just
-/// project one from the other).
-/// </summary>
+/// <summary>Bindable wrapper around one <see cref="AutoResponderRule"/>.</summary>
 public sealed class AutoResponderRuleViewModel(AutoResponderRule rule) : ViewModelBase
 {
     public AutoResponderRule Rule { get; } = rule;
@@ -35,12 +22,7 @@ public sealed class AutoResponderRuleViewModel(AutoResponderRule rule) : ViewMod
         }
     }
 
-    /// <summary>
-    /// See <see cref="AutoResponderMatch"/> for the grammar this is parsed
-    /// against at evaluation time -- there's nothing to validate here
-    /// up front, since an unrecognized form just falls back to a plain
-    /// literal/wildcard match rather than failing.
-    /// </summary>
+    /// <summary>See <see cref="AutoResponderMatch"/>; anything unrecognised is a literal or wildcard match.</summary>
     public string MatchPattern
     {
         get => Rule.MatchPattern;

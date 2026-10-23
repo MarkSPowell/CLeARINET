@@ -3,41 +3,17 @@ using System.Text.Json;
 namespace Violens.Compatibility.FiddlerScript;
 
 /// <summary>
-/// Backs <see cref="BindPrefBinding"/>'s persisted half: a small,
-/// string-keyed JSON file under the local app-data folder, the same
-/// <c>%LocalAppData%\VioLens\...</c> convention
-/// <c>Violens.ProxyCore.SystemProxy.WinInetSystemProxy</c>'s own crash-safety
-/// backup file already established (see that class's own remarks) --
-/// reused here rather than inventing a second settings convention.
-///
-/// A preference whose name contains "Ephemeral" (case-insensitive, matching
-/// real Fiddler's own documented <c>fiddlerscript.ephemeral.*</c> naming
-/// convention) is kept in this instance's own in-memory dictionary but never
-/// written to disk -- <see cref="FiddlerScriptRunner"/> owns exactly one
-/// instance of this class for its whole lifetime, so an ephemeral value set
-/// during one script load is still there for a later
-/// <see cref="FiddlerScriptRunner.Reload"/> within the same run (matching
-/// "preserved across recompiles of the script within a single Fiddler
-/// instance"), but starts fresh -- <see langword="null"/> -- the next time
-/// VioLens itself starts (matching "discarded each time Fiddler exits").
-///
-/// One instance is not safe to share across concurrent
-/// <see cref="Get"/>/<see cref="Set"/> calls from different threads without
-/// external synchronization -- the same "plain mutable state, caller's own
-/// responsibility" posture the rest of this codebase's own rule/script state
-/// already takes (see <see cref="FiddlerScriptHost"/>'s own remarks).
+/// Saved values for <c>[BindPref]</c> fields, in a small JSON file in the
+/// app's data folder. Names containing "Ephemeral" (Fiddler's
+/// <c>fiddlerscript.ephemeral.*</c> convention) are kept in memory only, so
+/// they survive a script reload but not a restart. Not thread-safe.
 /// </summary>
 public sealed class FiddlerScriptPreferenceStore
 {
     private readonly string _filePath;
     private readonly Dictionary<string, string> _values;
 
-    /// <param name="filePath">
-    /// Overrides the default <c>fiddlerscript-prefs.json</c> in the host app's data folder (<c>%LocalAppData%\VioLens</c> for VioLens)
-    /// path -- exists purely so tests can point this at a temp file instead
-    /// of touching a real machine's app-data folder; a production caller is
-    /// expected to leave this at its default.
-    /// </param>
+    /// <param name="filePath">For tests; defaults to <c>fiddlerscript-prefs.json</c> in the app's data folder.</param>
     public FiddlerScriptPreferenceStore(string? filePath = null)
     {
         _filePath = filePath ?? Path.Combine(
@@ -47,20 +23,10 @@ public sealed class FiddlerScriptPreferenceStore
         _values = LoadFromDisk();
     }
 
-    /// <summary><see langword="null"/> if this preference has never been set (or was set only as an ephemeral value in a previous process run -- see this class's own remarks).</summary>
+    /// <summary>The saved value, or null if there isn't one.</summary>
     public string? Get(string prefName) => _values.GetValueOrDefault(prefName);
 
-    /// <summary>
-    /// Records <paramref name="value"/> against <paramref name="prefName"/>,
-    /// immediately -- there's no separate "save on unload" step (see
-    /// <see cref="BindPrefBinding"/>'s own remarks on why
-    /// <see cref="FiddlerScriptRunner"/> writes through on every set rather
-    /// than batching until some unload event that doesn't reliably exist in
-    /// this codebase yet). Writing through immediately, on every call, is
-    /// strictly more crash-safe than real Fiddler's own "save at unload"
-    /// timing, not less -- an app crash between a script-driven change and
-    /// the next unload can't lose it here.
-    /// </summary>
+    /// <summary>Saves the value straight away, rather than when the script unloads as Fiddler does.</summary>
     public void Set(string prefName, string value)
     {
         _values[prefName] = value;

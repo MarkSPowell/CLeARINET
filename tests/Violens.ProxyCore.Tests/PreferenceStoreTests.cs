@@ -6,15 +6,10 @@ using Xunit;
 namespace Violens.ProxyCore.Tests;
 
 /// <summary>
-/// Exercises <see cref="PreferenceStore"/> against real files in a fresh
-/// temp folder per test -- never the real app-data folder. CI runs this on
-/// both windows-latest and macos-latest, which is what backs the
-/// Preferences Design doc's "Platform parity checklist": every row marked
-/// "test on both legs" is one of the tests below.
-///
-/// Stores are built with a one-hour save delay and flushed explicitly, so
-/// every write happens exactly when the test says (the one test of the
-/// background save itself is the exception, and polls).
+/// Real files in a temp folder per test. CI runs these on Windows and
+/// macOS, covering the Preferences Design's platform parity checklist.
+/// Stores use a one-hour save delay and are flushed explicitly, except in
+/// the one test of the background save.
 /// </summary>
 public sealed class PreferenceStoreTests : IDisposable
 {

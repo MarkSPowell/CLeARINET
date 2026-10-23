@@ -4,66 +4,21 @@ using System.Text;
 namespace Violens.ProxyCore.Http;
 
 /// <summary>
-/// Reads a single HTTP/1.1 request or response off a stream and decodes it
-/// into a <see cref="CapturedRequest"/>/<see cref="CapturedResponse"/>
-/// (chunked transfer-encoding already unwrapped, so the body is always the
-/// logical content, never the wire framing around it).
-///
-/// Two ways to get a body, and the choice matters: <see cref="ReadBodyAsync"/>
-/// buffers the whole thing into memory before returning it, which is the
-/// only option once a breakpoint has decided to pause this exchange (an
-/// edit needs the whole message at once). <see cref="RelayBodyAsync"/>
-/// writes every byte to a destination stream as it arrives *and* returns
-/// the same complete, decoded bytes for capture -- this is what lets an
-/// ordinary, non-paused exchange reach the other side of the proxy
-/// incrementally instead of only after it's entirely finished.
-///
-/// That distinction exists because of a real regression this project hit:
-/// this reader used to always relay bytes live to a paired stream while it
-/// read them, which made pausing-before-forwarding (breakpoints)
-/// architecturally impossible, so an earlier pass here switched to
-/// "buffer everything, then decide, then forward" for every message,
-/// unconditionally. That's fine for an ordinary request/response. It's not
-/// fine for a long-lived streamed response -- a chat reply arriving token
-/// by token over a chunked connection that can stay open for tens of
-/// seconds -- where "buffer everything first" means the client sees
-/// nothing at all until generation is completely finished, which looks
-/// exactly like the proxy breaking the app. <see cref="RelayBodyAsync"/>
-/// restores live relaying for the common case (nothing about to pause);
-/// <c>Violens.ProxyCore.Proxy.InterceptingProxyListener</c> is what
-/// decides, per message, which one applies -- see its own remarks on
-/// <c>PumpSessionsAsync</c>.
-///
-/// Scope for where the project is right now: Content-Length and chunked
-/// transfer-encoding bodies are handled, since together they cover the
-/// overwhelming majority of real HTTP/1.1 traffic. A response framed by
-/// "read until the connection closes" (no Content-Length, no chunked
-/// encoding -- legal but old-fashioned HTTP/1.0-style framing) is not
-/// supported yet: it's rare on modern HTTPS traffic and would need this
-/// reader to stop working message-by-message and switch the whole
-/// connection over to a raw pump, which is a deliberate follow-up rather
-/// than something to guess at here.
+/// Reads one HTTP/1.1 request or response from a stream.
+/// <see cref="ReadBodyAsync"/> buffers the whole body, which a breakpoint
+/// needs. <see cref="RelayBodyAsync"/> forwards bytes as they arrive while
+/// capturing them, so streamed responses (a chat reply arriving token by
+/// token) reach the client live.
 /// </summary>
 internal static class Http1MessageReader
 {
     private const int MaxStartLineOrHeaderLength = 16 * 1024;
 
-    // Read/relay granularity for a Content-Length-framed body. Chunked
-    // bodies don't need this -- they already relay at their own natural
-    // chunk boundaries -- but a large Content-Length body (a file download,
-    // say) would otherwise have to be read in one single, fully-buffered
-    // ReadExactAsync-style call even on the "relay live" path, which
-    // defeats the entire point. 64KB is a plain middle ground: small
-    // enough that relaying still feels live, large enough not to turn a
-    // big download into a flood of tiny writes.
+    // Content-Length bodies relay in pieces this size, so large downloads
+    // stream rather than buffer.
     private const int RelayBufferSize = 64 * 1024;
 
-    /// <summary>
-    /// Reads one request fully, body included. Returns <see langword="null"/>
-    /// if the connection closed cleanly before another request arrived --
-    /// the normal way a keep-alive HTTP/1.1 connection ends between
-    /// messages.
-    /// </summary>
+    /// <summary>Reads one request, body included. Null if the connection closed cleanly between requests.</summary>
     public static async Task<CapturedRequest?> ReadRequestAsync(Stream source, CancellationToken cancellationToken)
     {
         var preamble = await ReadRequestPreambleAsync(source, cancellationToken);
@@ -76,11 +31,7 @@ internal static class Http1MessageReader
         return preamble with { Body = body };
     }
 
-    /// <summary>
-    /// Reads one response fully, body included. Returns <see langword="null"/>
-    /// if the connection closed before a status line arrived at all -- the
-    /// upstream giving up without answering.
-    /// </summary>
+    /// <summary>Reads one response, body included. Null if the connection closed before a status line.</summary>
     public static async Task<CapturedResponse?> ReadResponseAsync(
         Stream source, bool isResponseToHeadRequest, CancellationToken cancellationToken)
     {
@@ -97,12 +48,8 @@ internal static class Http1MessageReader
     }
 
     /// <summary>
-    /// Reads just the request line and headers, with <c>Body</c> left as an
-    /// empty placeholder. Lets a caller decide whether a breakpoint would
-    /// actually apply -- <c>Violens.ProxyCore.Breakpoints.BreakpointRules.ShouldBreakBeforeRequest</c>
-    /// only ever looks at <c>Method</c>/<c>Target</c>, never the body --
-    /// before committing to <see cref="ReadBodyAsync"/> or
-    /// <see cref="RelayBodyAsync"/> for what comes next.
+    /// Reads only the request line and headers, so the caller can decide
+    /// whether to buffer or relay the body.
     /// </summary>
     public static async Task<CapturedRequest?> ReadRequestPreambleAsync(Stream source, CancellationToken cancellationToken)
     {
@@ -122,7 +69,7 @@ internal static class Http1MessageReader
         return new CapturedRequest(parts[0], parts[1], parts[2], headers, []);
     }
 
-    /// <summary>Same idea as <see cref="ReadRequestPreambleAsync"/>, for the response stage.</summary>
+    /// <summary>Reads only the status line and headers.</summary>
     public static async Task<CapturedResponse?> ReadResponsePreambleAsync(Stream source, CancellationToken cancellationToken)
     {
         var startLine = await ReadLineAsync(source, allowImmediateEof: true, cancellationToken);
@@ -142,21 +89,11 @@ internal static class Http1MessageReader
         return new CapturedResponse(parts[0], statusCode, reason, headers, []);
     }
 
-    /// <summary>
-    /// 1xx/204/304 and responses to HEAD never carry a body, whatever
-    /// Content-Length or Transfer-Encoding claim -- reading (or relaying)
-    /// one anyway would just hang waiting for bytes the server never
-    /// sends. Public because both <see cref="ReadResponseAsync"/> and
-    /// <c>InterceptingProxyListener.PumpSessionsAsync</c> need the same
-    /// answer, the latter before it's committed to a buffer-or-relay path.
-    /// </summary>
+    /// <summary>1xx, 204, 304 and HEAD responses never have a body, whatever the headers say.</summary>
     public static bool ResponseHasNoBody(int statusCode, bool isResponseToHeadRequest) =>
         (statusCode is >= 100 and < 200 or 204 or 304) || isResponseToHeadRequest;
 
-    /// <summary>
-    /// Reads a body fully into memory. See the class remarks for when to
-    /// use this instead of <see cref="RelayBodyAsync"/>.
-    /// </summary>
+    /// <summary>Reads a body into memory.</summary>
     public static Task<byte[]> ReadBodyAsync(
         Stream source, IReadOnlyList<(string Name, string Value)> headers, CancellationToken cancellationToken)
     {
@@ -179,9 +116,7 @@ internal static class Http1MessageReader
                 : ReadExactAsync(source, contentLength, cancellationToken);
         }
 
-        // Neither header: for a request this is the normal shape of a
-        // GET/DELETE/etc with no body. See the class remarks for why a
-        // close-terminated response isn't handled yet.
+        // Neither header: no body.
         return Task.FromResult(Array.Empty<byte>());
     }
 
@@ -194,14 +129,9 @@ internal static class Http1MessageReader
     public const long DefaultMaxCapturedBodyBytes = 64 * 1024 * 1024;
 
     /// <summary>
-    /// Reads a body the same way <see cref="ReadBodyAsync"/> does, except
-    /// every byte is written to <paramref name="destination"/> as it
-    /// arrives instead of only being accumulated. The returned bytes are
-    /// still the decoded body -- built from the same bytes as they're
-    /// relayed, not read twice -- so session capture works identically
-    /// either way, up to <paramref name="maxCapturedBytes"/>; past that the
-    /// rest is relayed but not kept. See the class remarks for why this
-    /// exists.
+    /// Writes each byte to <paramref name="destination"/> as it arrives and
+    /// returns the decoded body, keeping at most
+    /// <paramref name="maxCapturedBytes"/> of it.
     /// </summary>
     public static Task<RelayedBody> RelayBodyAsync(
         Stream source,
@@ -365,9 +295,8 @@ internal static class Http1MessageReader
 
             if (size == 0)
             {
-                // Optional trailer headers, then the final blank line.
-                // Rare in practice; drained and discarded rather than
-                // surfaced, since nothing downstream reads trailers yet.
+                // Trailers, then the final blank line. Nothing uses trailers, so
+                // they're discarded.
                 while (true)
                 {
                     var trailerLine = await ReadLineAsync(source, allowImmediateEof: false, cancellationToken);
@@ -393,14 +322,7 @@ internal static class Http1MessageReader
         return body.ToArray();
     }
 
-    /// <summary>
-    /// Same chunk-by-chunk walk as <see cref="ReadChunkedBodyAsync"/>, but
-    /// every line and every chunk's bytes are written to
-    /// <paramref name="destination"/> immediately after being read --
-    /// chunk framing included, so the wire format this relays is exactly
-    /// what a real client already expects from a chunked response, not a
-    /// rebuilt approximation of it.
-    /// </summary>
+    /// <summary>Relays a chunked body as it arrives, framing included.</summary>
     private static async Task<RelayedBody> RelayChunkedBodyAsync(
         Stream source, Stream destination, CaptureBuffer capture, CancellationToken cancellationToken)
     {
@@ -446,12 +368,7 @@ internal static class Http1MessageReader
         return capture.Build();
     }
 
-    /// <summary>
-    /// Relays a Content-Length-framed body in <see cref="RelayBufferSize"/>
-    /// increments rather than one fully-buffered read -- the whole point
-    /// of this method is that a large body still streams through instead
-    /// of sitting entirely in memory before the first byte moves on.
-    /// </summary>
+    /// <summary>Relays a Content-Length body in pieces.</summary>
     private static async Task<RelayedBody> RelayExactBytesAsync(
         Stream source, Stream destination, long count, CaptureBuffer capture, CancellationToken cancellationToken)
     {
@@ -547,14 +464,9 @@ internal static class Http1MessageReader
         return buffer;
     }
 
-    // Byte-at-a-time on purpose, same tradeoff as the CONNECT-preamble
-    // reader this builds on: start lines, header lines and chunk-size lines
-    // are always small, so simplicity wins over throughput here.
-    //
-    // allowImmediateEof controls what an EOF on the very first byte means:
-    // true for the start of a request/response (a clean, expected end of a
-    // keep-alive connection -- returns null), false everywhere else (a
-    // truncated message -- throws).
+    // A byte at a time: these lines are short, and the stream underneath is
+    // buffered. allowImmediateEof: whether EOF before the first byte is a
+    // clean end (null) rather than a truncated message (throws).
     private static async Task<string?> ReadLineAsync(
         Stream source, bool allowImmediateEof, CancellationToken cancellationToken)
     {

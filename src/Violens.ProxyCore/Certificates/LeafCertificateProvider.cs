@@ -6,11 +6,8 @@ using System.Security.Cryptography.X509Certificates;
 namespace Violens.ProxyCore.Certificates;
 
 /// <summary>
-/// Signs a short-lived leaf certificate for each host VioLens intercepts,
-/// caching results so a host is only re-signed once its cached certificate
-/// is close to expiring. See the "Leaf certificate generation" section of
-/// the Interception Certificate Design doc for the reasoning behind the
-/// algorithm, SAN and validity choices here.
+/// Signs and caches short-lived leaf certificates per host (see the
+/// Interception Certificate Design).
 /// </summary>
 public sealed class LeafCertificateProvider
 {
@@ -19,23 +16,9 @@ public sealed class LeafCertificateProvider
 
     private readonly X509Certificate2 _issuer;
 
-    // Lazy<T>, not X509Certificate2, as the cached value: a real browser
-    // opens several parallel/speculative connections to a host it hasn't
-    // talked to yet, and those all hit GetCertificateFor for the same
-    // uncached host within milliseconds of each other. A plain
-    // check-then-create cache lets each of those race into CreateLeaf
-    // independently -- signing several redundant certificates and, worse,
-    // creating several redundant persisted CNG key containers (see
-    // PersistKey below) for the exact same host. Under that kind of burst,
-    // that was reproduced live hitting intermittent
-    // "AuthenticationException ... Win32Exception: An unknown error
-    // occurred while processing the certificate" failures -- plausibly
-    // Windows' certificate/key-store machinery not being happy about
-    // several near-simultaneous create-and-immediately-use operations.
-    // ConcurrentDictionary<string, Lazy<T>> with
-    // ExecutionAndPublication makes this single-flight instead: only the
-    // first caller for a given uncached host actually runs CreateLeaf: the
-    // callers that raced in behind it just wait for that one result.
+    // Lazy values make signing single-flight: browsers open several
+    // connections to a new host at once, and signing in parallel caused
+    // intermittent Schannel "unknown error" handshake failures.
     private readonly ConcurrentDictionary<string, Lazy<X509Certificate2>> _cache =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -52,20 +35,12 @@ public sealed class LeafCertificateProvider
     }
 
     /// <summary>
-    /// The root certificate that signs every leaf, without its private key
-    /// (DER-encoded). What a phone or another computer installs to trust
-    /// VioLens (served at http://violens/ when remote computers are
-    /// allowed), and what the Composer trusts when it sends through the
-    /// listener.
+    /// The root, without its key (DER). What other devices install to trust
+    /// VioLens, and what the Composer trusts.
     /// </summary>
     public byte[] IssuerCertificateDer => _issuer.Export(X509ContentType.Cert);
 
-    /// <summary>
-    /// Returns a leaf certificate for <paramref name="host"/>, signing and
-    /// caching a new one if there's no cached certificate with at least
-    /// five minutes of validity left. Concurrent calls for the same host
-    /// share a single signing operation rather than each racing their own.
-    /// </summary>
+    /// <summary>A cached leaf for <paramref name="host"/>, or a new one if fewer than five minutes are left.</summary>
     public X509Certificate2 GetCertificateFor(string host)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(host);
@@ -82,22 +57,13 @@ public sealed class LeafCertificateProvider
                     return certificate;
                 }
 
-                // Close to expiring: drop this entry and loop around to
-                // regenerate it. If several callers see it expired at once
-                // they'll all attempt this same remove -- harmless, since
-                // at most one of them will actually win the next GetOrAdd's
-                // factory call and the rest will just share that result.
+                // Nearly expired: remove it and loop to make a new one.
                 _cache.TryRemove(new KeyValuePair<string, Lazy<X509Certificate2>>(host, lazyLeaf));
             }
             catch
             {
-                // Signing failed for this host. With
-                // ExecutionAndPublication, a Lazy<T> caches and rethrows a
-                // faulted evaluation forever -- so without this, every
-                // future request for this host would keep failing with the
-                // same stale error until the process restarts, even after
-                // whatever caused it has passed. Drop the poisoned entry
-                // so the next caller gets a genuinely fresh attempt.
+                // A faulted Lazy rethrows forever, so drop it and let the next caller
+                // try again.
                 _cache.TryRemove(new KeyValuePair<string, Lazy<X509Certificate2>>(host, lazyLeaf));
                 throw;
             }
@@ -110,9 +76,7 @@ public sealed class LeafCertificateProvider
             var notBefore = DateTimeOffset.UtcNow.AddMinutes(-5);
             var notAfter = notBefore.Add(LeafValidity);
 
-            // A leaf can't be valid outside its issuer's validity (signing
-            // throws). Only matters for a root made in the last few minutes,
-            // or one near expiry, but then it matters for every leaf.
+            // A leaf can't be valid outside its issuer's validity.
             var issuerNotBefore = new DateTimeOffset(_issuer.NotBefore.ToUniversalTime(), TimeSpan.Zero);
             var issuerNotAfter = new DateTimeOffset(_issuer.NotAfter.ToUniversalTime(), TimeSpan.Zero);
             if (notBefore < issuerNotBefore)
@@ -129,12 +93,7 @@ public sealed class LeafCertificateProvider
         },
         LazyThreadSafetyMode.ExecutionAndPublication);
 
-    /// <summary>
-    /// Signs a single leaf certificate for <paramref name="host"/>. Kept
-    /// separate from the cache so it can be unit tested directly against a
-    /// root produced by <see cref="CertificateAuthority.GenerateRoot(DateTimeOffset, DateTimeOffset)"/>,
-    /// without touching any OS certificate store.
-    /// </summary>
+    /// <summary>Signs one leaf, without caching or touching any store.</summary>
     public static X509Certificate2 CreateLeaf(
         X509Certificate2 issuer,
         string host,
@@ -179,9 +138,8 @@ public sealed class LeafCertificateProvider
         request.CertificateExtensions.Add(
             new X509SubjectKeyIdentifierExtension(request.PublicKey, critical: false));
 
-        // Ties this leaf to the issuing root's key for chain building,
-        // which strict validators (and some Chromium checks) expect even
-        // for a two-level chain.
+        // Strict validators expect the authority key identifier even in a
+        // two-level chain.
         request.CertificateExtensions.Add(
             X509AuthorityKeyIdentifierExtension.CreateFromCertificate(
                 issuer,
@@ -197,32 +155,13 @@ public sealed class LeafCertificateProvider
 
     private static X509Certificate2 PersistKey(X509Certificate2 certWithEphemeralKey)
     {
-        // On Windows, SslStream's server-side handshake (Schannel) refuses
-        // a certificate whose private key exists only in memory --
-        // CopyWithPrivateKey's result -- and throws "Authentication
-        // failed because the platform does not support ephemeral keys."
-        // Exporting to a PFX and re-importing gives it a real CNG key
-        // container instead, which Schannel accepts.
-        //
-        // Deliberately without PersistKeySet (unlike the root's own key):
-        // without it, .NET deletes the key container when the certificate
-        // is released -- disposed, or finalized once nothing (the cache, an
-        // SslStream) holds it any more. With it, every leaf ever signed
-        // left a key file behind in the user's profile, forever.
-        //
-        // A freshly persisted key container isn't always immediately ready
-        // for Schannel to grab -- reproduced live as an occasional,
-        // isolated (not just under concurrent-signing bursts, which
-        // GetCertificateFor's single-flight cache already guards against)
-        // "AuthenticationException ... Win32Exception: An unknown error
-        // occurred while processing the certificate" failure, right in the
-        // middle of a real client's TLS handshake. WarmUpPrivateKey forces
-        // one real private-key operation here instead, before this
-        // certificate is ever handed to SslStream, so that class of
-        // failure surfaces (and can be retried) right after import, in a
-        // spot where it's cheap to reason about -- not mid-handshake,
-        // where it silently drops one of the client's connections and
-        // costs us a capture.
+        // Schannel won't use a key that exists only in memory ("ephemeral
+        // keys"), so round-trip through a PFX to give it a key container.
+        // No PersistKeySet, so the container is deleted when the certificate is
+        // released instead of piling up in the profile.
+        // A fresh container isn't always ready straight away, which showed up as
+        // occasional handshake failures; WarmUpPrivateKey uses the key once here,
+        // where a failure can be retried.
         const int maxAttempts = 2;
         Exception? lastFailure = null;
 

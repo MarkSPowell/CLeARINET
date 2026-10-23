@@ -6,23 +6,10 @@ using Xunit.Abstractions;
 namespace Violens.LegacyExtensionHost.Tests;
 
 /// <summary>
-/// Optional: exercises <see cref="LegacyExtensionLoader"/> against a folder
-/// of extension DLLs a developer has already recompiled or re-targeted
-/// against this shim's own assembly identity (see
-/// <see cref="PatchedExtensionEnvironment"/>). Skips gracefully (an inert
-/// pass, not a failure) when <c>VIOLENS_LEGACY_PATCHED_EXTENSIONS_DIR</c>
-/// isn't set -- there's nothing in this repo to point it at by default,
-/// since shipping a patched copy of a real extension would mean
-/// redistributing a modified third-party binary (see the CompatShim
-/// README's own redistribution note).
-///
-/// This is where the pre-"Don't get sued" version of this test suite's
-/// assertions moved to: "does a correctly-targeted extension actually load
-/// and run, not just construct" is still a real, valuable thing to test --
-/// it's just no longer true of the five original samples unmodified. See
-/// <see cref="RealExtensionLoadingTests"/> for what's asserted about those
-/// five instead now, and the design doc's "Don't get sued" decision for
-/// why.
+/// Loads a folder of retargeted extension DLLs (see
+/// <see cref="PatchedExtensionEnvironment"/>) and checks they load and run.
+/// Passes without doing anything unless
+/// <c>VIOLENS_LEGACY_PATCHED_EXTENSIONS_DIR</c> is set.
 /// </summary>
 [Collection(PatchedExtensionsCollection.Name)]
 public sealed class PatchedExtensionTests
@@ -74,15 +61,8 @@ public sealed class PatchedExtensionTests
     }
 
     /// <summary>
-    /// The closest thing to a real functional check this project's
-    /// clean-room policy allows -- see the design doc's own remarks on
-    /// this, carried over unchanged from before "Don't get sued": feeds
-    /// each registered <see cref="Violens.CompatShim.IAutoTamper"/> a well-formed
-    /// synthetic session through every hook real Fiddler Classic would
-    /// have called it with, entirely through that interface's own public
-    /// contract, and checks nothing throws. Trivially passes (an empty
-    /// loop) if whatever's patched doesn't happen to implement
-    /// IAutoTamper -- that's fine, not every extension does.
+    /// Runs a synthetic session through every hook of each loaded
+    /// <see cref="Violens.CompatShim.IAutoTamper"/> and checks nothing throws.
     /// </summary>
     [Fact]
     public void RegisteredAutoTampers_HandleAWellFormedSessionWithoutThrowing()

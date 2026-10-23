@@ -6,31 +6,12 @@ using Violens.ProxyCore.Http;
 namespace Violens.ProxyCore.Sessions;
 
 /// <summary>
-/// Writes captured sessions out as a Fiddler-compatible .saz (Session
-/// Archive Zip) file -- the actual Phase 1 exit criterion: "a core test
-/// host captures a browser's HTTPS traffic and saves a SAZ that Fiddler
-/// Classic opens."
-///
-/// Telerik doesn't publish the SAZ format. This is built against what the
-/// open-source saz-tools parser (github.com/thomastay/saz-tools) expects,
-/// since that project's whole job is reading real Fiddler-produced
-/// archives: a zip with a raw/ folder holding three entries per session
-/// (&lt;n&gt;_c.txt, &lt;n&gt;_s.txt, &lt;n&gt;_m.xml, session numbers
-/// 1-based, no padding), each request/response file being an ordinary
-/// HTTP/1.x message parseable by a standard HTTP reader, and _m.xml
-/// following the &lt;Session&gt;/&lt;SessionTimers&gt;/&lt;SessionFlags&gt;
-/// shape that library's Go structs decode. A root [Content_Types].xml is
-/// included too, matching what real Fiddler output carries for zip-package
-/// compatibility.
-///
-/// The SessionTimers attributes are filled in from
-/// <see cref="Session.Timings"/>: each timestamp is the start plus the
-/// phases before it, and DNSTime/TCPConnectTime/HTTPSHandshakeTime are in
-/// whole milliseconds. A session with no timings gets its start time in
-/// every timestamp and zeros. The exact date format Fiddler itself expects
-/// here is unconfirmed (no real sample _m.xml was available to check
-/// against) -- ISO 8601 round-trip format is used as the most broadly
-/// parseable reasonable guess.
+/// Writes sessions as a Fiddler-compatible .saz file. The format isn't
+/// published; this follows what the open-source saz-tools parser expects: a
+/// zip whose raw/ folder holds &lt;n&gt;_c.txt, &lt;n&gt;_s.txt and
+/// &lt;n&gt;_m.xml per session (1-based), plus [Content_Types].xml.
+/// SessionTimers come from <see cref="Session.Timings"/>, as ISO 8601
+/// timestamps; Fiddler's exact expected format is unconfirmed.
 /// </summary>
 public static class SazWriter
 {
@@ -72,16 +53,9 @@ public static class SazWriter
     {
         var entry = archive.CreateEntry($"raw/{session.Id}_c.txt", CompressionLevel.Optimal);
         using var stream = entry.Open();
-        // The body here is always what Http1MessageReader already decoded
-        // -- never raw chunked-transfer-encoded wire bytes -- so
-        // HttpMessageWriter rebuilds headers rather than replaying them
-        // verbatim: Transfer-Encoding is dropped (there's nothing left to
-        // de-chunk) and Content-Length is set to this decoded body's real
-        // length, which may differ from whatever the original header said
-        // (or said nothing at all, for a chunked message).
-        // A plain HTTP request is written with its full URL in the request
-        // line, as Fiddler Classic writes it; SazReader reads the scheme
-        // back from that. HTTPS requests keep their path-only target.
+        // Bodies are already decoded, so headers are rebuilt: Transfer-Encoding
+        // dropped, Content-Length set to the body's length. Plain HTTP requests
+        // keep their full URL, as Fiddler Classic writes them.
         var request = string.Equals(session.Scheme, "http", StringComparison.OrdinalIgnoreCase) && session.Request.Target.StartsWith('/')
             ? session.Request with { Target = SessionUrl.Of(session) }
             : session.Request;

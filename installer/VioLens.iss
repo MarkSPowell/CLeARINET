@@ -1,43 +1,18 @@
 ; VioLens Windows installer (Inno Setup).
 ;
 ; Built by .github/workflows/release-windows.yml, which passes MyAppVersion,
-; MyFileVersion, PublishDir, LegacyHostDir and ExtensionsDir on the command line via /D;
-; the #ifndef fallbacks below exist purely so this script still compiles
-; (with placeholder values) if someone runs ISCC.exe against it directly
-; while testing, without having to remember all four /D switches every
-; time.
+; MyFileVersion, PublishDir, LegacyHostDir and ExtensionsDir with /D. The
+; fallbacks below let ISCC.exe compile it on its own for testing.
 ;
-; MyAppVersion and MyFileVersion are deliberately two different strings,
-; not one reused in two places: MyAppVersion can be anything (this
-; project's own tags look like "0.1.0-preview.1"), but VersionInfoVersion
-; below (the compiled setup.exe's actual Win32 FileVersion resource) only
-; accepts a strict numeric "X.X.X.X" -- a prerelease suffix there fails
-; the whole compile outright ("Value of [Setup] section directive
-; VersionInfoVersion is invalid"), which is exactly what happened before
-; this comment was added. release-windows.yml's own "Determine version"
-; step derives MyFileVersion from MyAppVersion by dropping everything from
-; the first "-" onward and padding to four components.
+; MyFileVersion is the numeric form of MyAppVersion ("0.1.0-preview.1"
+; becomes "0.1.0.0"), because VersionInfoVersion rejects a prerelease
+; suffix.
 ;
-; The one requirement this file exists to satisfy: a single setup.exe that
-; can install either per-machine (Program Files, needs an admin elevation
-; prompt) or per-user (the current user's own AppData\Local\Programs
-; folder, no admin prompt at all), with the person choosing which at
-; install time. PrivilegesRequired=lowest + PrivilegesRequiredOverridesAllowed=dialog
-; is what does that: Setup shows an "Install mode" page (the same one
-; Visual Studio Code's own installer uses) offering "Install for me only"
-; (no elevation) or "Install for all users" (elevates, admin prompt), and
-; every {auto*} constant below (AutoProgramFiles, AutoPrograms,
-; AutoDesktop, ...) automatically resolves to the per-user or per-machine
-; path depending on which one the person picked. Nothing in this script
-; hardcodes Program Files or AppData\Local\Programs directly -- that's the
-; whole point of the {auto*} family.
-;
-; VioLens's own runtime state (FiddlerScriptPreferenceStore's
-; %LocalAppData%\VioLens\, ExtensionHost.DefaultExtensionsFolder's
-; Documents\VioLens\Extensions, and SaveSaz's Desktop exports) all
-; already live under the current user's own profile regardless of where
-; the app itself gets installed, so neither install mode needs any special
-; handling beyond where the app's own files land.
+; One setup.exe installs either for all users (Program Files, with an admin
+; prompt) or just for the current user (AppData\Local\Programs, no prompt),
+; chosen at install time: PrivilegesRequired=lowest with
+; PrivilegesRequiredOverridesAllowed=dialog, and {auto*} paths throughout.
+; The app keeps its own data in the user's profile either way.
 
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
@@ -61,12 +36,8 @@
 #define MyAppURL "https://github.com/MarkSPowell/VioLens"
 
 [Setup]
-; A fixed, random GUID -- Inno Setup uses this (not the app name) to
-; recognize "this is the same product" across versions, so a later
-; installer with a higher AppVersion correctly upgrades in place instead
-; of installing side by side. Generated once for this project; never
-; regenerate it for a version bump, only if VioLens were ever forked
-; into a genuinely different product.
+; Identifies the product across versions, so a newer installer upgrades in
+; place. Never change it.
 AppId={{A95DF57C-70EA-4373-91CF-38B1A0CA0879}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
@@ -74,12 +45,8 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-; VersionInfoVersion is the strict-numeric one (see this file's own header
-; comment on why it can't just be MyAppVersion); VersionInfoTextVersion is
-; Inno Setup's documented escape hatch for showing the real, full version
-; string (with its "-preview.1"-style suffix intact) in the compiled
-; setup.exe's own Properties > Details "File version"/"Product version"
-; fields, in place of the numeric-only value VersionInfoVersion carries.
+; VersionInfoTextVersion shows the full version, suffix included, in the
+; file's properties; VersionInfoVersion must be numeric.
 VersionInfoVersion={#MyFileVersion}
 VersionInfoTextVersion={#MyAppVersion}
 
@@ -91,7 +58,7 @@ DisableProgramGroupPage=yes
 ; ...\VioLens instead and removes what CLeARINET installed (see [Code]).
 UsePreviousAppDir=no
 
-; See this file's own header comment for what these two do together.
+; See the header comment.
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 
@@ -125,14 +92,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
-; Off by default, deliberately -- mirrors the main app's own posture for
-; this feature (MainWindowViewModel.AutoLaunchLegacyHost also defaults to
-; false; see LegacyExtensionHostLauncher's own remarks: "not just 'safe if
-; it isn't running,' but 'won't even try to make it exist unless asked'").
-; A Task, not a [Components]/[Types] split: this installer only ever
-; produces one product either way, and a Task is the simplest mechanism
-; that already exists in this file (see "desktopicon" above) for "only
-; copy these files if the person checked this box."
+; Off by default, like the app's own auto-launch setting.
 Name: "legacyhost"; Description: "Legacy Fiddler Classic extension host (runs real, unmodified compiled Fiddler Classic extensions against VioLens's own traffic -- optional, and unrelated to normal use)"; GroupDescription: "Optional components:"; Flags: unchecked
 #ifdef ExtensionsDir
 ; Optional extensions, installed into {app}\Extensions, which the app scans
@@ -147,25 +107,13 @@ Name: "ext_privacy"; Description: "Privacy Scanner (colours responses that set c
 #endif
 
 [Files]
-; Everything dotnet publish produced -- the single-file app exe, its
-; native-library self-extract payload, and the loose content files
-; (Documentation\User Guide.md; see Violens.DesktopUi.csproj's own
-; None/Link entry) that PublishSingleFile deliberately doesn't fold into
-; the exe itself. recursesubdirs/createallsubdirs so that Documentation
-; folder comes along intact.
+; Everything dotnet publish produced, including the loose Documentation
+; folder that PublishSingleFile leaves outside the exe.
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; Only copied if the "legacyhost" Task above is checked. DestDir matches
-; LegacyExtensionHostLauncher.ExpectedExecutablePath's own fixed path
-; convention exactly (<main app's own exe folder>\LegacyHost\...) -- see
-; that class's own remarks and the .NET Extension Compatibility Design
-; doc's "legacy host launch/stop lifecycle" section for why this is a
-; convention, not a setting. {#LegacyHostDir} is release-windows.yml's own
-; `dotnet build ... --output publish\legacyhost` step's output -- a plain
-; framework-dependent net48 build (this is a net48 app; .NET Framework 4.8
-; ships with Windows 10/11 already), flattened to include its own
-; ProjectReferences (Violens.CompatShim.dll,
-; Violens.LegacyExtensionHost.Bridge.dll) alongside the host .exe itself.
+; Only with the "legacyhost" task. LegacyHost\ beside the app is where
+; LegacyExtensionHostLauncher looks. A framework-dependent net48 build;
+; .NET Framework 4.8 comes with Windows 10 and 11.
 Source: "{#LegacyHostDir}\*"; DestDir: "{app}\LegacyHost"; Flags: ignoreversion recursesubdirs createallsubdirs; Tasks: legacyhost
 
 #ifdef ExtensionsDir
@@ -205,12 +153,7 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: no
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--remove-root-certificate"; Flags: waituntilterminated; RunOnceId: "RemoveRootCertificate"
 
 [UninstallDelete]
-; Belt-and-suspenders alongside Inno Setup's own automatic per-file
-; uninstall list: catches anything the app itself might drop into its own
-; install folder at runtime (it doesn't today -- see this file's own
-; header comment on why runtime state all lives elsewhere -- but this
-; costs nothing to have in place if that ever changes) so an uninstall
-; doesn't leave an orphaned, empty {app} directory behind.
+; Removes anything left in the install folder, so no empty folder remains.
 Type: filesandordirs; Name: "{app}"
 
 [Code]

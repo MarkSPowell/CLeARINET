@@ -1,42 +1,22 @@
-// PhaseA2ValidationRules.js -- an original script written to validate
-// VioLens's Phase A2 FiddlerScript listener wiring: InterceptingProxyListener
-// actually calling Handlers.OnBeforeRequest/OnBeforeResponse against real,
-// live proxied traffic, not just the offline Violens.FiddlerScriptDemo
-// smoke test (see tools/Violens.FiddlerScriptDemo/SampleCustomRules.js for
-// that one). Not copied from Fiddler Classic's own SampleRules.js or any
-// cookbook -- written fresh for this validation pass.
+// PhaseA2ValidationRules.js: an original script for checking that
+// FiddlerScript runs on live traffic (tools/Violens.FiddlerScriptDemo does
+// the same offline).
 //
-// How to use this: open the desktop app, paste this file's path into the
-// FiddlerScript panel, click Load, then Start the proxy and browse through
-// it (with VioLens's root CA trusted, same as any other capture session).
-// Each numbered comment below says exactly what to look for and where.
-//
-// Deliberately sticks to things the desktop app can already show you today:
-// the Request/Response Headers inspector, the Raw/Text inspectors, and the
-// session grid's own "#" column. It does NOT use oSession["ui-color"] or
-// oSession["ui-customcolumn"] -- those are recorded on Exchange, but
-// nothing in the UI renders either one yet (that's Phase D, still unbuilt
-// -- see the FiddlerScript Compatibility Design doc's own phase list).
+// To use it: load this file in the FiddlerScript panel, start capturing
+// and browse (with VioLens's root trusted). Each numbered comment says what
+// to look for.
 
 class Handlers {
     static function OnBeforeRequest(oSession: Session) {
-        // (1) Proves OnBeforeRequest ran for THIS exchange, and shows the
-        //     best-effort session id SessionStore.PeekNextId() handed it.
-        //     Open the Request > Headers inspector for any captured session
-        //     and look for these two headers. X-Violens-Session-Id should
-        //     match (or be very close to, under concurrent traffic -- see
-        //     SessionStore.PeekNextId's own remarks on why it's best-effort,
-        //     not guaranteed exact) that row's own "#" column in the grid.
+        // (1) OnBeforeRequest ran. Look for these two headers in Request >
+        //     Headers. X-Violens-Session-Id should match the row's "#" (or be
+        //     close to it under concurrent traffic; the id is a best guess).
         oSession.oRequest.headers["X-Violens-Phase-A2"] = "OnBeforeRequest-ran";
         oSession.oRequest.headers["X-Violens-Session-Id"] = String(oSession.id);
 
-        // (2) Proves an EDITED request actually reaches the real server,
-        //     not just the local, throwaway Exchange copy: appends a marker
-        //     to the body of any POST/PUT/PATCH. Point a request at an
-        //     endpoint that echoes its own request body back in the
-        //     response (https://httpbin.org/post is a public one) and
-        //     you'll see the marker there too -- proof the edited body, not
-        //     the original, is what actually went out over the wire.
+        // (2) An edited request reaches the server: a marker is appended to
+        //     POST/PUT/PATCH bodies. Send one to an echo service such as
+        //     https://httpbin.org/post and the marker comes back.
         if (oSession.HTTPMethodIs("POST") || oSession.HTTPMethodIs("PUT") || oSession.HTTPMethodIs("PATCH")) {
             var originalBody: String = System.Text.Encoding.UTF8.GetString(oSession.requestBodyBytes);
             oSession.requestBodyBytes = System.Text.Encoding.UTF8.GetBytes(
@@ -45,19 +25,12 @@ class Handlers {
     }
 
     static function OnBeforeResponse(oSession: Session) {
-        // (3) Proves OnBeforeResponse ran, on every single response
-        //     regardless of content type -- check Response > Headers.
+        // (3) OnBeforeResponse ran: check Response > Headers.
         oSession.oResponse.headers["X-Violens-Phase-A2"] = "OnBeforeResponse-ran";
 
-        // (4) Proves a response BODY edit actually reaches the client: for
-        //     a text/html response, decodes it first (undoes gzip/br/
-        //     deflate, so the edit below lands in the actual bytes the
-        //     browser reads -- see utilDecodeResponse's own remarks on the
-        //     one encoding it doesn't handle, zstd) and inserts a visible
-        //     HTML comment right before the closing </body> tag, or
-        //     appends it if there isn't one, so this still proves
-        //     something either way. Load any plain HTML page through the
-        //     proxy, View Source, and search for
+        // (4) A response body edit reaches the browser: HTML responses are
+        //     decoded (zstd isn't supported) and get a comment before </body>,
+        //     or at the end. View Source and search for
         //     "violens-phase-a2-response-edit".
         if (oSession.oResponse.headers.ExistsAndContains("Content-Type", "text/html")) {
             oSession.utilDecodeResponse();

@@ -6,43 +6,24 @@ using System.Text.Json;
 namespace Violens.ProxyCore.SystemProxy;
 
 /// <summary>
-/// The macOS half of "System proxy registration" in the Interception
-/// Certificate Design doc's own "Platform status" section -- see that
-/// section for the full reasoning behind every choice here (why per
-/// network-*service* iteration rather than one global setting the way
-/// <see cref="WinInetSystemProxy"/> works on Windows, why bypass-domain
-/// lists are deliberately left untouched this pass, and the still-open
-/// question of whether <c>networksetup</c> needs admin elevation that this
-/// session had no way to confirm).
-///
-/// Same crash-safety shape as <see cref="WinInetSystemProxy"/>: <see cref="Enable"/>
-/// backs up whatever every network service's proxy settings were before
-/// touching any of them, and <see cref="Disable"/> restores from that backup
-/// and deletes it. <see cref="RecoverFromCrash"/> is meant to be called once,
-/// early, on every launch, on both platforms -- see
-/// <see cref="SystemProxyController"/> for the facade that makes that a
-/// single, platform-agnostic call site.
+/// The system proxy on macOS, set per network service with
+/// <c>networksetup</c> (see the Interception Certificate Design). Like
+/// <see cref="WinInetSystemProxy"/>, <see cref="Enable"/> backs up the
+/// previous settings first, <see cref="Disable"/> restores them, and
+/// <see cref="RecoverFromCrash"/> restores a backup left by a crash.
 /// </summary>
 internal static class MacOSSystemProxy
 {
-    // In the host app's data folder (see ProxyHostIdentity), read each time
-    // so ProxyEngine.Configure can come before or after this class is first used.
-    /// <summary>
-    /// How long one <c>networksetup</c> run may take. Long enough for
-    /// someone to answer a password prompt it shows.
-    /// </summary>
+    /// <summary>How long one <c>networksetup</c> run may take: long enough to answer a password prompt.</summary>
     private static readonly TimeSpan NetworkSetupTimeout = TimeSpan.FromMinutes(2);
 
     private static string BackupFilePath =>
         Path.Combine(ProxyEngine.Identity.ResolveDataFolder(), "system-proxy-backup-macos.json");
 
     /// <summary>
-    /// Points every enabled network service's HTTP and HTTPS proxy at
-    /// <c>127.0.0.1:port</c> and turns both on. A no-op on anything but
-    /// macOS. Safe to call more than once in a row without an intervening
-    /// <see cref="Disable"/> -- only the first call in such a run writes a
-    /// backup, matching <see cref="WinInetSystemProxy.Enable"/>'s own
-    /// re-entrancy guarantee.
+    /// Points every enabled service's HTTP and HTTPS proxy at
+    /// <c>127.0.0.1:port</c>. Calling it twice doesn't overwrite the first
+    /// backup.
     /// </summary>
     [SupportedOSPlatform("macos")]
     public static void Enable(int port)
@@ -79,14 +60,11 @@ internal static class MacOSSystemProxy
     }
 
     /// <summary>
-    /// The HTTPS (or, failing that, HTTP) proxy an enabled network service
-    /// is set to use right now, for VioLens to forward through (see
-    /// <see cref="Proxy.UpstreamProxy"/>). Call before <see cref="Enable"/>
-    /// replaces the setting with VioLens itself. Ignores a setting that
-    /// points at VioLens's own <paramref name="ownPort"/>. A service using
-    /// an automatic proxy configuration script or automatic proxy discovery
-    /// gets a <see cref="Proxy.AutoConfig.ProxyAutoConfig"/> instead, with
-    /// its manual proxy (if any) as the fallback.
+    /// The proxy an enabled service uses now, to forward through. Call before
+    /// <see cref="Enable"/>. A setting pointing at VioLens itself is ignored; an
+    /// automatic configuration script or discovery gives a
+    /// <see cref="Proxy.AutoConfig.ProxyAutoConfig"/>, with any manual proxy as
+    /// the fallback.
     /// </summary>
     [SupportedOSPlatform("macos")]
     public static UpstreamProxyDetection DetectUpstream(int ownPort)
@@ -129,13 +107,9 @@ internal static class MacOSSystemProxy
     }
 
     /// <summary>
-    /// Restores every network service's proxy settings to whatever
-    /// <see cref="Enable"/> last backed up, and deletes the backup file. A
-    /// no-op on anything but macOS. If no backup file exists -- Disable
-    /// called without a matching Enable, or it was already cleaned up --
-    /// the safe fallback is just turning each currently-enabled service's
-    /// proxy state off, the same "don't leave it pointed at a dead port"
-    /// posture <see cref="WinInetSystemProxy.Disable"/> takes.
+    /// Restores the backed-up settings and deletes the backup. Without a
+    /// backup, turns each service's proxy off rather than leave it pointing at
+    /// a dead port.
     /// </summary>
     [SupportedOSPlatform("macos")]
     public static void Disable()
@@ -166,12 +140,7 @@ internal static class MacOSSystemProxy
         DeleteBackupFile();
     }
 
-    /// <summary>
-    /// Call once, early, on every launch, before anything else in this
-    /// class runs -- see <see cref="WinInetSystemProxy.RecoverFromCrash"/>'s
-    /// own remarks, which apply here unchanged, just against
-    /// <c>networksetup</c> instead of the registry.
-    /// </summary>
+    /// <summary>Call once at launch: restores a backup left by a run that didn't stop cleanly.</summary>
     [SupportedOSPlatform("macos")]
     public static void RecoverFromCrash()
     {
@@ -220,12 +189,8 @@ internal static class MacOSSystemProxy
     [SupportedOSPlatform("macos")]
     private static void RestoreServiceBackup(NetworkServiceProxyBackup service)
     {
-        // Only re-point the server/port if one was actually configured
-        // before -- a service that had no proxy server set at all
-        // shouldn't gain one just because VioLens is cleaning up after
-        // itself. Either way the enabled/disabled state below is restored
-        // unconditionally, which is what actually matters for not leaving
-        // traffic pointed at a dead port.
+        // Only restore a server if one was set before; the enabled state is
+        // restored regardless.
         if (service.WebProxyServer is not null && service.WebProxyPort is not null)
         {
             RunNetworkSetupCommand(BuildSetProxyArguments(service.ServiceName, service.WebProxyServer, service.WebProxyPort.Value, secure: false));
@@ -257,22 +222,10 @@ internal static class MacOSSystemProxy
         }
     }
 
-    /// <summary>
-    /// Internal rather than private purely so
-    /// <c>MacOSSystemProxyTests</c> can assert on the exact argument list
-    /// without actually invoking <c>networksetup</c> -- see
-    /// <c>Certificates.MacOSCertificateTrust.BuildAddTrustedCertArguments</c>'s
-    /// own remarks on why this is <c>internal</c> and the design doc's
-    /// "Testing scope, deliberately narrow" note.
-    /// </summary>
+    /// <summary>Internal so tests can check the arguments without running <c>networksetup</c>.</summary>
     internal static string[] BuildListAllNetworkServicesArguments() => ["-listallnetworkservices"];
 
-    /// <summary>
-    /// <c>secure</c> selects <c>-getsecurewebproxy</c> (HTTPS) over
-    /// <c>-getwebproxy</c> (HTTP) -- macOS tracks these as two entirely
-    /// separate settings per service, unlike WinINET's single
-    /// <c>ProxyServer</c> value covering both.
-    /// </summary>
+    /// <summary>macOS keeps the HTTP and HTTPS proxies as separate settings.</summary>
     internal static string[] BuildGetProxyArguments(string serviceName, bool secure) =>
         [secure ? "-getsecurewebproxy" : "-getwebproxy", serviceName];
 
@@ -342,13 +295,8 @@ internal static class MacOSSystemProxy
     }
 
     /// <summary>
-    /// Parses <c>networksetup -listallnetworkservices</c>' output: a
-    /// human-readable header line ("An asterisk (*) denotes that a network
-    /// service is disabled.") followed by one service name per line, with
-    /// disabled services prefixed <c>*</c>. Only enabled services are
-    /// returned -- VioLens has nothing useful to configure on a service
-    /// the user isn't actually using. Internal for the same testability
-    /// reason as the argument-builders above.
+    /// Parses <c>-listallnetworkservices</c>: a header line, then one service
+    /// per line, disabled ones starred. Returns the enabled ones.
     /// </summary>
     internal static List<string> ParseNetworkServiceNames(string output)
     {
@@ -362,19 +310,15 @@ internal static class MacOSSystemProxy
     }
 
     /// <summary>
-    /// Parses <c>networksetup -getwebproxy</c>/<c>-getsecurewebproxy</c>'s
-    /// fixed-format output:
+    /// Parses <c>-getwebproxy</c>/<c>-getsecurewebproxy</c>:
     /// <code>
     /// Enabled: Yes
     /// Server: 127.0.0.1
     /// Port: 8888
     /// Authenticated Proxy Enabled: 0
     /// </code>
-    /// An empty <c>Server:</c> line (nothing configured) parses as a null
-    /// server and null port, not empty-string/zero, so
-    /// <see cref="RestoreServiceBackup"/> can tell "nothing was configured
-    /// before" apart from "port 0 was configured before". Internal for the
-    /// same testability reason as the argument-builders above.
+    /// An empty server gives null server and port, so "nothing set" is told
+    /// apart from port 0.
     /// </summary>
     internal static ProxyState ParseProxyState(string output)
     {
@@ -404,10 +348,7 @@ internal static class MacOSSystemProxy
             }
         }
 
-        // A server with no port (shouldn't happen in practice, but the
-        // parse above is line-by-line and defensive) isn't something
-        // RestoreServiceBackup can act on -- treat it the same as nothing
-        // configured rather than calling -setwebproxy with a garbage port.
+        // A server without a port can't be restored; treat it as unset.
         if (server is not null && port is null)
         {
             server = null;
@@ -452,10 +393,8 @@ internal static class MacOSSystemProxy
         using var process = Process.Start(startInfo)
             ?? throw new SystemProxyCommandException("Failed to start the 'networksetup' process.", exitCode: -1, standardError: string.Empty);
 
-        // Both streams are drained concurrently, so neither can fill and
-        // block the process. Bounded: a 'networksetup' that never finishes
-        // (a password prompt left unanswered, say) would otherwise hang
-        // Start or Stop for good.
+        // Drain both streams at once so neither fills up, and time out in case
+        // a password prompt is never answered.
         var standardOutputRead = process.StandardOutput.ReadToEndAsync();
         var standardErrorRead = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(NetworkSetupTimeout))
@@ -502,12 +441,8 @@ internal static class MacOSSystemProxy
         }
         catch
         {
-            // A corrupt or partially-written backup file is exactly the
-            // kind of thing a crash could leave behind. Treating it as "no
-            // backup" falls through to Disable's safe fallback (turn every
-            // service's proxy state off) instead of throwing during what's
-            // meant to be cleanup -- matches
-            // WinInetSystemProxy.ReadBackup's own posture.
+            // A crash can leave a corrupt backup; treat it as none, so Disable
+            // turns the proxy off instead of throwing.
             return null;
         }
     }
@@ -526,19 +461,11 @@ internal static class MacOSSystemProxy
         }
         catch
         {
-            // Best-effort -- matches WinInetSystemProxy.DeleteBackupFile's
-            // own posture on this exact kind of non-load-bearing cleanup.
+            // Best effort.
         }
     }
 
-    /// <summary>
-    /// Plain-property shapes on purpose -- the safest one for
-    /// <see cref="JsonSerializer"/> to round-trip without depending on
-    /// constructor-parameter matching, matching
-    /// <see cref="WinInetSystemProxy.ProxyBackup"/>'s own shape. Internal
-    /// rather than private so there's no question of System.Text.Json's
-    /// default reflection-based (de)serializer being able to see it.
-    /// </summary>
+    /// <summary>Settable properties, so System.Text.Json round-trips it simply.</summary>
     internal sealed class SystemProxyBackup
     {
         public int ManagedPort { get; set; }
@@ -572,11 +499,6 @@ internal static class MacOSSystemProxy
         public bool? AutoDiscoveryEnabled { get; set; }
     }
 
-    /// <summary>
-    /// The parsed result of a single <c>-getwebproxy</c>/
-    /// <c>-getsecurewebproxy</c> call. A record struct rather than a tuple
-    /// purely for readability at <see cref="ParseProxyState"/>'s call
-    /// sites and in <c>MacOSSystemProxyTests</c>' own assertions.
-    /// </summary>
+    /// <summary>One <c>-getwebproxy</c>/<c>-getsecurewebproxy</c> result.</summary>
     internal readonly record struct ProxyState(bool Enabled, string? Server, int? Port);
 }

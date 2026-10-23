@@ -5,21 +5,11 @@ using System.Linq;
 namespace Violens.LegacyExtensionHost.Tests;
 
 /// <summary>
-/// Locates a folder of extension DLLs that have already been recompiled or
-/// re-targeted against this shim's own assembly identity
-/// (<c>Violens.CompatShim</c>, not <c>Fiddler</c> -- see the design doc's
-/// "Don't get sued" decision and <c>AssemblyMismatch</c>). Unlike
-/// <see cref="RealExtensionEnvironment"/>, this doesn't assume any
-/// particular set of files -- a patched extension could be any of the five
-/// real samples, a subset, or something else entirely -- so there's no
-/// fixed file-name list to check against, only "at least one .dll is
-/// there."
-///
-/// Optional, and off by default: nothing in this repo ships a patched copy
-/// of any real extension (that would mean redistributing a modified
-/// third-party binary -- see the CompatShim README's own redistribution
-/// note), so the tests that use this only run when a developer points it
-/// at their own local folder of patched extensions.
+/// Finds a folder of extension DLLs already recompiled or retargeted
+/// against <c>Violens.CompatShim</c>. Any set of files will do. Nothing in
+/// the repo provides one (that would mean redistributing modified
+/// third-party binaries), so the tests using it only run when a developer
+/// points them at a local folder.
 /// </summary>
 internal static class PatchedExtensionEnvironment
 {

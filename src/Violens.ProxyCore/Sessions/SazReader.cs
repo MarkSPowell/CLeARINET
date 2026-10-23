@@ -6,48 +6,18 @@ using Violens.ProxyCore.Http;
 namespace Violens.ProxyCore.Sessions;
 
 /// <summary>
-/// Reads a Fiddler-compatible .saz file back into <see cref="SessionStore"/>
-/// -- the inverse of <see cref="SazWriter"/>, and the other half of the
-/// "import and export of .saz traffic captures" requirement SazWriter's own
-/// remarks quote. Without this, VioLens could only ever save its own
-/// captures, never open one someone else sent, one attached to a bug
-/// report, or one saved from Fiddler Classic itself.
-///
-/// Parses each session's raw request/response text with
-/// <see cref="Http1MessageReader"/> -- the exact same byte-level parser
-/// live capture uses to read messages off the wire -- rather than
-/// <c>HttpMessageText</c>'s UTF-8 text round-trip (built for a person
-/// hand-editing a breakpoint, and lossy for a binary body -- see that
-/// class's own remarks). Reading a zip entry as a <see cref="Stream"/> and
-/// handing it straight to the same reader real traffic goes through means
-/// a captured image or other binary body survives export-then-import
-/// byte-for-byte.
-///
-/// Imported sessions are added through <see cref="SessionStore.Add(string, DateTimeOffset, CapturedRequest, CapturedResponse)"/> --
-/// the exact same path live capture uses -- rather than handed back as a
-/// list for a caller to insert some other way. That means an import gets
-/// fresh, store-assigned <see cref="Session.Id"/> values (an archive's own
-/// internal numbering is never reused, and can't collide with whatever's
-/// already been captured this run) and fires
-/// <see cref="SessionStore.SessionAdded"/> once per session, so a live UI
-/// picks up imported sessions through the exact same subscription it
-/// already has for freshly captured ones -- no separate "import" code path
-/// for a host application to maintain.
-///
-/// One malformed or incomplete session in an archive doesn't fail the
-/// whole import: each session is parsed independently, and a failure is
-/// recorded in <see cref="SazImportResult.Skipped"/> instead of thrown --
-/// the same reasoning <c>MainWindowViewModel.AddInspectorTabs</c> applies
-/// per-inspector, applied here per-session.
+/// Reads a .saz file into a <see cref="SessionStore"/>. Messages are parsed
+/// with the same reader as live traffic, so binary bodies survive
+/// byte for byte. Sessions are added like live captures, with new Ids. A
+/// session that can't be read is skipped and listed in
+/// <see cref="SazImportResult.Skipped"/>.
 /// </summary>
 public static class SazReader
 {
     public static async Task<SazImportResult> ImportAsync(
         string path, SessionStore sessionStore, CancellationToken cancellationToken = default)
     {
-        // Awaited, so the file stays open until the import has finished
-        // reading it (returning the task straight away closed it as soon
-        // as the import first had to wait for the disk).
+        // Awaited, so the file stays open until the import has read it.
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
         return await ImportAsync(stream, sessionStore, cancellationToken);
     }
@@ -94,12 +64,9 @@ public static class SazReader
         CapturedResponse response;
         await using (var responseStream = responseEntry.Open())
         {
-            // isResponseToHeadRequest: false is always safe here -- SazWriter
-            // always writes Content-Length from the real body length (see
-            // HttpMessageWriter), and a response with no length at all
-            // (from another tool) is read to the end of its file, so
-            // there's no ambiguous framing this could misread regardless of
-            // what the original request method was.
+            // Content-Length is always present in VioLens's own archives, and a
+            // response without one is read to the end of its entry, so HEAD doesn't
+            // matter here.
             response = await Http1MessageReader.ReadResponseAsync(responseStream, isResponseToHeadRequest: false, cancellationToken)
                 ?? throw new InvalidDataException("response file was empty");
         }
@@ -145,17 +112,7 @@ public static class SazReader
         return numbers;
     }
 
-    /// <summary>
-    /// SazWriter's own _m.xml doesn't carry a Host field -- only
-    /// SessionTimers/SessionFlags -- so the host comes from the request's
-    /// own Host header instead, the same header every real HTTP/1.1 client
-    /// already sends. A Host header can carry an explicit port
-    /// ("example.com:8443"); <see cref="Session.Host"/> elsewhere in this
-    /// codebase is always a bare hostname (the port, when there is one,
-    /// stays in the Host header -- see SessionUrl.Of), so any port suffix
-    /// is stripped to match rather than introduce a "host:port" shape this
-    /// codebase doesn't otherwise use.
-    /// </summary>
+    /// <summary>The host from the Host header, without any port; _m.xml doesn't record it.</summary>
     private static string ExtractHost(IReadOnlyList<(string Name, string Value)> headers)
     {
         foreach (var (name, value) in headers)
@@ -167,26 +124,16 @@ public static class SazReader
             }
         }
 
-        // No Host header at all -- legal for a very old HTTP/1.0 request,
-        // but every modern capture (and everything VioLens itself
-        // produces) has one. A missing display value shouldn't fail the
-        // whole session over it.
+        // No Host header (old HTTP/1.0); don't fail the session over it.
         return "(unknown host)";
     }
 
     /// <summary>
-    /// Best-effort only, and expected to come up empty for a real Fiddler
-    /// Classic capture -- see <see cref="SazWriter"/>'s own remarks on why
-    /// the exact _m.xml timestamp format a real Fiddler installation
-    /// expects is unconfirmed. A session with no readable timestamp still
-    /// imports fine; it just gets "now" instead of when it was originally
-    /// captured.
+    /// The start time and timings from _m.xml, read the way
+    /// <see cref="SazWriter"/> writes them. Fiddler's own timestamp format is
+    /// unconfirmed, so these may be missing; the session then starts "now".
+    /// Timings are null when every timestamp is the same.
     /// </summary>
-    /// <remarks>
-    /// The phases are worked out from the timestamps the way
-    /// <see cref="SazWriter"/> writes them; timings come back null when
-    /// they're all the same moment (nothing was measured).
-    /// </remarks>
     private static (DateTimeOffset? StartedAt, SessionTimings? Timings) TryReadTimers(ZipArchiveEntry? metadataEntry)
     {
         if (metadataEntry is null)
@@ -238,9 +185,5 @@ public static class SazReader
     }
 }
 
-/// <summary>
-/// The outcome of an import: how many sessions made it into
-/// <see cref="SessionStore"/>, and a human-readable reason for each one
-/// that didn't.
-/// </summary>
+/// <summary>How many sessions were imported, and why any were skipped.</summary>
 public sealed record SazImportResult(int Imported, IReadOnlyList<string> Skipped);

@@ -12,12 +12,8 @@
         Icon="avares://Violens.DesktopUi/Assets/violens-icon.png"
         Background="{DynamicResource AppBackgroundBrush}">
 
-  <!-- File > Import/Export via Extension's format picker, shown only when
-       the loaded extensions offer more than one format. One row per
-       (extension, format) pair, from ProfferedFormats.ChoicesFrom. The
-       items are plain FormatChoice records; nothing here changes while the
-       dialog is open, so it's filled in from code-behind, like the app's
-       other small dialogs. Double-click or Enter picks, Escape cancels. -->
+  <!-- One row per (extension, format). Double-click or Enter picks, Escape
+       cancels. -->
   <DockPanel Margin="20">
     <TextBlock x:Name="HeadingText"
                DockPanel.Dock="Top"

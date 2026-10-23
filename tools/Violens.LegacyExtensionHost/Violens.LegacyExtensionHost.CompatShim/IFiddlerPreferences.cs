@@ -15,13 +15,7 @@ public interface IFiddlerPreferences
     void SetBoolPref(string prefName, bool value);
 }
 
-/// <summary>
-/// A simple, real implementation backing <see cref="FiddlerApplication.Prefs"/>
-/// -- not part of the confirmed binary-compat surface itself (extensions
-/// only ever see it through the <see cref="IFiddlerPreferences"/> interface),
-/// just this shim's own in-memory storage so the interface has something
-/// real behind it.
-/// </summary>
+/// <summary>In-memory storage behind <see cref="FiddlerApplication.Prefs"/>.</summary>
 public sealed class InMemoryFiddlerPreferences : IFiddlerPreferences
 {
     private readonly Dictionary<string, string> _stringPrefs = new();

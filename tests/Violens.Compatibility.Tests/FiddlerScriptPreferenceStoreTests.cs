@@ -3,14 +3,7 @@ using Xunit;
 
 namespace Violens.Compatibility.Tests;
 
-/// <summary>
-/// Exercises <see cref="FiddlerScriptPreferenceStore"/> against a real temp
-/// file (never the real <c>%LocalAppData%\VioLens\</c> path -- see the
-/// constructor's own <c>filePath</c> parameter, added specifically so tests
-/// don't touch a real machine's app-data folder), cleaning up after itself
-/// in a <c>finally</c> block the same way <c>SampleSessionExporterTests</c>
-/// does for its own output file.
-/// </summary>
+/// <summary>Against a temp file, never the real app-data folder.</summary>
 public class FiddlerScriptPreferenceStoreTests
 {
     private static string NewTempFilePath() =>
@@ -71,11 +64,8 @@ public class FiddlerScriptPreferenceStoreTests
     [Fact]
     public void AnEphemeralPreferenceDoesNotSurviveANewInstance()
     {
-        // Matches real Fiddler's own documented "fiddlerscript.ephemeral.*"
-        // convention -- see BindPrefBinding's own remarks: kept for one
-        // running FiddlerScriptRunner (one store instance), not written to
-        // disk at all, so a fresh instance against the same file never
-        // sees it.
+        // Fiddler's "fiddlerscript.ephemeral.*" convention: kept in memory, never
+        // written, so a new store on the same file doesn't see it.
         var path = NewTempFilePath();
         try
         {

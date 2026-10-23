@@ -11,12 +11,8 @@
         Background="#0B0E1A"
         Icon="avares://Violens.DesktopUi/Assets/violens-icon.png">
 
-  <!-- violens.webp is the whole splash design in one image (emblem,
-       wordmark and tagline), drawn at twice this window's 768x429 so it
-       stays sharp on high-DPI screens. This window is just an undecorated
-       frame for it while MainWindow spins up behind the scenes. See
-       App.axaml.cs for how long it stays up and when MainWindow takes
-       over. -->
+  <!-- violens.webp is the whole splash, drawn at twice the window size for
+       high-DPI screens. -->
   <Image Source="avares://Violens.DesktopUi/Assets/violens.webp"
          Stretch="Uniform" />
 </Window>

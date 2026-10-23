@@ -3,25 +3,9 @@ using System.IO.Compression;
 namespace Violens.Compatibility.FiddlerScript;
 
 /// <summary>
-/// Backs <see cref="Exchange.utilDecodeResponse"/>. Handles gzip, deflate
-/// (zlib-wrapped first, falling back to raw DEFLATE, same reasoning as
-/// <c>Violens.Extensibility.Inspection.Inspectors.RawTextInspector.InflateDeflate</c>),
-/// and br (Brotli) -- all available from <c>System.IO.Compression</c> with
-/// no extra package. Deliberately does NOT handle zstd the way
-/// <c>RawTextInspector</c> does: that inspector pulls in <c>ZstdSharp.Port</c>,
-/// and adding that dependency to <c>Violens.Compatibility</c> too, just
-/// for this one codec, wasn't worth doing without asking first -- a script
-/// calling <c>utilDecodeResponse()</c> against a zstd-encoded body gets an
-/// honest <see cref="NotSupportedException"/> rather than silent garbage.
-///
-/// This is a deliberate duplication of <c>RawTextInspector</c>'s own
-/// decode logic, not a shared call -- the two live in different layers
-/// (<c>Violens.Extensibility</c> is UI-inspector-shaped, returning
-/// <c>InspectorContent</c>; this needs to mutate an <see cref="Exchange"/>'s
-/// body in place) and cross-referencing sideways between them felt like
-/// the wrong coupling to introduce for four codec branches. Worth
-/// extracting into a shared <c>Violens.ProxyCore</c> utility if the two
-/// implementations ever need to drift back in sync.
+/// Backs <see cref="Exchange.utilDecodeResponse"/>: gzip, deflate (zlib or
+/// raw) and br. zstd throws <see cref="NotSupportedException"/>, to avoid
+/// adding ZstdSharp to this assembly.
 /// </summary>
 internal static class ExchangeCodec
 {

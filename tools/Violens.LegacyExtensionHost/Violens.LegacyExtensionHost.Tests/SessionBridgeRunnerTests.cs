@@ -8,21 +8,10 @@ using Xunit;
 namespace Violens.LegacyExtensionHost.Tests;
 
 /// <summary>
-/// Direct, no-pipe unit tests of <see cref="SessionBridgeRunner"/> and
-/// <see cref="SessionMapping"/> -- the part of the session bridge (see the
-/// design doc's "Session bridge" section) most worth pinning down with a
-/// fast, deterministic test: does a wire message actually turn into a
-/// correct <see cref="Session"/>, does a loaded extension's edit to it
-/// actually make it back out, and does one throwing extension leave the
-/// others (and the call itself) unaffected. See
-/// <see cref="SessionBridgeServerTests"/> for the complementary real,
-/// end-to-end pipe version of this same round trip.
-///
-/// Both classes below are accessible here only because
-/// <c>Violens.LegacyExtensionHost/AssemblyInfo.cs</c> grants this test
-/// assembly <c>InternalsVisibleTo</c> -- they stay <c>internal</c> in the
-/// host project itself, genuine implementation details rather than a
-/// public surface.
+/// <see cref="SessionBridgeRunner"/> and <see cref="SessionMapping"/> without
+/// a pipe: wire messages become correct sessions, extension edits come
+/// back out, and a throwing extension doesn't stop the others.
+/// <see cref="SessionBridgeServerTests"/> covers the real pipe.
 /// </summary>
 public sealed class SessionBridgeRunnerTests
 {
@@ -40,12 +29,7 @@ public sealed class SessionBridgeRunnerTests
     [Fact]
     public void Handle_RequestBefore_RunsEveryTamperAgainstOneSharedSessionInOrder()
     {
-        // Each tamper appends its own marker to the same header -- if they
-        // were each handed an independent Session instead of one shared,
-        // progressively-edited one (matching LoadedExtensionSet's own
-        // shape -- see that class's own remarks), the second tamper
-        // wouldn't see the first one's edit and this header would only
-        // ever contain "A".
+        // Each tamper appends a marker, so the second must see the first's edit.
         var first = new RecordingAutoTamper(onRequestBefore: s => s.oRequest.headers["X-Trace"] = (s.oRequest.headers["X-Trace"] ?? string.Empty) + "A");
         var second = new RecordingAutoTamper(onRequestBefore: s => s.oRequest.headers["X-Trace"] = (s.oRequest.headers["X-Trace"] ?? string.Empty) + "B");
         var runner = new SessionBridgeRunner(new IAutoTamper[] { first, second }, _ => { });
@@ -70,9 +54,7 @@ public sealed class SessionBridgeRunnerTests
         Assert.True(response.Ok);
         Assert.NotNull(response.Request);
         Assert.Equal("AB", response.Request!.Headers.Single(h => h.Name == "X-Trace").Value);
-        // Untouched fields pass straight through -- see SessionMapping's own
-        // remarks on HttpVersion specifically (Session has no member for
-        // it at all).
+        // Session has no HTTP version, so it passes through from the original.
         Assert.Equal("HTTP/1.1", response.Request.HttpVersion);
         Assert.Equal("GET", response.Request.Method);
         Assert.Equal("/index.html?x=1", response.Request.Target);
@@ -119,9 +101,7 @@ public sealed class SessionBridgeRunnerTests
     [Fact]
     public void Handle_OneTamperThrowing_StillRunsTheOthersAndReturnsOk()
     {
-        // Matches LoadedExtensionSet.RunSafely's own contract -- see that
-        // method's remarks: a badly-behaved loaded extension shouldn't take
-        // the others, or the call itself, down with it.
+        // One extension throwing mustn't stop the others or the call.
         var before = new RecordingAutoTamper(onRequestBefore: s => s.oRequest.headers["X-Before"] = "ran");
         var throwing = new RecordingAutoTamper(onRequestBefore: _ => throw new InvalidOperationException("boom"));
         var after = new RecordingAutoTamper(onRequestBefore: s => s.oRequest.headers["X-After"] = "ran");
@@ -155,8 +135,7 @@ public sealed class SessionBridgeRunnerTests
     [Fact]
     public void Handle_RepeatedHeaderName_KeepsOnlyTheLastValue_AndDoesNotThrow()
     {
-        // Documents, rather than hides, the known HTTPHeaders limitation --
-        // see SessionMapping.SetHeaders' own remarks.
+        // Repeated header names aren't supported (see SessionMapping.SetHeaders).
         var runner = new SessionBridgeRunner(Array.Empty<IAutoTamper>(), _ => { });
 
         var message = new BridgeRequestMessage
@@ -183,12 +162,7 @@ public sealed class SessionBridgeRunnerTests
         Assert.Equal("second", response.Request!.Headers.Single(h => h.Name == "X-Multi").Value);
     }
 
-    /// <summary>
-    /// A minimal, configurable <see cref="IAutoTamper"/> fake -- same role
-    /// as the hand-written fakes <c>LoadedExtensionSetTests</c> uses on the
-    /// in-process side, adapted to this shim's own <see cref="Session"/>
-    /// shape.
-    /// </summary>
+    /// <summary>A configurable fake <see cref="IAutoTamper"/>.</summary>
     private sealed class RecordingAutoTamper : IAutoTamper
     {
         private readonly Action<Session> _onRequestBefore;

@@ -1,10 +1,4 @@
 namespace Violens.DesktopUi.ViewModels;
 
-/// <summary>
-/// A tab an extension added with
-/// <see cref="Violens.Compatibility.Extensions.ExtensionUi.AddTab"/>:
-/// its title, and the view the extension supplied (expected to be an
-/// Avalonia <c>Control</c>; see MainWindow.axaml.cs for what happens if it
-/// isn't).
-/// </summary>
+/// <summary>A tab an extension added: its title and its view (expected to be an Avalonia control).</summary>
 public sealed record ExtensionTabViewModel(string Title, object View);
