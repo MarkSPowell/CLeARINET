@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
@@ -29,7 +30,7 @@ public sealed class InterceptingProxyListener
     /// For AutoResponder rules that serve another URL. Never goes through the
     /// system proxy, which while capturing is VioLens itself.
     /// </summary>
-    private readonly HttpClient _proxyUrlClient;
+    private readonly UpstreamWebProxy _proxyUrl;
 
     private readonly LeafCertificateProvider _leafProvider;
     private readonly SessionStore _sessionStore;
@@ -61,12 +62,7 @@ public sealed class InterceptingProxyListener
     {
         _leafProvider = leafProvider;
         _sessionStore = sessionStore;
-        _proxyUrlClient = new HttpClient(new SocketsHttpHandler
-        {
-            Proxy = new UpstreamWebProxy(this),
-            UseProxy = true,
-            AutomaticDecompression = DecompressionMethods.None,
-        });
+        _proxyUrl = new UpstreamWebProxy(this);
         // With nothing configured, each check is a single boolean.
         _breakpointManager = breakpointManager ?? new BreakpointManager();
         _autoResponderRules = autoResponderRules ?? new AutoResponderRules();
@@ -149,6 +145,46 @@ public sealed class InterceptingProxyListener
         }
     }
 
+    /// <summary>The default for <see cref="ClientIdleTimeout"/>.</summary>
+    public static readonly TimeSpan DefaultClientIdleTimeout = TimeSpan.FromMinutes(2);
+
+    private long _clientIdleTimeoutTicks = DefaultClientIdleTimeout.Ticks;
+
+    /// <summary>
+    /// How long a client connection may take to send each request's start
+    /// line and headers (two minutes unless changed), or
+    /// <see cref="Timeout.InfiniteTimeSpan"/> for no limit. Covers the
+    /// first request, the gap between requests on a kept-alive connection,
+    /// and the TLS handshake after CONNECT; a connection that runs out of
+    /// time is closed quietly, the same way a client ending a keep-alive
+    /// connection is. Without it, a client that connects and then says
+    /// nothing (or stops halfway through its headers) holds a connection
+    /// and its task for ever -- a nuisance on loopback, and a way to tie
+    /// the listener up once <see cref="AllowsRemoteClients"/> opens it to
+    /// the network.
+    ///
+    /// Deliberately only the preamble: once a request has started, nothing
+    /// here times it out. A request or response body streamed slowly (a
+    /// chat reply, a long upload), a session paused at a breakpoint while
+    /// someone edits it, and a WebSocket or other upgraded connection after
+    /// its 101 can all legitimately sit quiet for far longer than this.
+    /// Read when each client connection opens, like
+    /// <see cref="MaxCapturedBodyBytes"/>.
+    /// </summary>
+    public TimeSpan ClientIdleTimeout
+    {
+        get => TimeSpan.FromTicks(Interlocked.Read(ref _clientIdleTimeoutTicks));
+        set
+        {
+            if (value != Timeout.InfiniteTimeSpan)
+            {
+                ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(value, TimeSpan.Zero);
+            }
+
+            Interlocked.Exchange(ref _clientIdleTimeoutTicks, value.Ticks);
+        }
+    }
+
     private static readonly IReadOnlyList<UpstreamProxy?> DirectOnly = [null];
 
     /// <summary>
@@ -228,13 +264,52 @@ public sealed class InterceptingProxyListener
     /// <see cref="IWebProxy"/> for <see cref="HttpClient"/>: the first one
     /// (the gateway, the PAC script's first choice, or direct). Credentials
     /// are the proxy sign-in (<see cref="ProxyCredential"/>), or the
-    /// signed-in account.
+    /// signed-in account. <see cref="Client"/> is the <see cref="HttpClient"/>
+    /// that goes out this way.
+    ///
+    /// <see cref="IWebProxy"/> is synchronous, and HttpClient asks it for
+    /// every request (twice: <see cref="IsBypassed"/>, then
+    /// <see cref="GetProxy"/>), while a PAC script's answer is
+    /// asynchronous -- the script may still be downloading, and running it
+    /// happens off-thread (see <see cref="ProxyAutoConfig.GetRoutesAsync"/>).
+    /// So a PAC answer is kept here per scheme, host and port for
+    /// <see cref="RouteLifetime"/>, and <see cref="PrepareRouteAsync"/> fills
+    /// that in asynchronously ahead of a request, leaving the synchronous
+    /// question nothing to wait for. Only a question that arrives with
+    /// nothing prepared (HttpClient following a redirect to another host,
+    /// say) still blocks, once per host. Keyed by host rather than the whole
+    /// URL, so a script that routes plain-HTTP requests by path gets its
+    /// answer for the first path asked about -- the same per-host shortcut
+    /// browsers' own PAC caches take, and the only way the cache helps at all
+    /// for a host whose paths are all different. A gateway, or no proxy
+    /// configuration at all, is decided without waiting, so isn't cached.
     /// </summary>
-    private sealed class UpstreamWebProxy(InterceptingProxyListener listener) : IWebProxy
+    internal sealed class UpstreamWebProxy : IWebProxy
     {
+        /// <summary>How long a PAC script's answer for one host is reused.</summary>
+        public static readonly TimeSpan RouteLifetime = TimeSpan.FromSeconds(30);
+
+        private const int MaxCachedRoutes = 256;
+
+        private readonly InterceptingProxyListener _listener;
+        private readonly ConcurrentDictionary<string, CachedRoute> _routes = new(StringComparer.OrdinalIgnoreCase);
+
+        public UpstreamWebProxy(InterceptingProxyListener listener)
+        {
+            _listener = listener;
+            Client = new HttpClient(new SocketsHttpHandler
+            {
+                Proxy = this,
+                UseProxy = true,
+                AutomaticDecompression = DecompressionMethods.None,
+            });
+        }
+
+        public HttpClient Client { get; }
+
         public ICredentials? Credentials
         {
-            get => (ICredentials?)listener.ProxyCredential ?? CredentialCache.DefaultCredentials;
+            get => (ICredentials?)_listener.ProxyCredential ?? CredentialCache.DefaultCredentials;
             set { }
         }
 
@@ -243,13 +318,86 @@ public sealed class InterceptingProxyListener
 
         public bool IsBypassed(Uri host) => Route(host) is null;
 
+        /// <summary>
+        /// Works out the route for <paramref name="destination"/> without
+        /// blocking, so the synchronous <see cref="GetProxy"/>/
+        /// <see cref="IsBypassed"/> that follow find it ready.
+        /// </summary>
+        public async Task PrepareRouteAsync(Uri destination, CancellationToken cancellationToken)
+        {
+            if (UsesAutoConfig(destination) is not { } autoConfig || TryGetCached(destination, autoConfig, out _))
+            {
+                return;
+            }
+
+            var routes = await ChooseAsync(destination, cancellationToken);
+            Remember(destination, autoConfig, routes);
+        }
+
         private UpstreamProxy? Route(Uri destination)
         {
-            var isTls = string.Equals(destination.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
-            var routes = listener.ChooseRoutesAsync(isTls, destination.IdnHost, destination.Port, destination.PathAndQuery, CancellationToken.None)
-                .GetAwaiter().GetResult();
-            return routes.Count > 0 ? routes[0] : null;
+            if (UsesAutoConfig(destination) is not { } autoConfig)
+            {
+                // Loopback, a gateway, or no configuration: ChooseRoutesAsync
+                // decides those before its first await, so this doesn't block.
+                return First(ChooseAsync(destination, CancellationToken.None).GetAwaiter().GetResult());
+            }
+
+            if (TryGetCached(destination, autoConfig, out var cached))
+            {
+                return cached;
+            }
+
+            // Nothing prepared: wait, once for this host. ProxyAutoConfig's
+            // own answer cache often has it anyway, and then this task has
+            // already finished.
+            var routes = ChooseAsync(destination, CancellationToken.None).GetAwaiter().GetResult();
+            return Remember(destination, autoConfig, routes);
         }
+
+        /// <summary>The PAC script <paramref name="destination"/> would be routed by, or null when none is consulted.</summary>
+        private ProxyAutoConfig? UsesAutoConfig(Uri destination) =>
+            _listener.Gateway is null && _listener.AutoConfig is { } autoConfig && !UpstreamProxy.IsLoopback(destination.IdnHost)
+                ? autoConfig
+                : null;
+
+        private Task<IReadOnlyList<UpstreamProxy?>> ChooseAsync(Uri destination, CancellationToken cancellationToken)
+        {
+            var isTls = string.Equals(destination.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+            return _listener.ChooseRoutesAsync(isTls, destination.IdnHost, destination.Port, destination.PathAndQuery, cancellationToken);
+        }
+
+        private bool TryGetCached(Uri destination, ProxyAutoConfig autoConfig, out UpstreamProxy? route)
+        {
+            // An entry from a script that's since been replaced doesn't count.
+            if (_routes.TryGetValue(Key(destination), out var cached) &&
+                ReferenceEquals(cached.AutoConfig, autoConfig) && Environment.TickCount64 < cached.ExpiresAt)
+            {
+                route = cached.Route;
+                return true;
+            }
+
+            route = null;
+            return false;
+        }
+
+        private UpstreamProxy? Remember(Uri destination, ProxyAutoConfig autoConfig, IReadOnlyList<UpstreamProxy?> routes)
+        {
+            if (_routes.Count >= MaxCachedRoutes)
+            {
+                _routes.Clear();
+            }
+
+            var route = First(routes);
+            _routes[Key(destination)] = new CachedRoute(autoConfig, route, Environment.TickCount64 + (long)RouteLifetime.TotalMilliseconds);
+            return route;
+        }
+
+        private static string Key(Uri destination) => $"{destination.Scheme}://{destination.IdnHost}:{destination.Port}";
+
+        private static UpstreamProxy? First(IReadOnlyList<UpstreamProxy?> routes) => routes.Count > 0 ? routes[0] : null;
+
+        private sealed record CachedRoute(ProxyAutoConfig AutoConfig, UpstreamProxy? Route, long ExpiresAt);
     }
 
     private async Task AcceptLoopAsync(CancellationToken cancellationToken)
@@ -280,7 +428,8 @@ public sealed class InterceptingProxyListener
             // Read-buffered (see ReadBufferedStream), and the TLS handshake after
             // CONNECT reads through it too, so nothing read ahead is lost.
             using var clientStream = new ReadBufferedStream(client.GetStream());
-            var first = await Http1MessageReader.ReadRequestPreambleAsync(clientStream, cancellationToken);
+            var idleTimeout = ClientIdleTimeout;
+            var first = await ReadRequestPreambleWithinAsync(clientStream, idleTimeout, cancellationToken);
             if (first is null)
             {
                 return;
@@ -307,8 +456,8 @@ public sealed class InterceptingProxyListener
 
                 await PumpSessionsAsync(
                     isTls: false, string.Empty, PlainHttpRequest.DefaultPort, client, clientStream, first, _sessionStore,
-                    _breakpointManager, _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, _proxyUrlClient, Port,
-                    () => _leafProvider.IssuerCertificateDer, MaxCapturedBodyBytes, cancellationToken);
+                    _breakpointManager, _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, _proxyUrl, Port,
+                    () => _leafProvider.IssuerCertificateDer, MaxCapturedBodyBytes, idleTimeout, cancellationToken);
                 return;
             }
 
@@ -325,13 +474,27 @@ public sealed class InterceptingProxyListener
                 // Let the OS choose TLS 1.2 or 1.3.
                 EnabledSslProtocols = SslProtocols.None,
             };
-            await clientTls.AuthenticateAsServerAsync(serverOptions, cancellationToken);
+            // The handshake falls under the idle timeout too: a client that
+            // sends CONNECT and then nothing else would otherwise hold the
+            // connection just as surely as one that never sends a request.
+            using (var handshakeTimer = StartIdleTimer(idleTimeout, cancellationToken))
+            {
+                try
+                {
+                    await clientTls.AuthenticateAsServerAsync(serverOptions, handshakeTimer.Token);
+                }
+                catch (Exception) when (handshakeTimer.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+                {
+                    ProxyEngine.Log("proxy", $"{targetHost}: the client didn't finish its TLS handshake in time; closing the connection.");
+                    return;
+                }
+            }
 
             // The server connection is opened later, only when needed.
             await PumpSessionsAsync(
                 isTls: true, targetHost, targetPort, client, new ReadBufferedStream(clientTls), firstRequest: null, _sessionStore, _breakpointManager,
-                _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, _proxyUrlClient, Port,
-                () => _leafProvider.IssuerCertificateDer, MaxCapturedBodyBytes, cancellationToken);
+                _autoResponderRules, _scriptRunner, _extensionHost, _sessionHost, ChooseRoutesAsync, () => ProxyCredential, _proxyUrl, Port,
+                () => _leafProvider.IssuerCertificateDer, MaxCapturedBodyBytes, idleTimeout, cancellationToken);
         }
         catch (BreakpointAbortedException ex)
         {
@@ -392,10 +555,11 @@ public sealed class InterceptingProxyListener
         IExtensionSessionHost? sessionHost,
         Func<bool, string, int, string, CancellationToken, Task<IReadOnlyList<UpstreamProxy?>>> chooseRoutes,
         Func<NetworkCredential?> proxyCredential,
-        HttpClient proxyUrlClient,
+        UpstreamWebProxy proxyUrl,
         int ownPort,
         Func<byte[]> rootCertificateDer,
         long maxCapturedBodyBytes,
+        TimeSpan idleTimeout,
         CancellationToken cancellationToken)
     {
         // clientTls is the TLS stream for a CONNECT tunnel, or the plain
@@ -626,11 +790,12 @@ public sealed class InterceptingProxyListener
         {
             while (true)
             {
-                var requestPreamble = pendingRequest ?? await Http1MessageReader.ReadRequestPreambleAsync(clientTls, cancellationToken);
+                var requestPreamble = pendingRequest ?? await ReadRequestPreambleWithinAsync(clientTls, idleTimeout, cancellationToken);
                 pendingRequest = null;
                 if (requestPreamble is null)
                 {
-                    // The client closed the connection between requests.
+                    // The client closed the connection between requests, or
+                    // left it idle past ClientIdleTimeout.
                     return;
                 }
 
@@ -701,7 +866,7 @@ public sealed class InterceptingProxyListener
                         return;
                     }
 
-                    var localResponse = await BuildMockResponseAsync(outcome, localRequest, proxyUrlClient, cancellationToken);
+                    var localResponse = await BuildMockResponseAsync(outcome, localRequest, proxyUrl, cancellationToken);
                     await HttpMessageWriter.WriteResponseAsync(clientTls, localResponse, cancellationToken);
                     timing.Done();
                     var localSession = sessionStore.Add(targetHost, startedAt, localRequest, localResponse, flags: null, scheme, timing.Build(answeredLocally: true));
@@ -1090,10 +1255,10 @@ public sealed class InterceptingProxyListener
     }
 
     private static Task<CapturedResponse> BuildMockResponseAsync(
-        AutoResponderOutcome outcome, CapturedRequest request, HttpClient proxyUrlClient, CancellationToken cancellationToken) => outcome.FinalActionKind switch
+        AutoResponderOutcome outcome, CapturedRequest request, UpstreamWebProxy proxyUrl, CancellationToken cancellationToken) => outcome.FinalActionKind switch
     {
         AutoResponderActionKind.ServeFile => BuildServeFileResponseAsync(outcome.Text!, cancellationToken),
-        AutoResponderActionKind.ProxyUrl => FetchAndBuildResponseAsync(proxyUrlClient, outcome.Text!, cancellationToken),
+        AutoResponderActionKind.ProxyUrl => FetchAndBuildResponseAsync(proxyUrl, outcome.Text!, cancellationToken),
         AutoResponderActionKind.Redirect => Task.FromResult(BuildRedirectResponse(outcome.Text!)),
         AutoResponderActionKind.CorsPreflightAllow => Task.FromResult(BuildCorsPreflightResponse(request)),
         _ => throw new InvalidOperationException($"Unexpected AutoResponder final action: {outcome.FinalActionKind}."),
@@ -1135,11 +1300,15 @@ public sealed class InterceptingProxyListener
     /// AutoResponder URL proxying: fetch another URL and serve its response
     /// as-is, without decompressing it.
     /// </summary>
-    private static async Task<CapturedResponse> FetchAndBuildResponseAsync(HttpClient client, string url, CancellationToken cancellationToken)
+    private static async Task<CapturedResponse> FetchAndBuildResponseAsync(UpstreamWebProxy proxyUrl, string url, CancellationToken cancellationToken)
     {
         try
         {
-            using var upstreamResponse = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            // Asks for the route first, asynchronously, so HttpClient's own
+            // (synchronous) question a moment later is answered from the
+            // cache rather than by blocking on the PAC script.
+            await proxyUrl.PrepareRouteAsync(new Uri(url), cancellationToken);
+            using var upstreamResponse = await proxyUrl.Client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             var body = await upstreamResponse.Content.ReadAsByteArrayAsync(cancellationToken);
 
             var headers = new List<(string Name, string Value)>();
@@ -1206,33 +1375,113 @@ public sealed class InterceptingProxyListener
     private static bool IsWebSocketUpgrade(IReadOnlyList<(string Name, string Value)> headers) =>
         ContentDecoder.FindHeader(headers, "Upgrade")?.Split(',').Any(p => string.Equals(p.Trim(), "websocket", StringComparison.OrdinalIgnoreCase)) == true;
 
+    /// <summary>
+    /// Passes an upgraded (101, not WebSocket) connection's bytes through in
+    /// both directions until it's done. Once one side closes, the other gets
+    /// <see cref="WebSocketRelay.CloseGrace"/> to finish too -- the same
+    /// rule <see cref="WebSocketRelay"/> uses -- and is then cut off: just
+    /// waiting for both directions would leave a connection open for ever
+    /// whenever one side goes away and the other never notices (a server
+    /// that closes while the client sits waiting to send, say), holding
+    /// both connections and this task with it.
+    /// </summary>
     private static async Task RelayRawBytesUntilClosedAsync(
         Stream clientTls, Stream upstreamTls, CancellationToken cancellationToken)
     {
-        var clientToUpstream = clientTls.CopyToAsync(upstreamTls, cancellationToken);
-        var upstreamToClient = upstreamTls.CopyToAsync(clientTls, cancellationToken);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var clientToUpstream = clientTls.CopyToAsync(upstreamTls, stop.Token);
+        var upstreamToClient = upstreamTls.CopyToAsync(clientTls, stop.Token);
 
         try
         {
+            var first = await Task.WhenAny(clientToUpstream, upstreamToClient);
+            var other = first == clientToUpstream ? upstreamToClient : clientToUpstream;
+            if (await Task.WhenAny(other, Task.Delay(WebSocketRelay.CloseGrace, cancellationToken)) != other)
+            {
+                await stop.CancelAsync();
+            }
+
             await Task.WhenAll(clientToUpstream, upstreamToClient);
         }
         catch (Exception)
         {
-            // A one-sided close is the normal way an upgraded connection
-            // like a WebSocket ends here; nothing to act on.
+            // A reset or a one-sided close is the normal way an upgraded
+            // connection ends here; nothing to act on.
         }
     }
 
-    private static (string Host, int Port) ParseConnectTarget(string target)
+    /// <summary>
+    /// A token for one wait under <see cref="ClientIdleTimeout"/>: cancelled
+    /// when <paramref name="cancellationToken"/> is, or once
+    /// <paramref name="idleTimeout"/> has passed (never, for
+    /// <see cref="Timeout.InfiniteTimeSpan"/>).
+    /// </summary>
+    private static CancellationTokenSource StartIdleTimer(TimeSpan idleTimeout, CancellationToken cancellationToken)
     {
-        var separatorIndex = target.LastIndexOf(':');
-        if (separatorIndex < 0)
+        var timer = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timer.CancelAfter(idleTimeout);
+        return timer;
+    }
+
+    /// <summary>
+    /// <see cref="Http1MessageReader.ReadRequestPreambleAsync"/>, given
+    /// <paramref name="idleTimeout"/> to arrive in full. Null, as for a
+    /// client that closed, when it doesn't: a client that went quiet before
+    /// starting a request and one that stalled halfway through its headers
+    /// both just lose the connection (see <see cref="ClientIdleTimeout"/>).
+    /// </summary>
+    private static async Task<CapturedRequest?> ReadRequestPreambleWithinAsync(
+        Stream client, TimeSpan idleTimeout, CancellationToken cancellationToken)
+    {
+        using var timer = StartIdleTimer(idleTimeout, cancellationToken);
+        try
         {
-            return (target, 443);
+            return await Http1MessageReader.ReadRequestPreambleAsync(client, timer.Token);
+        }
+        catch (Exception) when (timer.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            // A cancelled socket read surfaces as OperationCanceledException,
+            // or as an IOException from a stream wrapped around it.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The host and port a CONNECT request names: <c>host:port</c>, with
+    /// 443 when the port is missing or unreadable. An IPv6 address comes in
+    /// brackets (<c>[::1]:443</c>, the authority form RFC 9110 requires),
+    /// which are removed here -- from now on the host is used as a bare
+    /// address (DNS, the leaf certificate's IP SAN, TLS), and whatever writes
+    /// it back into a URL or authority (<see cref="UpstreamProxy"/>'s CONNECT,
+    /// a PAC script's URL) adds them again. An IPv6 address without brackets
+    /// has no room for a port -- every colon belongs to the address -- so
+    /// it's taken whole, on 443.
+    /// </summary>
+    internal static (string Host, int Port) ParseConnectTarget(string target)
+    {
+        string host;
+        string? portText;
+        if (target.StartsWith('[') && target.IndexOf(']') is var close and > 0)
+        {
+            host = target[1..close];
+            var rest = target[(close + 1)..];
+            portText = rest.StartsWith(':') ? rest[1..] : null;
+        }
+        else if (target.IndexOf(':') is var separator and >= 0 && separator == target.LastIndexOf(':'))
+        {
+            host = target[..separator];
+            portText = target[(separator + 1)..];
+        }
+        else
+        {
+            // No colon at all, or more than one: a bare IPv6 address.
+            host = target;
+            portText = null;
         }
 
-        var host = target[..separatorIndex];
-        var portText = target[(separatorIndex + 1)..];
-        return int.TryParse(portText, out var port) ? (host, port) : (host, 443);
+        return int.TryParse(portText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var port) &&
+               port is > 0 and <= IPEndPoint.MaxPort
+            ? (host, port)
+            : (host, 443);
     }
 }

@@ -95,6 +95,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly DispatcherTimer _captureFlashTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
 
     /// <summary>
+    /// How long new sessions wait so a burst reaches the lists as one update.
+    /// </summary>
+    private static readonly TimeSpan SessionArrivalInterval = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>Captured sessions not yet in <see cref="Sessions"/>; added in batches by <see cref="AddSessionRows"/>.</summary>
+    private readonly CoalescingQueue<Session> _sessionArrivals;
+
+    /// <summary>
     /// Every session captured this run, ignoring the filter. Saving exports
     /// these, so a filter never silently drops sessions from a SAZ.
     /// </summary>
@@ -637,27 +645,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
         // Must come after SaveSazCommand is assigned, or nullable analysis
         // reports CS8602.
-        _sessionStore.SessionAdded += session => Dispatcher.UIThread.Post(() =>
-        {
-            var row = SessionRow.From(session, _fiddlerScriptRunner);
-            Sessions.Add(row);
-            // Only the new row needs checking against the filter. ui-hide sessions
-            // are captured and saved but not listed.
-            if (!row.Style.Hidden && _query.Matches(session))
-            {
-                FilteredSessions.Add(row);
-            }
-
-            SaveSazCommand.RaiseCanExecuteChanged();
-            ExportViaExtensionCommand.RaiseCanExecuteChanged();
-            RemoveAllSessionsCommand.RaiseCanExecuteChanged();
-            RaisePropertyChanged(nameof(HasSessions));
-            FlashCaptureIndicator();
-        });
+        //
+        // Sessions reach the lists in batches, at most one UI update per
+        // SessionArrivalInterval, so heavy traffic doesn't flood the UI
+        // thread. Only the delivery is posted to it.
+        _sessionArrivals = new CoalescingQueue<Session>(
+            deliver => _ = Task.Delay(SessionArrivalInterval).ContinueWith(
+                _ => Dispatcher.UIThread.Post(deliver), TaskScheduler.Default),
+            AddSessionRows);
+        _sessionStore.SessionAdded += _sessionArrivals.Add;
 
         // Removed sessions leave both lists; the selection goes with them.
         _sessionStore.SessionsRemoved += ids => Dispatcher.UIThread.Post(() =>
         {
+            // Anything still waiting to be added goes in first, so a session
+            // removed before its batch arrived can't reappear afterwards.
+            _sessionArrivals.Flush();
             var removed = new HashSet<int>(ids);
             for (var i = Sessions.Count - 1; i >= 0; i--)
             {
@@ -973,6 +976,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         _legacyExtensionHostLauncher.StopIfLaunchedByUs(
             log: message => Console.WriteLine($"[Extension] {message}"));
 
+        // Add any sessions still waiting, so the count below includes them.
+        _sessionArrivals.Flush();
         _captureFlashTimer.Stop();
         IsCaptureFlashing = false;
 
@@ -1321,6 +1326,30 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             StatusText = $"Failed to import {Path.GetFileName(path)}: {ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// Adds a batch of new sessions, checking only them against the filter,
+    /// and updates the commands and the capture flash once for the batch.
+    /// </summary>
+    private void AddSessionRows(IReadOnlyList<Session> arrived)
+    {
+        foreach (var session in arrived)
+        {
+            var row = SessionRow.From(session, _fiddlerScriptRunner);
+            Sessions.Add(row);
+            // ui-hide sessions are captured and saved but not listed.
+            if (!row.Style.Hidden && _query.Matches(session))
+            {
+                FilteredSessions.Add(row);
+            }
+        }
+
+        SaveSazCommand.RaiseCanExecuteChanged();
+        ExportViaExtensionCommand.RaiseCanExecuteChanged();
+        RemoveAllSessionsCommand.RaiseCanExecuteChanged();
+        RaisePropertyChanged(nameof(HasSessions));
+        FlashCaptureIndicator();
     }
 
     /// <summary>Full rescan; only needed when the query changes.</summary>
